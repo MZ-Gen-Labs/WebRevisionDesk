@@ -1,0 +1,632 @@
+import { PageEditor } from "./editor.js";
+import { cleanHtmlString, downloadHtml, EDITOR_CLASS } from "./html.js";
+import { changeLabel, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
+import { downloadProjectPackage } from "./project-package.js";
+import { ProjectStore } from "./project-storage.js";
+import { comparePageHtml } from "./page-comparison.js";
+
+const $ = (selector) => document.querySelector(selector);
+const ui = {
+  file: $("#html-file"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
+  fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
+  modified: $("#show-modified"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"), download: $("#download"),
+  downloadDiff: $("#download-diff"),
+  downloadRedline: $("#download-redline"),
+  downloadPackage: $("#download-package"),
+  fields: $("#inspector-fields"), label: $("#element-label"), text: $("#text-value"),
+  link: $("#link-value"), alt: $("#alt-value"), image: $("#image-file"),
+  classes: $("#class-value"), classOptions: $("#class-options"), before: $("#move-before"),
+  after: $("#move-after"), duplicate: $("#duplicate-element"), delete: $("#delete-element"),
+  historyCount: $("#history-count"), historyList: $("#history-list"), clearHistory: $("#clear-history"),
+  captureUrl: $("#capture-url"), openCapture: $("#open-capture-browser"),
+  finishCapture: $("#capture-current-page"), cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
+  selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
+  projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
+  crawlProjectPages: $("#crawl-project-pages"),
+  projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
+  selectAllProjectPages: $("#select-all-project-pages"), batchCapturePages: $("#batch-capture-pages"),
+  checkProjectPages: $("#check-project-pages"), batchProgress: $("#batch-progress"),
+};
+
+const state = {
+  fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
+  sourceUrl: "", activeProjectPageId: "", dirty: false,
+  selectedProjectUrls: new Set(), batchRunning: false,
+};
+let captureSessionId = "";
+const projectStore = new ProjectStore();
+const editor = new PageEditor(ui.frame, {
+  onSelect: showSelection,
+  onChange: (change) => {
+    state.modifiedHtml = editor.getHtml();
+    if (change) {
+      state.changes.push(change);
+      state.redoChanges = [];
+      state.dirty = true;
+      renderHistory();
+    }
+    setStatus("修正内容をブラウザ内に保持しました。保存ボタンでHTMLを出力できます。", "success");
+  },
+});
+
+function setStatus(message, kind = "info") {
+  ui.status.textContent = message;
+  ui.status.dataset.kind = kind;
+}
+
+function setControls(enabled) {
+  [ui.original, ui.modified, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
+  ui.downloadPackage.disabled = !enabled;
+  ui.downloadDiff.disabled = !enabled || state.changes.length === 0;
+  ui.downloadRedline.disabled = !enabled || state.changes.length === 0;
+  updateUndoControls();
+  syncProjectControls();
+}
+
+function syncProjectControls() {
+  const hasProject = Boolean(projectStore.project);
+  ui.projectName.disabled = !hasProject;
+  ui.projectBaseUrl.disabled = !hasProject;
+  ui.saveProjectPage.disabled = !hasProject || !state.originalHtml;
+  ui.crawlProjectPages.disabled = !hasProject;
+  updateBatchControls();
+}
+
+function updateBatchControls() {
+  const listed = listedProjectPages();
+  const selected = listed.filter((page) => state.selectedProjectUrls.has(page.url));
+  ui.selectAllProjectPages.disabled = state.batchRunning || listed.length === 0;
+  ui.selectAllProjectPages.textContent = selected.length === listed.length && listed.length ? "すべて解除" : "すべて選択";
+  ui.batchCapturePages.disabled = state.batchRunning || selected.length === 0;
+  ui.checkProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
+}
+
+function updateUndoControls() {
+  const editable = Boolean(state.originalHtml) && state.mode === "modified";
+  ui.undo.disabled = !editable || state.changes.length === 0;
+  ui.redo.disabled = !editable || state.redoChanges.length === 0;
+}
+
+function renderHistory() {
+  ui.historyCount.textContent = String(state.changes.length);
+  ui.clearHistory.disabled = state.changes.length === 0;
+  ui.downloadDiff.disabled = !state.originalHtml || state.changes.length === 0;
+  ui.downloadRedline.disabled = !state.originalHtml || state.changes.length === 0;
+  updateUndoControls();
+  if (!state.changes.length) {
+    ui.historyList.innerHTML = '<li class="history-empty">まだ変更はありません。</li>';
+    return;
+  }
+  ui.historyList.replaceChildren(...state.changes.map((change, index) => {
+    const item = document.createElement("li");
+    const type = document.createElement("strong");
+    const target = document.createElement("span");
+    type.textContent = `${index + 1}. ${changeLabel(change.type)}`;
+    target.textContent = change.target;
+    item.append(type, target);
+    return item;
+  }));
+}
+
+function setMode(mode) {
+  state.mode = mode;
+  ui.badge.textContent = mode === "original" ? "修正前・参照専用" : "修正後・編集可能";
+  ui.badge.dataset.mode = mode;
+  ui.original.classList.toggle("active", mode === "original");
+  ui.modified.classList.toggle("active", mode === "modified");
+  updateUndoControls();
+}
+
+async function render(mode, { captureCurrent = true } = {}) {
+  if (!state.originalHtml) return;
+  // 初回読込前のiframeは空のabout:blank。これをmodifiedHtmlへ保存すると、
+  // 読み込んだHTMLを空ページで上書きしてしまうため、準備済みの場合だけ同期する。
+  if (captureCurrent && state.mode === "modified" && editor.hasLoadedDocument()) {
+    state.modifiedHtml = editor.getHtml();
+  }
+  setMode(mode);
+  showSelection(null);
+  await editor.load(mode === "original" ? state.originalHtml : state.modifiedHtml, mode === "modified");
+  if (mode === "modified") refreshClassOptions();
+}
+
+function refreshClassOptions() {
+  ui.classOptions.replaceChildren(...editor.getClassNames().map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    return option;
+  }));
+}
+
+function selectedImage(element) {
+  const ImageType = ui.frame.contentWindow?.HTMLImageElement;
+  return ImageType && element instanceof ImageType ? element : null;
+}
+
+function showSelection(element) {
+  const editable = Boolean(element) && state.mode === "modified";
+  ui.fields.disabled = !editable;
+  ui.label.textContent = element ? describeElement(element) : "未選択";
+  if (!element) {
+    ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
+    return;
+  }
+  const classNames = [...element.classList].filter((name) => name !== EDITOR_CLASS);
+  const link = element.closest("a");
+  const image = selectedImage(element);
+  ui.text.value = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName) ? "" : element.textContent ?? "";
+  ui.text.disabled = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
+  ui.link.value = link?.getAttribute("href") ?? "";
+  ui.link.disabled = !link;
+  ui.alt.value = image?.alt ?? "";
+  ui.alt.disabled = !image;
+  ui.image.disabled = !image;
+  ui.classes.value = classNames.join(" ");
+}
+
+function describeElement(element) {
+  const id = element.id ? `#${element.id}` : "";
+  const classes = [...element.classList].filter((name) => name !== EDITOR_CLASS).slice(0, 2);
+  return `${element.tagName.toLowerCase()}${id}${classes.map((name) => `.${name}`).join("")}`;
+}
+
+async function loadHtml(html, fileName, options = {}) {
+  if (!/<(?:!doctype|html|head|body)[\s>]/i.test(html)) throw new Error("HTML文書として認識できませんでした。");
+  state.fileName = fileName || "captured-page.html";
+  state.originalHtml = html;
+  state.modifiedHtml = options.workingHtml || html;
+  state.changes = options.changes || [];
+  state.redoChanges = [];
+  state.sourceUrl = options.sourceUrl ?? sourceUrlFromHtml(html);
+  state.activeProjectPageId = options.activeProjectPageId || "";
+  state.dirty = options.dirty ?? true;
+  renderHistory();
+  ui.fileName.textContent = state.fileName;
+  ui.empty.hidden = true;
+  ui.frame.hidden = false;
+  setControls(true);
+  await render("modified", { captureCurrent: false });
+  renderProjectPages();
+}
+
+function sourceUrlFromHtml(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return doc.querySelector('meta[name="web-revision-source-url"]')?.content ?? "";
+}
+
+function listedProjectPages() {
+  const savedPages = projectStore.project?.pages || [];
+  const savedByUrl = new Map(savedPages.map((page) => [page.url, page]));
+  const discovered = projectStore.project?.discoveredPages || [];
+  const listed = discovered.map((page) => ({ ...page, ...savedByUrl.get(page.url), saved: savedByUrl.has(page.url) }));
+  savedPages.filter((page) => !discovered.some((item) => item.url === page.url)).forEach((page) => listed.push({ ...page, saved: true }));
+  listed.sort((a, b) => a.url.localeCompare(b.url, "ja"));
+  return listed;
+}
+
+function renderProjectPages() {
+  const listed = listedProjectPages();
+  const availableUrls = new Set(listed.map((page) => page.url));
+  state.selectedProjectUrls = new Set([...state.selectedProjectUrls].filter((url) => availableUrls.has(url)));
+  ui.projectPageCount.textContent = String(listed.length);
+  if (!listed.length) {
+    ui.projectPages.innerHTML = '<p class="project-empty">「配下ページを一括検索」でページ候補を取得するか、現在のページを案件へ保存してください。</p>';
+    updateBatchControls();
+    return;
+  }
+  ui.projectPages.replaceChildren(...listed.map((page) => {
+    const row = document.createElement("div");
+    row.className = "project-page-row";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.selectedProjectUrls.has(page.url);
+    checkbox.setAttribute("aria-label", `${page.title}を選択`);
+    checkbox.addEventListener("change", () => {
+      checkbox.checked ? state.selectedProjectUrls.add(page.url) : state.selectedProjectUrls.delete(page.url);
+      updateBatchControls();
+    });
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "project-page";
+    button.classList.toggle("saved", page.saved);
+    button.classList.toggle("changed", page.checkStatus === "changed");
+    button.classList.toggle("active", page.id === state.activeProjectPageId);
+    const title = document.createElement("strong");
+    const path = document.createElement("small");
+    const status = document.createElement("span");
+    title.textContent = page.title;
+    path.textContent = page.saved ? page.path.replace(/^pages\//, "") : new URL(page.url).pathname;
+    status.className = "page-status";
+    const savedStatus = {
+      same: "公開版と同じ",
+      changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
+      error: "公開版の確認失敗",
+    }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
+    status.textContent = page.saved ? savedStatus : "未取得・クリックしてブラウザ表示";
+    button.append(title, path, status);
+    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : startCaptureForUrl(page.url));
+    row.append(checkbox, button);
+    if (page.saved && page.checkStatus === "changed") {
+      const actions = document.createElement("div");
+      actions.className = "project-update-actions";
+      const keep = document.createElement("button");
+      const replace = document.createElement("button");
+      keep.type = replace.type = "button";
+      keep.textContent = "上書きしない";
+      replace.textContent = "バックアップして更新";
+      keep.addEventListener("click", () => keepCurrentProjectPage(page.id));
+      replace.addEventListener("click", () => replaceProjectPage(page.id));
+      actions.append(keep, replace);
+      row.append(actions);
+    }
+    return row;
+  }));
+  updateBatchControls();
+}
+
+async function captureUrlDirectly(url) {
+  const response = await postJson("/api/capture/direct", { url });
+  const html = await response.text();
+  return {
+    html,
+    fileName: decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html"),
+    url: decodeURIComponent(response.headers.get("X-Captured-Url") || url),
+  };
+}
+
+async function processSelectedPages(mode) {
+  if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてから一括処理してください。", "error");
+  const selected = listedProjectPages().filter((page) => state.selectedProjectUrls.has(page.url));
+  const targets = mode === "check" ? selected.filter((page) => page.saved) : selected;
+  if (!targets.length) return;
+  state.batchRunning = true;
+  updateBatchControls();
+  let completed = 0;
+  let failed = 0;
+  for (let index = 0; index < targets.length; index++) {
+    const page = targets[index];
+    ui.batchProgress.textContent = `${targets.length}件中 ${index + 1}件目：${page.title}`;
+    try {
+      const captured = await captureUrlDirectly(page.url);
+      if (page.saved) {
+        const saved = await projectStore.loadPage(page.id);
+        const comparison = comparePageHtml(saved.originalHtml, captured.html);
+        await projectStore.checkSource(page.id, captured.html, comparison);
+      } else {
+        await projectStore.savePage({
+          fileName: captured.fileName,
+          sourceUrl: captured.url,
+          originalHtml: captured.html,
+          workingHtml: captured.html,
+          changes: [],
+        });
+      }
+      completed++;
+    } catch (error) {
+      failed++;
+      if (page.saved) await projectStore.markCheckFailed(page.id, error.message).catch(() => {});
+    }
+    renderProjectPages();
+  }
+  state.batchRunning = false;
+  ui.batchProgress.textContent = `完了 ${completed}件${failed ? `・失敗 ${failed}件` : ""}`;
+  updateBatchControls();
+  setStatus(`${mode === "check" ? "公開ページの更新確認" : "一括取得"}が完了しました。成功 ${completed}件、失敗 ${failed}件です。`, failed ? "error" : "success");
+}
+
+async function keepCurrentProjectPage(pageId) {
+  await projectStore.markCurrentVersionKept(pageId);
+  renderProjectPages();
+  setStatus("公開ページでは更新が見つかりましたが、案件内の現在版を維持します。", "success");
+}
+
+async function replaceProjectPage(pageId) {
+  if (!window.confirm("現在の編集内容を旧版フォルダへバックアップし、公開中の最新版で上書きしますか？")) return;
+  try {
+    const saved = await projectStore.replaceWithLatest(pageId);
+    if (state.activeProjectPageId === pageId) {
+      await loadHtml(saved.originalHtml, saved.page.fileName, {
+        workingHtml: saved.workingHtml,
+        changes: saved.changes,
+        sourceUrl: saved.page.url,
+        activeProjectPageId: saved.page.id,
+        dirty: false,
+      });
+    }
+    renderProjectPages();
+    setStatus("旧版をversionsフォルダへバックアップし、公開中の最新版へ更新しました。", "success");
+  } catch (error) {
+    setStatus(`最新版へ更新できませんでした: ${error.message}`, "error");
+  }
+}
+
+ui.selectAllProjectPages.addEventListener("click", () => {
+  const pages = listedProjectPages();
+  const allSelected = pages.length > 0 && pages.every((page) => state.selectedProjectUrls.has(page.url));
+  state.selectedProjectUrls = allSelected ? new Set() : new Set(pages.map((page) => page.url));
+  renderProjectPages();
+});
+ui.batchCapturePages.addEventListener("click", () => processSelectedPages("capture"));
+ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check"));
+
+async function saveCurrentToProject({ quiet = false } = {}) {
+  if (!state.originalHtml) throw new Error("保存するページがありません。");
+  projectStore.setMetadata({
+    projectName: ui.projectName.value,
+    baseUrl: ui.projectBaseUrl.value,
+  });
+  if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+  const sourceUrl = state.sourceUrl || ui.captureUrl.value.trim();
+  if (!sourceUrl) throw new Error("ページURLが不明です。WebページURLを入力してください。");
+  const page = await projectStore.savePage({
+    fileName: state.fileName,
+    sourceUrl,
+    originalHtml: state.originalHtml,
+    workingHtml: state.modifiedHtml,
+    changes: state.changes,
+  });
+  state.sourceUrl = page.url;
+  state.activeProjectPageId = page.id;
+  state.dirty = false;
+  renderProjectPages();
+  ui.projectState.textContent = `${projectStore.project.projectName}：${projectStore.project.pages.length}ページ`;
+  if (!quiet) setStatus(`案件フォルダの ${page.path} へ保存しました。`, "success");
+  return page;
+}
+
+async function openProjectPage(pageId) {
+  if (pageId === state.activeProjectPageId) return;
+  try {
+    if (state.dirty && state.originalHtml) await saveCurrentToProject({ quiet: true });
+    const saved = await projectStore.loadPage(pageId);
+    await loadHtml(saved.originalHtml, saved.page.fileName, {
+      workingHtml: saved.workingHtml,
+      changes: saved.changes,
+      sourceUrl: saved.page.url,
+      activeProjectPageId: saved.page.id,
+      dirty: false,
+    });
+    ui.captureUrl.value = saved.page.url;
+    setStatus(`案件ページ「${saved.page.title}」を開きました。`, "success");
+  } catch (error) {
+    setStatus(`案件ページを開けませんでした: ${error.message}`, "error");
+  }
+}
+
+ui.selectProjectFolder.addEventListener("click", async () => {
+  try {
+    const project = await projectStore.selectDirectory();
+    ui.projectName.value = project.projectName;
+    ui.projectBaseUrl.value = project.baseUrl;
+    ui.projectState.textContent = `${project.projectName}：保存済み${project.pages.length}ページ`;
+    syncProjectControls();
+    renderProjectPages();
+    setStatus(project.pages.length ? "案件フォルダを開きました。左の一覧からページを選べます。" : "新しい案件フォルダを選択しました。案件名と基準URLを入力してください。", "success");
+  } catch (error) {
+    if (error.name !== "AbortError") setStatus(`案件フォルダを開けませんでした: ${error.message}`, "error");
+  }
+});
+
+ui.saveProjectPage.addEventListener("click", async () => {
+  ui.saveProjectPage.disabled = true;
+  try {
+    await saveCurrentToProject();
+  } catch (error) {
+    setStatus(`案件フォルダへ保存できませんでした: ${error.message}`, "error");
+  } finally {
+    syncProjectControls();
+  }
+});
+
+ui.crawlProjectPages.addEventListener("click", async () => {
+  ui.crawlProjectPages.disabled = true;
+  try {
+    projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
+    await projectStore.saveProject();
+    ui.projectState.textContent = "基準URL配下を検索しています…";
+    setStatus("リンクをたどって配下ページを検索しています。ページ数によって時間がかかります。", "info");
+    const response = await postJson("/api/crawl", { baseUrl: projectStore.project.baseUrl, maxPages: 100 });
+    const result = await response.json();
+    await projectStore.mergeDiscoveredPages(result.pages);
+    renderProjectPages();
+    const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
+    const limitText = result.truncated ? "（100件で打ち切り）" : "";
+    ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
+    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックするとブラウザで開きます。`, "success");
+  } catch (error) {
+    ui.projectState.textContent = "配下ページの検索に失敗しました";
+    setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");
+  } finally {
+    syncProjectControls();
+  }
+});
+
+if (!ProjectStore.isSupported()) {
+  ui.selectProjectFolder.disabled = true;
+  ui.projectState.textContent = "フォルダ保存にはChromeまたはEdgeが必要です";
+}
+
+ui.file.addEventListener("change", async () => {
+  const file = ui.file.files?.[0];
+  if (!file) return;
+  if (file.size > 100 * 1024 * 1024 && !window.confirm("100MBを超えるHTMLです。読み込みを続けますか？")) return;
+  try {
+    const html = await file.text();
+    await loadHtml(html, file.name);
+    setStatus("HTMLを読み込みました。ページ内の要素をクリックして編集できます。", "success");
+  } catch (error) {
+    setStatus(`読み込みに失敗しました: ${error.message}`, "error");
+  } finally {
+    ui.file.value = "";
+  }
+});
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `HTTP ${response.status}`);
+  }
+  return response;
+}
+
+async function startCaptureForUrl(url) {
+  if (!url) return setStatus("取得するURLを入力してください。", "error");
+  ui.captureUrl.value = url;
+  ui.openCapture.disabled = true;
+  ui.captureState.textContent = "取得用ブラウザを起動しています…";
+  try {
+    const response = await postJson("/api/capture/start", { url });
+    const data = await response.json();
+    captureSessionId = data.sessionId;
+    ui.finishCapture.disabled = false;
+    ui.cancelCapture.disabled = false;
+    ui.captureState.textContent = "取得用ブラウザでログインや表示調整後、取り込みを押してください";
+    setStatus("取得用ブラウザを開きました。対象画面を表示してから「表示中ページを取り込む」を押してください。", "success");
+  } catch (error) {
+    ui.openCapture.disabled = false;
+    ui.captureState.textContent = "取得用ブラウザを開けませんでした";
+    setStatus(`ページ取得の開始に失敗しました: ${error.message}`, "error");
+  }
+}
+
+ui.openCapture.addEventListener("click", () => startCaptureForUrl(ui.captureUrl.value.trim()));
+
+ui.finishCapture.addEventListener("click", async () => {
+  if (!captureSessionId) return;
+  ui.finishCapture.disabled = true;
+  ui.captureState.textContent = "CSS・画像を埋め込んでいます…";
+  setStatus("表示中ページを取り込んでいます。ページによっては少し時間がかかります。", "info");
+  try {
+    if (state.dirty && state.activeProjectPageId) await saveCurrentToProject({ quiet: true });
+    const response = await postJson("/api/capture/finish", { sessionId: captureSessionId });
+    const html = await response.text();
+    const fileName = decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html");
+    captureSessionId = "";
+    await loadHtml(html, fileName);
+    ui.captureState.textContent = "取り込み完了";
+    ui.openCapture.disabled = false;
+    ui.cancelCapture.disabled = true;
+    setStatus("Webページを単一HTMLとして取り込みました。編集を開始できます。", "success");
+  } catch (error) {
+    ui.finishCapture.disabled = false;
+    ui.captureState.textContent = "取り込みに失敗しました";
+    setStatus(`ページ取得に失敗しました: ${error.message}`, "error");
+  }
+});
+
+ui.cancelCapture.addEventListener("click", async () => {
+  if (captureSessionId) await postJson("/api/capture/cancel", { sessionId: captureSessionId }).catch(() => {});
+  captureSessionId = "";
+  ui.openCapture.disabled = false;
+  ui.finishCapture.disabled = true;
+  ui.cancelCapture.disabled = true;
+  ui.captureState.textContent = "取得をキャンセルしました";
+});
+
+ui.original.addEventListener("click", () => render("original"));
+ui.modified.addEventListener("click", () => render("modified"));
+ui.undo.addEventListener("click", () => applyUndoRedo("undo"));
+ui.redo.addEventListener("click", () => applyUndoRedo("redo"));
+ui.reset.addEventListener("click", async () => {
+  if (!window.confirm("すべての修正を破棄して、読み込み時点へ戻しますか？")) return;
+  state.modifiedHtml = state.originalHtml;
+  state.changes = [];
+  state.redoChanges = [];
+  state.dirty = true;
+  renderHistory();
+  // リセット直前の編集DOMでoriginalHtmlを再上書きしない。
+  await render("modified", { captureCurrent: false });
+  setStatus("読み込み時点へ戻しました。", "success");
+});
+ui.download.addEventListener("click", () => {
+  const html = state.mode === "modified" ? editor.getExportHtml() : cleanHtmlString(state.modifiedHtml);
+  if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+  downloadHtml(html, state.fileName);
+  setStatus("修正後HTMLをダウンロードしました。", "success");
+});
+ui.downloadRedline.addEventListener("click", () => {
+  if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+  downloadRedlineReport(state.fileName, state.modifiedHtml, state.changes);
+  setStatus("ページ上で変更箇所を示す赤入れHTMLをダウンロードしました。", "success");
+});
+ui.downloadDiff.addEventListener("click", () => {
+  downloadDiffReport(state.fileName, state.changes);
+  setStatus("差分・修正指示HTMLをダウンロードしました。", "success");
+});
+ui.downloadPackage.addEventListener("click", () => {
+  if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+  downloadProjectPackage({
+    fileName: state.fileName,
+    originalHtml: state.originalHtml,
+    modifiedHtml: state.modifiedHtml,
+    changes: state.changes,
+  });
+  setStatus("修正前・修正後・差分・赤入れを案件一式ZIPでダウンロードしました。", "success");
+});
+
+function applyUndoRedo(direction) {
+  if (state.mode !== "modified") return;
+  const source = direction === "undo" ? state.changes : state.redoChanges;
+  const destination = direction === "undo" ? state.redoChanges : state.changes;
+  const change = source.pop();
+  if (!change) return;
+  if (!editor.applyChange(change, direction)) {
+    source.push(change);
+    setStatus("この操作を復元できませんでした。すべてリセットは利用できます。", "error");
+    return;
+  }
+  destination.push(change);
+  state.modifiedHtml = editor.getHtml();
+  state.dirty = true;
+  renderHistory();
+  refreshClassOptions();
+  setStatus(direction === "undo" ? "直前の編集を元に戻しました。" : "編集をやり直しました。", "success");
+}
+
+document.addEventListener("keydown", (event) => {
+  const shortcut = event.metaKey || event.ctrlKey;
+  const typing = ["INPUT", "TEXTAREA"].includes(event.target?.tagName);
+  if (!shortcut || event.key.toLowerCase() !== "z" || typing) return;
+  event.preventDefault();
+  applyUndoRedo(event.shiftKey ? "redo" : "undo");
+});
+
+ui.text.addEventListener("change", () => editor.updateText(ui.text.value));
+ui.link.addEventListener("change", () => editor.updateLink(ui.link.value));
+ui.alt.addEventListener("change", () => editor.updateAlt(ui.alt.value));
+ui.classes.addEventListener("change", () => {
+  editor.updateClasses(ui.classes.value);
+  refreshClassOptions();
+});
+ui.before.addEventListener("click", () => editor.moveBefore());
+ui.after.addEventListener("click", () => editor.moveAfter());
+ui.duplicate.addEventListener("click", () => {
+  if (editor.duplicateSelected()) refreshClassOptions();
+});
+ui.delete.addEventListener("click", () => {
+  if (window.confirm("選択した要素を削除しますか？")) editor.deleteSelected();
+});
+ui.clearHistory.addEventListener("click", () => {
+  if (!window.confirm("変更履歴だけを消去しますか？ 編集内容はそのまま残ります。")) return;
+  state.changes = [];
+  state.redoChanges = [];
+  state.dirty = true;
+  renderHistory();
+  setStatus("変更履歴を消去しました。編集内容は維持されています。", "success");
+});
+ui.image.addEventListener("change", () => {
+  const file = ui.image.files?.[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024 && !window.confirm("画像が10MBを超えています。埋め込みを続けますか？")) return;
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    editor.updateImage(String(reader.result));
+    ui.image.value = "";
+  });
+  reader.readAsDataURL(file);
+});

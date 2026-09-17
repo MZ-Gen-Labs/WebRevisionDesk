@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>サンプル会社</title>
+    <style>
+      body { margin: 0; font-family: system-ui, sans-serif; color: #19323c; }
+      header { padding: 18px 8%; color: white; background: #0c5963; }
+      main { max-width: 900px; margin: auto; padding: 64px 24px; }
+      .lead { font-size: 1.2rem; line-height: 1.8; }
+      .hero-image { display: block; width: 100%; height: 140px; margin: 28px 0; object-fit: cover; border-radius: 12px; }
+      .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 40px; }
+      .card { border: 1px solid #cbd8da; border-radius: 12px; padding: 20px; }
+      .accent { color: #bf4e30; }
+      a { color: #0c6775; }
+    </style>
+  </head>
+  <body>
+    <header><strong>Sample Company</strong></header>
+    <main>
+      <h1>より良い未来を、技術とともに。</h1>
+      <p class="lead">私たちは、お客様の業務を支える製品とサービスを提供しています。</p>
+      <img class="hero-image" alt="青緑色のサンプル画像" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='140'%3E%3Crect width='900' height='140' fill='%230c5963'/%3E%3Ccircle cx='740' cy='70' r='42' fill='%23ffffff' fill-opacity='.25'/%3E%3C/svg%3E" />
+      <p><a href="https://example.com/contact">お問い合わせはこちら</a></p>
+      <section class="cards">
+        <article class="card"><h2>企画</h2><p>課題を整理し、実現方法を考えます。</p></article>
+        <article class="card"><h2>開発</h2><p>使いやすい仕組みを形にします。</p></article>
+        <article class="card"><h2>支援</h2><p>導入後の改善を継続して支援します。</p></article>
+      </section>
+    </main>
+  </body>
+</html>
