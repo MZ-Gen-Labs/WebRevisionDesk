@@ -32,6 +32,7 @@ foreach ($script in @((Join-Path $installRoot "launcher.ps1"), (Join-Path $insta
 $dataRoot = Join-Path $testRoot "data"
 $env:WEB_REVISION_DATA_DIR = $dataRoot
 $env:WEB_REVISION_NO_BROWSER = "1"
+$env:WEB_REVISION_NO_PAUSE = "1"
 try {
   & (Join-Path $installRoot "Start-WebRevisionDesk.cmd")
   if ($LASTEXITCODE -ne 0) { throw "Start-WebRevisionDesk.cmd failed with exit code $LASTEXITCODE." }

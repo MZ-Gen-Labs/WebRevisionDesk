@@ -1,9 +1,10 @@
 param(
-  [Parameter(Mandatory = $false)][string]$InstallRoot = $PSScriptRoot,
+  [Parameter(Mandatory = $false)][string]$InstallRoot,
   [switch]$RollbackAttempt
 )
 
 $ErrorActionPreference = "Stop"
+if ([string]::IsNullOrWhiteSpace($InstallRoot)) { $InstallRoot = $PSScriptRoot }
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $PathRoot = [IO.Path]::GetPathRoot($InstallRoot)
 if ($InstallRoot -ne $PathRoot) { $InstallRoot = $InstallRoot.TrimEnd([char[]]"\/") }

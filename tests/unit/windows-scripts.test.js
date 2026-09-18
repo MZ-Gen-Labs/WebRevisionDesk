@@ -9,6 +9,12 @@ for (const file of ["windows/launcher.ps1", "windows/updater.ps1"]) {
   });
 }
 
+test("launcher resolves PSScriptRoot after parameter binding", async () => {
+  const content = await readFile(new URL("../../windows/launcher.ps1", import.meta.url), "utf8");
+  assert.match(content, /if \(\[string\]::IsNullOrWhiteSpace\(\$InstallRoot\)\) \{ \$InstallRoot = \$PSScriptRoot \}/);
+  assert.doesNotMatch(content, /\$InstallRoot\s*=\s*\$PSScriptRoot,/);
+});
+
 for (const file of ["windows/Start-WebRevisionDesk.cmd", "windows/Start-WebRevisionEditor.cmd"]) {
   test(`${file} lets launcher.ps1 resolve its own installation directory`, async () => {
     const content = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
