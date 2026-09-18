@@ -55,6 +55,17 @@ export function releaseAsset(release) {
     || null;
 }
 
+export function updaterPowerShellArguments({ updater, installRoot, update, appPid }) {
+  return [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", updater,
+    "-InstallRoot", path.resolve(installRoot),
+    "-Version", update.version,
+    "-ZipPath", update.path,
+    "-ExpectedDigest", update.digest,
+    "-AppPid", String(appPid),
+  ];
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
@@ -251,14 +262,16 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     }
     await access(update.path);
     const updater = path.join(path.resolve(installRoot), "updater.ps1");
-    const child = spawn("powershell.exe", [
-      "-NoProfile", "-File", updater,
-      "-InstallRoot", path.resolve(installRoot),
-      "-Version", update.version,
-      "-ZipPath", update.path,
-      "-ExpectedDigest", update.digest,
-      "-AppPid", String(process.pid),
-    ], { detached: true, stdio: "ignore", windowsHide: true });
+    const child = spawn("powershell.exe", updaterPowerShellArguments({
+      updater,
+      installRoot,
+      update,
+      appPid: process.pid,
+    }), { detached: true, stdio: "ignore", windowsHide: true });
+    await new Promise((resolve, reject) => {
+      child.once("spawn", resolve);
+      child.once("error", reject);
+    });
     child.unref();
     return { applying: true, version: update.version };
   }

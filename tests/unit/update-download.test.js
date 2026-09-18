@@ -4,7 +4,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { createUpdateService } from "../../src/update-service.js";
+import { createUpdateService, updaterPowerShellArguments } from "../../src/update-service.js";
+
+test("Windows updater is launched with the same execution-policy allowance as the main launcher", () => {
+  const args = updaterPowerShellArguments({
+    updater: "C:\\tool\\WebRevisionDesk\\updater.ps1",
+    installRoot: "C:\\tool\\WebRevisionDesk",
+    update: {
+      version: "0.3.6",
+      path: "C:\\Users\\tester\\update.zip",
+      digest: `sha256:${"a".repeat(64)}`,
+    },
+    appPid: 1234,
+  });
+  assert.deepEqual(args.slice(0, 5), ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\tool\\WebRevisionDesk\\updater.ps1"]);
+  assert.equal(args.at(-1), "1234");
+});
 
 test("an update with a mismatched SHA-256 is rejected and not retained", async () => {
   const dataDirectory = await mkdtemp(path.join(os.tmpdir(), "web-revision-update-test-"));
