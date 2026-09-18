@@ -32,6 +32,7 @@ foreach ($script in @((Join-Path $installRoot "launcher.ps1"), (Join-Path $insta
 $dataRoot = Join-Path $testRoot "data"
 $env:WEB_REVISION_DATA_DIR = $dataRoot
 $env:WEB_REVISION_NO_BROWSER = "1"
+$env:WEB_REVISION_NO_MENU = "1"
 $env:WEB_REVISION_NO_PAUSE = "1"
 try {
   & (Join-Path $installRoot "Start-WebRevisionDesk.cmd")
@@ -44,6 +45,11 @@ try {
     } catch { Start-Sleep -Milliseconds 250 }
   }
   if (-not $healthy) { throw "Portable server did not become healthy." }
+  $firstPid = (Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort 5173 -State Listen).OwningProcess
+  & (Join-Path $installRoot "Start-WebRevisionDesk.cmd")
+  if ($LASTEXITCODE -ne 0) { throw "Second launcher invocation failed with exit code $LASTEXITCODE." }
+  $secondPid = (Get-NetTCPConnection -LocalAddress "127.0.0.1" -LocalPort 5173 -State Listen).OwningProcess
+  if ($firstPid -ne $secondPid) { throw "Second launcher invocation started a duplicate process." }
   $page = Invoke-WebRequest "http://127.0.0.1:5173/" -UseBasicParsing
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch "Web Revision Desk") { throw "Portable UI was not served correctly." }
 } finally {

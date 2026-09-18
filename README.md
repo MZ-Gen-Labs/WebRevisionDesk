@@ -203,6 +203,8 @@ npm run build:portable
 
 初回配布用ZIPを展開し、`Start-WebRevisionDesk.cmd` を実行すると起動します。GitHub Releaseにはアプリ内更新用ZIP、`update.json`、`SHA256SUMS.txt`を添付します。完全版ZIPは初回利用者向けです。
 
+ランチャーは起動済みのWeb Revision Deskを検出し、二重起動せず既存画面を開きます。起動後のコンソールでは `O` で画面を開く、`R` で再起動、`S` で終了、Enterでコンソールだけを閉じられます。再起動と終了は確認後に実行され、当該インストール配下のNode.jsプロセスであることを確認できた場合だけ停止します。
+
 ## 安全性と制約
 
 編集プレビューはsandbox付きiframeに表示し、入力HTMLのスクリプト、フォーム送信、ポップアップを許可しません。ページ取り込みではCSS、CSS内の追加CSS、画像等を可能な範囲で単一HTMLへ埋め込みます。取得後も外部URLが残るページでは通信が発生する可能性があります。

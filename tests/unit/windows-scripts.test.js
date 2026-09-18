@@ -15,6 +15,16 @@ test("launcher resolves PSScriptRoot after parameter binding", async () => {
   assert.doesNotMatch(content, /\$InstallRoot\s*=\s*\$PSScriptRoot,/);
 });
 
+test("launcher verifies ownership before controlling the port listener", async () => {
+  const content = await readFile(new URL("../../windows/launcher.ps1", import.meta.url), "utf8");
+  assert.match(content, /Get-NetTCPConnection -LocalAddress "127\.0\.0\.1" -LocalPort 5173/);
+  assert.match(content, /Get-CimInstance Win32_Process/);
+  assert.match(content, /StartsWith\(\$VersionsPrefix, \[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(content, /EndsWith\(\$ExpectedSuffix, \[StringComparison\]::OrdinalIgnoreCase\)/);
+  assert.match(content, /Restart Web Revision Desk\? \(Y\/N\)/);
+  assert.match(content, /Stop Web Revision Desk\? \(Y\/N\)/);
+});
+
 for (const file of ["windows/Start-WebRevisionDesk.cmd", "windows/Start-WebRevisionEditor.cmd"]) {
   test(`${file} lets launcher.ps1 resolve its own installation directory`, async () => {
     const content = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
