@@ -35,14 +35,15 @@ const ui = {
   openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
   applyAppUpdate: $("#apply-app-update"),
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
-  importPreviewPage: $("#import-preview-page"),
+  importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
+  screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   stepImport: $("#step-import"), stepEdit: $("#step-edit"), stepExport: $("#step-export"),
 };
 
 const state = {
   fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
-  sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false,
+  sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
   selectedProjectUrls: new Set(), batchRunning: false,
 };
 let captureSessionId = "";
@@ -162,15 +163,15 @@ function updateGuidance() {
   const loaded = Boolean(state.originalHtml);
   const changed = state.changes.length > 0;
   [ui.stepImport, ui.stepEdit, ui.stepExport].forEach((step) => step.classList.remove("active", "complete"));
-  if (!loaded) {
+  if (state.previewOnly) {
     ui.stepImport.classList.add("active");
-    ui.saveState.textContent = "ページ未読込";
+    ui.saveState.textContent = "未取得・画像プレビュー";
     ui.saveState.className = "save-state";
     return;
   }
-  if (state.previewOnly) {
+  if (!loaded) {
     ui.stepImport.classList.add("active");
-    ui.saveState.textContent = "未取得・一時プレビュー";
+    ui.saveState.textContent = "ページ未読込";
     ui.saveState.className = "save-state";
     return;
   }
@@ -345,11 +346,13 @@ async function loadHtml(html, fileName, options = {}) {
   state.activeProjectPageId = options.activeProjectPageId || "";
   state.dirty = options.dirty ?? true;
   state.previewOnly = options.previewOnly ?? false;
+  clearScreenshotPreview();
   renderHistory();
   ui.fileName.textContent = state.fileName;
   ui.empty.hidden = true;
   ui.frame.hidden = false;
-  ui.importPreviewPage.hidden = !state.previewOnly;
+  ui.importPreviewPage.hidden = true;
+  ui.refreshPreview.hidden = true;
   setControls(true);
   await render(state.previewOnly ? "original" : "modified", { captureCurrent: false });
   renderProjectPages();
@@ -410,7 +413,7 @@ function renderProjectPages() {
       changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
       error: "公開版の確認失敗",
     }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
-    status.textContent = page.saved ? savedStatus : "未取得・クリックして中央へ一時表示";
+    status.textContent = page.saved ? savedStatus : "未取得・クリックして画像プレビュー";
     button.append(title, path, status);
     button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page));
     row.append(checkbox, button);
@@ -451,6 +454,45 @@ async function captureUrlDirectly(url) {
   };
 }
 
+async function captureScreenshot(url, refresh = false) {
+  const response = await postJson("/api/preview/screenshot", { url, refresh });
+  const image = await response.blob();
+  return {
+    imageUrl: URL.createObjectURL(image),
+    title: decodeURIComponent(response.headers.get("X-Preview-Title") || "公開ページ"),
+    url: decodeURIComponent(response.headers.get("X-Preview-Url") || url),
+  };
+}
+
+function clearScreenshotPreview() {
+  if (state.previewObjectUrl) URL.revokeObjectURL(state.previewObjectUrl);
+  state.previewObjectUrl = "";
+  ui.screenshotPreviewImage.removeAttribute("src");
+  ui.screenshotPreview.hidden = true;
+}
+
+function showScreenshotPreview(preview) {
+  editor.unload();
+  clearScreenshotPreview();
+  Object.assign(state, {
+    fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "original", changes: [], redoChanges: [],
+    sourceUrl: preview.url, activeProjectPageId: "", dirty: false, previewOnly: true, previewObjectUrl: preview.imageUrl,
+  });
+  ui.captureUrl.value = preview.url;
+  ui.fileName.textContent = preview.title;
+  ui.badge.textContent = "公開ページ・画像プレビュー";
+  ui.badge.dataset.mode = "preview";
+  ui.empty.hidden = true;
+  ui.frame.hidden = true;
+  ui.screenshotPreviewImage.src = preview.imageUrl;
+  ui.screenshotPreview.hidden = false;
+  ui.importPreviewPage.hidden = false;
+  ui.refreshPreview.hidden = false;
+  showSelection(null);
+  renderHistory();
+  setControls(false);
+}
+
 async function previewUncapturedProjectPage(page) {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてからページを開いてください。", "error");
@@ -459,10 +501,9 @@ async function previewUncapturedProjectPage(page) {
     state.batchRunning = true;
     updateBatchControls();
     setStatus(`「${page.title}」を中央へ一時表示しています…`, "info");
-    const captured = await captureUrlDirectly(page.url);
-    ui.captureUrl.value = captured.url;
-    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: false, previewOnly: true });
-    setStatus(`「${page.title}」を一時表示しました。まだ保存されていません。編集する場合は「このページを取り込んで編集」を押してください。`, "success");
+    const preview = await captureScreenshot(page.url);
+    showScreenshotPreview(preview);
+    setStatus(`「${page.title}」の画像プレビューを表示しました。まだ保存されていません。`, "success");
   } catch (error) {
     setStatus(`中央へ一時表示できませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
   } finally {
@@ -474,9 +515,10 @@ async function previewUncapturedProjectPage(page) {
 
 function clearLoadedPage() {
   editor.unload();
+  clearScreenshotPreview();
   Object.assign(state, {
     fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
-    sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false,
+    sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
   });
   ui.fileName.textContent = "ファイル未選択";
   ui.badge.textContent = "未読込";
@@ -484,6 +526,7 @@ function clearLoadedPage() {
   ui.empty.hidden = false;
   ui.frame.hidden = true;
   ui.importPreviewPage.hidden = true;
+  ui.refreshPreview.hidden = true;
   showSelection(null);
   renderHistory();
   setControls(false);
@@ -590,23 +633,36 @@ ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check
 ui.resetProjectPages.addEventListener("click", resetSelectedProjectPages);
 
 ui.importPreviewPage.addEventListener("click", async () => {
-  if (!state.previewOnly || !state.originalHtml) return;
+  if (!state.previewOnly || !state.sourceUrl) return;
   ui.importPreviewPage.disabled = true;
+  ui.refreshPreview.disabled = true;
   try {
-    state.previewOnly = false;
-    state.dirty = true;
-    ui.importPreviewPage.hidden = true;
-    setControls(true);
+    setStatus("編集用HTMLを取得しています…", "info");
+    const captured = await captureUrlDirectly(state.sourceUrl);
+    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
     await saveCurrentToProject({ quiet: true });
-    await render("modified", { captureCurrent: false });
     setStatus("ページを案件フォルダへ取り込みました。中央の画面で編集できます。", "success");
   } catch (error) {
-    state.previewOnly = true;
-    state.dirty = false;
-    ui.importPreviewPage.hidden = false;
-    setControls(true);
     setStatus(`ページを取り込めませんでした: ${error.message}`, "error");
   } finally {
+    ui.importPreviewPage.disabled = false;
+    ui.refreshPreview.disabled = false;
+  }
+});
+
+ui.refreshPreview.addEventListener("click", async () => {
+  if (!state.previewOnly || !state.sourceUrl) return;
+  ui.refreshPreview.disabled = true;
+  ui.importPreviewPage.disabled = true;
+  try {
+    setStatus("最新のスクリーンショットを取得しています…", "info");
+    const preview = await captureScreenshot(state.sourceUrl, true);
+    showScreenshotPreview(preview);
+    setStatus("スクリーンショットを更新しました。", "success");
+  } catch (error) {
+    setStatus(`スクリーンショットを更新できませんでした: ${error.message}`, "error");
+  } finally {
+    ui.refreshPreview.disabled = false;
     ui.importPreviewPage.disabled = false;
   }
 });

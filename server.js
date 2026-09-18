@@ -16,6 +16,7 @@ const updateService = await createUpdateService({
 });
 const profileDir = updateService.profileDirectory;
 const sessions = new Map();
+const screenshotCache = new Map();
 let browserOperationRunning = false;
 
 const productionMode = process.env.WEB_REVISION_PRODUCTION === "1";
@@ -239,6 +240,52 @@ async function captureDirect(request, response) {
   }
 }
 
+function sendScreenshot(response, preview, cached = false) {
+  response.writeHead(200, {
+    "Content-Type": "image/jpeg",
+    "Content-Length": preview.image.length,
+    "Cache-Control": "no-store",
+    "X-Preview-Title": encodeURIComponent(preview.title),
+    "X-Preview-Url": encodeURIComponent(preview.url),
+    "X-Preview-Cached": cached ? "1" : "0",
+  });
+  response.end(preview.image);
+}
+
+async function previewScreenshot(request, response) {
+  const { url: inputUrl, refresh = false } = await readJson(request);
+  const url = validateUrl(inputUrl);
+  if (sessions.size) throw new Error("取得用ブラウザを閉じてからプレビューしてください。");
+  const cached = screenshotCache.get(url);
+  if (!refresh && cached && Date.now() - cached.createdAt < 5 * 60 * 1000) {
+    return sendScreenshot(response, cached, true);
+  }
+
+  const context = await chromium.launchPersistentContext(profileDir, {
+    headless: true,
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 1,
+  });
+  const page = context.pages()[0] ?? await context.newPage();
+  let preview;
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
+    await page.waitForLoadState("load", { timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(250);
+    preview = {
+      image: await page.screenshot({ type: "jpeg", quality: 78, fullPage: false, animations: "disabled" }),
+      title: (await page.title()).trim() || new URL(page.url()).pathname,
+      url: page.url(),
+      createdAt: Date.now(),
+    };
+  } finally {
+    await context.close().catch(() => {});
+  }
+  if (screenshotCache.size >= 30) screenshotCache.delete(screenshotCache.keys().next().value);
+  screenshotCache.set(url, preview);
+  sendScreenshot(response, preview);
+}
+
 const server = http.createServer(async (request, response) => {
   let ownsBrowserOperation = false;
   try {
@@ -253,7 +300,7 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, 415, { error: "JSON形式で送信してください。" });
       }
     }
-    if (request.method === "POST" && /^(?:\/api\/capture\/|\/api\/login\/|\/api\/crawl$)/.test(request.url)) {
+    if (request.method === "POST" && /^(?:\/api\/capture\/|\/api\/login\/|\/api\/preview\/|\/api\/crawl$)/.test(request.url)) {
       if (browserOperationRunning) return sendJson(response, 409, { error: "ブラウザ処理中です。完了してから再実行してください。" });
       browserOperationRunning = true;
       ownsBrowserOperation = true;
@@ -290,6 +337,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/api/capture/finish") return await finishCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/cancel") return await cancelCapture(request, response);
     if (request.method === "POST" && request.url === "/api/crawl") return await crawlSite(request, response);
+    if (request.method === "POST" && request.url === "/api/preview/screenshot") return await previewScreenshot(request, response);
     if (request.method === "POST" && request.url === "/api/capture/direct") return await captureDirect(request, response);
     if (productionMode) return await serveProductionFile(request, response);
     vite.middlewares(request, response, () => {

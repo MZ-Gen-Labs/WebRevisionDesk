@@ -122,11 +122,15 @@
           <span id="save-state" class="save-state">ページ未読込</span>
           <span id="file-name">ファイル未選択</span>
           <button id="import-preview-page" class="small-button primary-inline" type="button" hidden>このページを取り込んで編集</button>
+          <button id="refresh-preview" class="small-button" type="button" hidden>画像を更新</button>
           <span class="hint">直したい場所をクリックしてください</span>
         </div>
         <div id="empty-state" class="empty-state">
           <strong>既存ページをここに表示します</strong>
           <span>HTMLは外部へ送信されません。</span>
+        </div>
+        <div id="screenshot-preview" class="screenshot-preview" hidden>
+          <img id="screenshot-preview-image" alt="公開ページのスクリーンショット" />
         </div>
         <iframe
           id="page-frame"

@@ -85,8 +85,10 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .project-page-actions button { width: 100%; padding: .35rem; font-size: .65rem; }
 .project-empty { color: #77788b; font-size: .76rem; line-height: 1.55; }
 .canvas-panel { display: flex; flex-direction: column; min-width: 0; padding: 1rem; }
-.canvas-meta { display: flex; align-items: center; gap: .8rem; min-height: 38px; color: #646578; font-size: .85rem; }
+.canvas-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; min-height: 38px; color: #646578; font-size: .85rem; }
 .canvas-meta .hint { margin-left: auto; }
+.screenshot-preview { flex: 1; min-height: 0; overflow: auto; border: 1px solid #d8d9e2; border-radius: 12px; background: #e8e9ef; }
+.screenshot-preview img { display: block; width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .badge { display: inline-flex; border-radius: 999px; padding: .3rem .65rem; background: #e4e5eb; color: #55566a; font-weight: 700; }
 .badge[data-mode="modified"] { background: #e6e6ff; color: #4b4bc0; }
 .badge[data-mode="original"] { background: #fff0d8; color: #865d1a; }

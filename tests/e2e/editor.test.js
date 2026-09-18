@@ -168,6 +168,24 @@ test("cross-site API writes and form requests are rejected", async () => {
   assert.equal((await settings.json()).settings.lastDownloadedUpdate, null);
 });
 
+test("screenshot preview returns a viewport image and reuses its short-lived cache", async () => {
+  const requestPreview = () => fetch(`${baseUrl}/api/preview/screenshot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: baseUrl }),
+  });
+  const first = await requestPreview();
+  assert.equal(first.status, 200);
+  assert.equal(first.headers.get("content-type"), "image/jpeg");
+  assert.equal(first.headers.get("x-preview-cached"), "0");
+  assert.ok((await first.arrayBuffer()).byteLength > 1000);
+
+  const second = await requestPreview();
+  assert.equal(second.status, 200);
+  assert.equal(second.headers.get("x-preview-cached"), "1");
+  assert.ok((await second.arrayBuffer()).byteLength > 1000);
+});
+
 test("undo restores nested links and formatting, reload can be cancelled", async () => {
   const page = await browser.newPage();
   await page.goto(baseUrl);
@@ -253,22 +271,43 @@ test("an uncaptured project page previews without saving, then can be imported a
     },
     body: "<!doctype html><html><head><title>Captured page</title></head><body><h1>中央に表示されたページ</h1></body></html>",
   }));
+  let previewRequests = 0;
+  await page.route("**/api/preview/screenshot", (route) => {
+    previewRequests++;
+    return route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "X-Preview-Title": encodeURIComponent("Screenshot preview"),
+        "X-Preview-Url": encodeURIComponent("https://example.com/base/one"),
+      },
+      body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+    });
+  });
 
   await page.goto(baseUrl);
   await page.locator("#select-project-folder").click();
   const projectPage = page.locator(".project-page").filter({ hasText: "未取得テストページ" });
   await projectPage.waitFor();
-  assert.match(await projectPage.textContent(), /中央へ一時表示/);
+  assert.match(await projectPage.textContent(), /画像プレビュー/);
   assert.equal(await page.locator(".project-page-actions").getByText("取得用ブラウザで開く").isVisible(), true);
 
   await projectPage.click();
-  await page.frameLocator("#page-frame").locator("h1").filter({ hasText: "中央に表示されたページ" }).waitFor();
+  await page.locator("#screenshot-preview").waitFor({ state: "visible" });
+  assert.match(await page.locator("#screenshot-preview-image").getAttribute("src"), /^blob:/);
+  assert.equal(await page.locator("#page-frame").isHidden(), true);
   assert.equal(await page.locator(".project-page.saved").count(), 0);
-  assert.match(await page.locator("#save-state").textContent(), /未取得・一時プレビュー/);
+  assert.match(await page.locator("#save-state").textContent(), /未取得・画像プレビュー/);
   assert.equal(await page.locator("#show-modified").isDisabled(), true);
   assert.equal(await page.locator("#import-preview-page").isVisible(), true);
+  assert.equal(previewRequests, 1);
+
+  await page.locator("#refresh-preview").click();
+  await page.locator("#status").filter({ hasText: "スクリーンショットを更新しました" }).waitFor();
+  assert.equal(previewRequests, 2);
 
   await page.locator("#import-preview-page").click();
+  await page.frameLocator("#page-frame").locator("h1").filter({ hasText: "中央に表示されたページ" }).waitFor();
   await page.locator(".project-page.saved").filter({ hasText: "Captured page" }).waitFor();
   assert.equal(await page.locator("#show-modified").isEnabled(), true);
 
