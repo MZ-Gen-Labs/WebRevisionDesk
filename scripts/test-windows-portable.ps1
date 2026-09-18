@@ -22,6 +22,13 @@ $required = @(
 )
 foreach ($file in $required) { if (-not (Test-Path $file)) { throw "Required portable file is missing: $file" } }
 
+foreach ($script in @((Join-Path $installRoot "launcher.ps1"), (Join-Path $installRoot "updater.ps1"))) {
+  $tokens = $null
+  $parseErrors = $null
+  [System.Management.Automation.Language.Parser]::ParseFile($script, [ref]$tokens, [ref]$parseErrors) | Out-Null
+  if ($parseErrors.Count -gt 0) { throw "PowerShell script could not be parsed: $script - $($parseErrors[0].Message)" }
+}
+
 $port = 23187
 $dataRoot = Join-Path $testRoot "data"
 $env:PORT = "$port"

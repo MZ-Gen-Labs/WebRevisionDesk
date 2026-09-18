@@ -22,15 +22,15 @@ function Save-Current($State) {
 }
 
 try {
-  if (-not (Test-Path -LiteralPath $CurrentFile)) { throw "current.json がありません。" }
+  if (-not (Test-Path -LiteralPath $CurrentFile)) { throw "current.json was not found." }
   $Current = Get-Content -LiteralPath $CurrentFile -Raw | ConvertFrom-Json
   $Version = [string]$Current.version
-  if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') { throw "バージョン情報が不正です。" }
+  if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') { throw "The version information is invalid." }
   $VersionDirectory = Join-Path (Join-Path $InstallRoot "versions") $Version
   $Node = Join-Path $VersionDirectory "node\node.exe"
   $Server = Join-Path $VersionDirectory "server.js"
   if (-not (Test-Path -LiteralPath $Node) -or -not (Test-Path -LiteralPath $Server)) {
-    throw "バージョン $Version の実行ファイルが見つかりません。"
+    throw "The application files for version $Version were not found."
   }
 
   $env:WEB_REVISION_INSTALL_ROOT = $InstallRoot
@@ -67,10 +67,10 @@ try {
       exit $LASTEXITCODE
     }
   }
-  throw "アプリを起動できませんでした。ログ: $LogFile"
+  throw "The application could not be started. Log: $LogFile"
 } catch {
   Write-LauncherLog "ERROR: $($_.Exception.Message)"
   Add-Type -AssemblyName PresentationFramework
-  [System.Windows.MessageBox]::Show("Web Revision Editorを起動できませんでした。`n$($_.Exception.Message)", "起動エラー", "OK", "Error") | Out-Null
+  [System.Windows.MessageBox]::Show("Web Revision Editor could not be started.`n$($_.Exception.Message)", "Startup error", "OK", "Error") | Out-Null
   exit 1
 }

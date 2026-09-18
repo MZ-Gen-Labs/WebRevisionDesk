@@ -21,20 +21,20 @@ function Write-UpdaterLog([string]$Message) {
 }
 
 try {
-  if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') { throw "バージョン情報が不正です。" }
-  if (-not (Test-Path -LiteralPath $ZipPath)) { throw "更新ZIPが見つかりません。" }
-  if (-not $ExpectedDigest.StartsWith("sha256:")) { throw "SHA-256情報がありません。" }
-  if (-not (Test-Path -LiteralPath $CurrentFile)) { throw "current.jsonがありません。" }
+  if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$') { throw "The version information is invalid." }
+  if (-not (Test-Path -LiteralPath $ZipPath)) { throw "The update ZIP was not found." }
+  if (-not $ExpectedDigest.StartsWith("sha256:")) { throw "SHA-256 information is missing." }
+  if (-not (Test-Path -LiteralPath $CurrentFile)) { throw "current.json was not found." }
 
   Write-UpdaterLog "Waiting for PID $AppPid before applying v$Version."
   for ($Attempt = 0; $Attempt -lt 120; $Attempt++) {
     if (-not (Get-Process -Id $AppPid -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 500
   }
-  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw "実行中の旧バージョンを終了できませんでした。" }
+  if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw "The previous version could not be stopped." }
 
   $ActualDigest = "sha256:$((Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant())"
-  if ($ActualDigest -ne $ExpectedDigest.ToLowerInvariant()) { throw "更新ZIPのSHA-256が一致しません。" }
+  if ($ActualDigest -ne $ExpectedDigest.ToLowerInvariant()) { throw "The update ZIP SHA-256 does not match." }
 
   New-Item -ItemType Directory -Force -Path $VersionsRoot | Out-Null
   $Staging = Join-Path $VersionsRoot ".staging-$Version"
@@ -43,11 +43,11 @@ try {
   Expand-Archive -LiteralPath $ZipPath -DestinationPath $Staging -Force
 
   $ReleaseFile = Join-Path $Staging "release.json"
-  if (-not (Test-Path -LiteralPath $ReleaseFile)) { throw "更新ZIPにrelease.jsonがありません。" }
+  if (-not (Test-Path -LiteralPath $ReleaseFile)) { throw "release.json is missing from the update ZIP." }
   $Release = Get-Content -LiteralPath $ReleaseFile -Raw | ConvertFrom-Json
-  if ([string]$Release.version -ne $Version) { throw "更新ZIP内のバージョンが一致しません。" }
+  if ([string]$Release.version -ne $Version) { throw "The update ZIP version does not match." }
   foreach ($Required in @("server.js", "dist\index.html", "node\node.exe", "node_modules\playwright\package.json")) {
-    if (-not (Test-Path -LiteralPath (Join-Path $Staging $Required))) { throw "更新ZIPに必要なファイルがありません: $Required" }
+    if (-not (Test-Path -LiteralPath (Join-Path $Staging $Required))) { throw "A required update file is missing: $Required" }
   }
 
   $Destination = Join-Path $VersionsRoot $Version
@@ -69,6 +69,6 @@ try {
 } catch {
   Write-UpdaterLog "ERROR: $($_.Exception.Message)"
   Add-Type -AssemblyName PresentationFramework
-  [System.Windows.MessageBox]::Show("更新を適用できませんでした。旧バージョンは維持されています。`n$($_.Exception.Message)", "更新エラー", "OK", "Error") | Out-Null
+  [System.Windows.MessageBox]::Show("The update could not be applied. The previous version is still active.`n$($_.Exception.Message)", "Update error", "OK", "Error") | Out-Null
   exit 1
 }
