@@ -3,9 +3,13 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
+  "portable": {
+    "nodeVersion": "24.18.0"
+  },
   "scripts": {
     "dev": "node server.js",
     "build": "vite build",
+    "build:portable": "node scripts/build-windows-portable.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

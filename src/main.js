@@ -31,6 +31,7 @@ const ui = {
   checkUpdatesOnStartup: $("#check-updates-on-startup"), saveUpdateSettings: $("#save-update-settings"),
   checkAppUpdate: $("#check-app-update"), updateResult: $("#update-result"),
   openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
+  applyAppUpdate: $("#apply-app-update"),
 };
 
 const state = {
@@ -40,6 +41,7 @@ const state = {
 };
 let captureSessionId = "";
 let latestAppUpdate = null;
+let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
 
 function formatBytes(value) {
@@ -55,6 +57,7 @@ async function loadAppInfo() {
     const data = await response.json();
     ui.appUpdateButton.textContent = `v${data.version}`;
     ui.appUpdateButton.title = `設定保存先: ${data.dataDirectory}`;
+    canApplyAppUpdate = data.canApplyUpdate === true;
     ui.updateRepository.value = data.settings.githubRepository || "";
     ui.checkUpdatesOnStartup.checked = data.settings.checkUpdatesOnStartup !== false;
     if (data.settings.checkUpdatesOnStartup && data.settings.githubRepository) await checkAppUpdate({ quiet: true });
@@ -91,6 +94,7 @@ async function checkAppUpdate({ quiet = false } = {}) {
       ui.updateResult.dataset.kind = security ? "security" : "available";
       ui.updateResult.textContent = `${security ? "セキュリティ更新" : "新しいバージョン"}があります。\n現在 v${latestAppUpdate.currentVersion} → 最新 v${latestAppUpdate.latestVersion}${severity}${asset}\n\n${latestAppUpdate.notes || "更新内容はGitHubで確認できます。"}`;
       ui.downloadAppUpdate.hidden = !latestAppUpdate.downloadable;
+      ui.applyAppUpdate.hidden = true;
       if (quiet) {
         ui.updatePanel.hidden = false;
         setStatus(`${security ? "セキュリティ更新" : "更新版"} v${latestAppUpdate.latestVersion} が公開されています。`, security ? "error" : "info");
@@ -99,6 +103,7 @@ async function checkAppUpdate({ quiet = false } = {}) {
       ui.updateResult.dataset.kind = "current";
       ui.updateResult.textContent = `v${latestAppUpdate.currentVersion} は最新です。`;
       ui.downloadAppUpdate.hidden = true;
+      ui.applyAppUpdate.hidden = true;
     }
     ui.openUpdateRelease.href = latestAppUpdate.releaseUrl;
     ui.openUpdateRelease.hidden = false;
@@ -107,6 +112,7 @@ async function checkAppUpdate({ quiet = false } = {}) {
     ui.updateResult.dataset.kind = "";
     ui.updateResult.textContent = `更新を確認できませんでした: ${error.message}`;
     ui.downloadAppUpdate.hidden = true;
+    ui.applyAppUpdate.hidden = true;
     if (!quiet) setStatus(`アプリの更新確認に失敗しました: ${error.message}`, "error");
   } finally {
     ui.checkAppUpdate.disabled = false;
@@ -740,7 +746,8 @@ ui.downloadAppUpdate.addEventListener("click", async () => {
     const response = await postJson("/api/update/download", {});
     const data = await response.json();
     ui.updateResult.dataset.kind = "current";
-    ui.updateResult.textContent = `v${data.version} を安全にダウンロードしました。\nSHA-256を確認済みです。\n保存先: ${data.path}\n\n現在は準備段階のため、本体の切り替えはまだ自動実行しません。`;
+    ui.updateResult.textContent = `v${data.version} を安全にダウンロードしました。\nSHA-256を確認済みです。\n保存先: ${data.path}\n\n${canApplyAppUpdate ? "「再起動して更新を適用」で新しい版へ切り替えられます。" : "開発版では自動切り替えを行いません。Windowsポータブル版では自動適用できます。"}`;
+    ui.applyAppUpdate.hidden = !canApplyAppUpdate;
     setStatus(`更新版 v${data.version} をダウンロードしました。現在のバージョンはそのまま動作しています。`, "success");
   } catch (error) {
     ui.updateResult.dataset.kind = "";
@@ -749,6 +756,21 @@ ui.downloadAppUpdate.addEventListener("click", async () => {
   } finally {
     ui.downloadAppUpdate.disabled = false;
     ui.downloadAppUpdate.textContent = "更新ZIPをダウンロード";
+  }
+});
+ui.applyAppUpdate.addEventListener("click", async () => {
+  if (!window.confirm("編集中の内容を保存しましたか？ アプリを終了して新しいバージョンへ切り替えます。")) return;
+  ui.applyAppUpdate.disabled = true;
+  try {
+    const response = await postJson("/api/update/apply", {});
+    const data = await response.json();
+    ui.updateResult.dataset.kind = "available";
+    ui.updateResult.textContent = `v${data.version} を適用しています。\nこの画面はまもなく閉じ、新しいバージョンで開き直します。`;
+    setStatus("アプリを再起動して更新を適用しています…", "info");
+  } catch (error) {
+    ui.applyAppUpdate.disabled = false;
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = `更新を適用できませんでした: ${error.message}`;
   }
 });
 

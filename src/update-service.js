@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
@@ -41,7 +42,10 @@ function compareVersions(left, right) {
 
 function releaseAsset(release) {
   const candidates = (release.assets || []).filter((asset) => /\.zip$/i.test(asset.name));
-  return candidates.find((asset) => /win(?:dows)?[-_]?x64/i.test(asset.name))
+  const updates = candidates.filter((asset) => !/(?:complete|full)/i.test(asset.name));
+  return updates.find((asset) => /win(?:dows)?[-_]?x64/i.test(asset.name))
+    || updates.find((asset) => /win(?:dows)?/i.test(asset.name))
+    || updates[0]
     || candidates.find((asset) => /win(?:dows)?/i.test(asset.name))
     || candidates[0]
     || null;
@@ -81,7 +85,7 @@ async function fetchManifest(release) {
   }
 }
 
-export async function createUpdateService({ appVersion, legacyProfileDirectory }) {
+export async function createUpdateService({ appVersion, legacyProfileDirectory, installRoot = process.env.WEB_REVISION_INSTALL_ROOT }) {
   const dataDirectory = defaultDataDirectory();
   const profileDirectory = path.join(dataDirectory, "capture-profile");
   const updatesDirectory = path.join(dataDirectory, "updates");
@@ -112,6 +116,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory }
       checkUpdatesOnStartup: true,
       lastCheckAt: null,
       lastDownloadedVersion: null,
+      lastDownloadedUpdate: null,
     };
     try {
       const saved = JSON.parse(await readFile(settingsFile, "utf8"));
@@ -207,8 +212,40 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory }
     }
     await unlink(destination).catch(() => {});
     await rename(temporary, destination);
-    await saveSettings({ ...settings, lastDownloadedVersion: version });
-    return { version, fileName, size, digest, path: destination };
+    const downloadedUpdate = { version, fileName, size, digest, path: destination, downloadedAt: new Date().toISOString() };
+    await saveSettings({ ...settings, lastDownloadedVersion: version, lastDownloadedUpdate: downloadedUpdate });
+    return downloadedUpdate;
+  }
+
+  async function canApply() {
+    if (process.platform !== "win32" || !installRoot) return false;
+    try {
+      await access(path.join(path.resolve(installRoot), "updater.ps1"));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function apply() {
+    if (!(await canApply())) throw new Error("自動切り替えはWindowsポータブル版から起動した場合に利用できます。");
+    const settings = await readSettings();
+    const update = settings.lastDownloadedUpdate;
+    if (!update?.path || compareVersions(update.version, appVersion) <= 0) {
+      throw new Error("適用できるダウンロード済み更新版がありません。");
+    }
+    await access(update.path);
+    const updater = path.join(path.resolve(installRoot), "updater.ps1");
+    const child = spawn("powershell.exe", [
+      "-NoProfile", "-File", updater,
+      "-InstallRoot", path.resolve(installRoot),
+      "-Version", update.version,
+      "-ZipPath", update.path,
+      "-ExpectedDigest", update.digest,
+      "-AppPid", String(process.pid),
+    ], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    return { applying: true, version: update.version };
   }
 
   return {
@@ -219,5 +256,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory }
     saveSettings,
     check,
     download,
+    canApply,
+    apply,
   };
 }

@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { createServer as createViteServer } from "vite";
 import { chromium } from "playwright";
 import { capturePage } from "./src/capture-page.js";
 import { createUpdateService } from "./src/update-service.js";
@@ -13,15 +12,47 @@ const packageJson = JSON.parse(await readFile(path.join(rootDir, "package.json")
 const updateService = await createUpdateService({
   appVersion: packageJson.version,
   legacyProfileDirectory: path.join(rootDir, "work", "capture-profile"),
+  installRoot: process.env.WEB_REVISION_INSTALL_ROOT,
 });
 const profileDir = updateService.profileDirectory;
 const sessions = new Map();
 
-const vite = await createViteServer({
+const productionMode = process.env.WEB_REVISION_PRODUCTION === "1";
+const vite = productionMode ? null : await import("vite").then(({ createServer }) => createServer({
   root: rootDir,
   server: { middlewareMode: true },
   appType: "spa",
-});
+}));
+
+const contentTypes = new Map([
+  [".html", "text/html; charset=utf-8"], [".js", "text/javascript; charset=utf-8"],
+  [".css", "text/css; charset=utf-8"], [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"], [".png", "image/png"], [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"], [".gif", "image/gif"], [".webp", "image/webp"],
+  [".ico", "image/x-icon"], [".woff", "font/woff"], [".woff2", "font/woff2"],
+]);
+
+async function serveProductionFile(request, response) {
+  const requested = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+  const relative = requested === "/" ? "index.html" : requested.replace(/^\/+/, "");
+  let filePath = path.resolve(rootDir, "dist", relative);
+  const distRoot = path.resolve(rootDir, "dist");
+  if (!filePath.startsWith(`${distRoot}${path.sep}`) && filePath !== path.join(distRoot, "index.html")) {
+    response.writeHead(403); response.end("Forbidden"); return;
+  }
+  try {
+    const data = await readFile(filePath);
+    response.writeHead(200, { "Content-Type": contentTypes.get(path.extname(filePath).toLowerCase()) || "application/octet-stream" });
+    response.end(data);
+  } catch (error) {
+    if (error.code !== "ENOENT" || path.extname(relative)) {
+      response.writeHead(404); response.end("Not found"); return;
+    }
+    filePath = path.join(distRoot, "index.html");
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(await readFile(filePath));
+  }
+}
 
 function sendJson(response, status, data) {
   response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
@@ -203,8 +234,12 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, {
         version: updateService.appVersion,
         dataDirectory: updateService.dataDirectory,
+        canApplyUpdate: await updateService.canApply(),
         settings: await updateService.readSettings(),
       });
+    }
+    if (request.method === "GET" && request.url === "/api/health") {
+      return sendJson(response, 200, { ok: true, version: updateService.appVersion });
     }
     if (request.method === "POST" && request.url === "/api/settings") {
       return sendJson(response, 200, { settings: await updateService.saveSettings(await readJson(request)) });
@@ -215,11 +250,18 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && request.url === "/api/update/download") {
       return sendJson(response, 200, await updateService.download());
     }
+    if (request.method === "POST" && request.url === "/api/update/apply") {
+      const result = await updateService.apply();
+      sendJson(response, 200, result);
+      setTimeout(() => shutdown(), 750);
+      return;
+    }
     if (request.method === "POST" && request.url === "/api/capture/start") return await startCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/finish") return await finishCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/cancel") return await cancelCapture(request, response);
     if (request.method === "POST" && request.url === "/api/crawl") return await crawlSite(request, response);
     if (request.method === "POST" && request.url === "/api/capture/direct") return await captureDirect(request, response);
+    if (productionMode) return await serveProductionFile(request, response);
     vite.middlewares(request, response, () => {
       response.writeHead(404);
       response.end("Not found");
@@ -237,7 +279,7 @@ server.listen(port, "127.0.0.1", () => {
 
 async function shutdown() {
   await Promise.all([...sessions.values()].map(({ context }) => context.close().catch(() => {})));
-  await vite.close();
+  await vite?.close();
   server.close();
 }
 process.on("SIGINT", shutdown);

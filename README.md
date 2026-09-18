@@ -125,7 +125,25 @@ npm run dev
 }
 ```
 
-現段階では、安全のため実行中の本体は上書きしません。更新ZIPの自動展開・新バージョンへの切り替え・失敗時のロールバックは、Windows配布ランチャーとセットで実装します。
+Windowsポータブル版では、ダウンロード後に「再起動して更新を適用」を押すと更新用ランチャーが新しいバージョンを別フォルダへ展開して切り替えます。新バージョンが起動確認に失敗した場合は、`current.json` を旧版へ戻して自動的にロールバックします。開発版からは誤適用を防ぐため自動切り替えできません。
+
+## Windowsポータブル版の作成
+
+Windows 11またはWindowsのCI環境で次を実行します。
+
+```powershell
+npm ci
+npm run build:portable
+```
+
+`release/` に次が生成されます。
+
+- `WebRevisionEditor-<version>-win-x64-complete.zip`：初回配布用
+- `WebRevisionEditor-<version>-win-x64.zip`：アプリ内更新用
+- `update.json`：GitHub Releaseへ添付する更新種別情報
+- `SHA256SUMS.txt`：配布物のSHA-256
+
+初回配布用ZIPを展開し、`Start-WebRevisionEditor.cmd` を実行すると起動します。GitHub Releaseにはアプリ内更新用ZIP、`update.json`、`SHA256SUMS.txt`を添付します。完全版ZIPは初回利用者向けです。
 
 ## 安全性と制約
 
