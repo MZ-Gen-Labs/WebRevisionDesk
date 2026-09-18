@@ -31,13 +31,6 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .status { min-height: 42px; padding: .72rem 1.4rem; color: #55566c; background: #f8f8fb; border-bottom: 1px solid #dedfe7; }
 .status[data-kind="success"] { color: #196345; background: #ecf8f2; }
 .status[data-kind="error"] { color: #a12626; background: #fff0f0; }
-.journey { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: 1px; padding: .55rem 1.4rem; border-bottom: 1px solid #dedfe7; background: #e5e6ed; }
-.journey-step { display: flex; align-items: center; justify-content: center; gap: .55rem; min-height: 38px; color: #77788a; background: #f8f8fb; }
-.journey-step span { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; color: #66677a; background: #e6e7ed; font-size: .75rem; }
-.journey-step.active { color: #3f3fae; background: #eeeeff; }
-.journey-step.active span { color: #fff; background: #5b5bd6; }
-.journey-step.complete { color: #176142; background: #edf8f2; }
-.journey-step.complete span { color: #fff; background: #27825d; }
 .update-panel { padding: 1rem 1.4rem; border-bottom: 1px solid #cfd0dc; background: #f7f7ff; box-shadow: inset 0 -1px 0 #fff; }
 .update-panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
 .update-settings { display: grid; grid-template-columns: minmax(340px, 1fr) auto auto auto; align-items: end; gap: .65rem; }
@@ -142,9 +135,6 @@ input:focus, textarea:focus { outline: 3px solid rgb(91 91 214 / 18%); border-co
 .toolbar button, .toolbar .button, .export-menu summary { padding: .45rem .6rem; font-size: .8rem; }
 .status { min-height: 0; padding: .3rem .9rem; font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status[data-kind="error"] { white-space: normal; max-height: 15vh; overflow: auto; }
-.journey { padding: .2rem .9rem; background: #f8f8fb; gap: .4rem; }
-.journey-step { min-height: 26px; font-size: .75rem; border-radius: 5px; }
-.journey-step span { width: 19px; height: 19px; font-size: .65rem; }
 .setup-panel { background: #fff; border-bottom: 1px solid #d8d9e2; }
 .setup-panel > summary { cursor: pointer; padding: .45rem .9rem; color: #4747bd; font-size: .82rem; font-weight: 700; }
 .setup-panel > summary span { margin-left: .8rem; font-size: .72rem; font-weight: 400; color: #737487; }

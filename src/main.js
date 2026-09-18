@@ -38,7 +38,6 @@ const ui = {
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
-  stepImport: $("#step-import"), stepEdit: $("#step-edit"), stepExport: $("#step-export"),
 };
 
 const state = {
@@ -161,26 +160,15 @@ const editor = new PageEditor(ui.frame, {
 
 function updateGuidance() {
   const loaded = Boolean(state.originalHtml);
-  const changed = state.changes.length > 0;
-  [ui.stepImport, ui.stepEdit, ui.stepExport].forEach((step) => step.classList.remove("active", "complete"));
   if (state.previewOnly) {
-    ui.stepImport.classList.add("active");
     ui.saveState.textContent = "未取得・画像プレビュー";
     ui.saveState.className = "save-state";
     return;
   }
   if (!loaded) {
-    ui.stepImport.classList.add("active");
     ui.saveState.textContent = "ページ未読込";
     ui.saveState.className = "save-state";
     return;
-  }
-  ui.stepImport.classList.add("complete");
-  if (changed) {
-    ui.stepEdit.classList.add("complete");
-    ui.stepExport.classList.add("active");
-  } else {
-    ui.stepEdit.classList.add("active");
   }
   ui.saveState.textContent = state.dirty ? "● 案件フォルダへ未保存" : "保存済み";
   ui.saveState.className = `save-state ${state.dirty ? "dirty" : "saved"}`;

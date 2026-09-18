@@ -106,7 +106,7 @@ test("a user can add saved HTML to a project, edit, inspect changes and export",
   await prepareMemoryProject(page);
   await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
   await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
-  assert.match(await page.locator("#step-edit").getAttribute("class"), /active/);
+  await page.locator("#save-state").filter({ hasText: "保存済み" }).waitFor();
 
   const frame = page.frameLocator("#page-frame");
   const heading = frame.locator("h1").first();
@@ -119,7 +119,6 @@ test("a user can add saved HTML to a project, edit, inspect changes and export",
   await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
   assert.equal(await heading.textContent(), "自動テストで変更した見出し");
   assert.match(await page.locator("#save-state").textContent(), /未保存/);
-  assert.match(await page.locator("#step-export").getAttribute("class"), /active/);
 
   await page.locator("#undo").click();
   assert.notEqual(await heading.textContent(), "自動テストで変更した見出し");
