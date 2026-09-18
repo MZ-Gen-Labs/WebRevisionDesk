@@ -1,8 +1,9 @@
 # Webサイト修正指示作成ツール PoC実装仕様書
 
 - 対象: MVP-01〜MVP-06
-- ステータス: PoC Verified 1.1
+- ステータス: PoC Verified 1.2
 - 作成日: 2026-09-17
+- 更新日: 2026-09-18
 - 想定環境: Windows 11 + Chrome / Edge
 - 実装形態: ローカルWebアプリ
 
@@ -95,6 +96,11 @@ URL取得にはApache-2.0のPlaywrightを使用する。SingleFileのプログ�
   originalHtml: "<!doctype html>...",
   modifiedHtml: "<!doctype html>...",
   mode: "modified", // original | modified
+  changes: [],
+  redoChanges: [],
+  sourceUrl: "https://example.com/page",
+  activeProjectPageId: "",
+  dirty: false,
   selectedElement: null
 }
 ```
@@ -185,20 +191,36 @@ URL取得にはApache-2.0のPlaywrightを使用する。SingleFileのプログ�
 - 操作履歴と変更前後を一覧化した差分HTMLを保存できる
 - ページ上へ `<del>`、`<ins>`、変更ラベルを重ねた赤入れHTMLを保存できる
 
+### POC-12 操作案内・編集メニュー
+
+- 「ページを取り込む」「修正する」「確認して保存」の現在段階を表示する
+- 未選択時は、ページ内の編集したい場所をクリックするよう案内する
+- 選択対象に応じて文章、リンク、画像のうち必要な編集欄だけを表示する
+- altとCSS classは「詳細設定を表示」を有効にした場合だけ表示する
+- 変更状態を「変更なし」「未保存の変更あり」「保存済み」で表示する
+- 未保存の変更がある状態で画面を閉じる場合はブラウザ標準の警告を表示する
+- 主出力を共有用ZIPとし、個別HTMLは「その他の保存」へまとめる
+
 ## 8. ファイル構成
 
 ```text
-web-revision-poc/
+WebRevisionDesk/
 ├── index.html
 ├── package.json
 ├── README.md
+├── server.js
+├── windows/
+├── scripts/
 ├── src/
 │   ├── main.js
 │   ├── editor.js
 │   ├── html.js
+│   ├── capture-page.js
+│   ├── diff-report.js
 │   ├── project-storage.js
 │   ├── project-package.js
 │   ├── page-comparison.js
+│   ├── update-service.js
 │   └── styles.css
 └── test-data/
     └── sample.html
@@ -222,6 +244,9 @@ web-revision-poc/
 | AT-12 | URLから実ページを取得 | CSS、画像、主要レイアウトを保って表示される |
 | AT-13 | 差分HTMLを保存 | 操作内容と変更前後が一覧表示される |
 | AT-14 | 赤入れHTMLを保存 | 削除・追加・変更位置がページ上で視認できる |
+| AT-15 | 文章、リンク、画像を順に選択 | 対象に必要な編集項目だけが表示される |
+| AT-16 | 詳細設定を切替 | altとCSS classの表示・非表示が切り替わる |
+| AT-17 | 編集後に案件保存 | 未保存表示が保存済みへ変わる |
 
 ## 10. 互換性検証マトリクス
 
@@ -251,8 +276,7 @@ PoC判断には最低5ページを使う。
 
 - 自由なドラッグ&ドロップ配置
 - 豊富な部品・ブロック追加
-- 本格的なUndo/Redo
 - DOM階層ナビゲーション
-- 複数ページ管理
+- テンプレート化された多数の新規ブロック
 
-PoCで操作履歴と差分出力まで成立したため、次段階は複数実ページでの互換性試験、案件保存、Undo/Redo、配布方式、安全な取得範囲の確定を優先する。
+PoCで操作履歴、差分出力、案件保存、Undo/Redo、複数ページ管理、初心者向け操作案内まで成立した。次段階は複数実ページでの互換性試験、取得失敗リソースの可視化、選択ページの一括出力、配布・更新運用の検証を優先する。
