@@ -340,6 +340,7 @@ async function loadHtml(html, fileName, options = {}) {
   await render("modified", { captureCurrent: false });
   renderProjectPages();
   updateGuidance();
+  document.querySelector("#setup-panel").open = false;
 }
 
 function sourceUrlFromHtml(html) {
@@ -648,6 +649,7 @@ async function postJson(url, body) {
 }
 
 async function startCaptureForUrl(url) {
+  document.querySelector("#setup-panel").open = true;
   if (loginBusy || loginSessionId) return setStatus("ログイン完了または中止を押してください。", "error");
   if (!url) return setStatus("取得するURLを入力してください。", "error");
   ui.captureUrl.value = url;

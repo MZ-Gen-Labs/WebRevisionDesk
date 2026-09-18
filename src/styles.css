@@ -1,7 +1,8 @@
 :root { color-scheme: light; font-family: Inter, "Noto Sans JP", system-ui, sans-serif; color: #20202b; background: #f1f2f7; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; min-width: 1200px; }
+body { margin: 0; min-width: 1000px; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+body > :not(.workspace) { flex-shrink: 0; }
 button, input, textarea { font: inherit; }
 button, .button { border: 1px solid #d4d5df; border-radius: 9px; background: #fff; color: #292936; padding: .65rem .85rem; cursor: pointer; }
 button:hover:not(:disabled), .button:hover { border-color: #7779d8; }
@@ -59,7 +60,7 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .login-bar label { display: flex; align-items: center; gap: .4rem; }
 .login-bar input { width: auto; }
 .login-bar span { font-size: .8rem; color: #55566c; }
-.workspace { display: grid; grid-template-columns: 230px minmax(650px, 1fr) 330px; height: calc(100vh - 390px); min-height: 400px; }
+.workspace { display: grid; grid-template-columns: 210px minmax(0, 1fr) 300px; flex: 1; min-height: 0; overflow: hidden; }
 .project-sidebar { overflow: auto; padding: 1rem; border-right: 1px solid #d8d9e2; background: #f8f9fc; }
 .project-heading { padding-bottom: .7rem; border-bottom: 1px solid #dedfe7; }
 .project-heading h2 span { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 999px; color: #fff; background: #5b5bd6; font-size: .75rem; }
@@ -119,3 +120,38 @@ input:focus, textarea:focus { outline: 3px solid rgb(91 91 214 / 18%); border-co
 .history-list .history-empty { color: #77788b; text-align: center; border-style: dashed; }
 .inspector-note { margin-top: 1rem; border-radius: 10px; padding: .9rem; color: #646578; background: #f3f3f8; font-size: .8rem; line-height: 1.5; }
 .inspector-note p { margin: .3rem 0 0; }
+
+/* Keep the page canvas in the remaining viewport; settings scroll independently. */
+.topbar { padding: .5rem .9rem; gap: .8rem; }
+.topbar .eyebrow { display: none; }
+.topbar h1 { font-size: .95rem; white-space: nowrap; }
+.toolbar { gap: .3rem; }
+.toolbar button, .toolbar .button, .export-menu summary { padding: .45rem .6rem; font-size: .8rem; }
+.status { min-height: 0; padding: .3rem .9rem; font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.status[data-kind="error"] { white-space: normal; max-height: 15vh; overflow: auto; }
+.journey { padding: .2rem .9rem; background: #f8f8fb; gap: .4rem; }
+.journey-step { min-height: 26px; font-size: .75rem; border-radius: 5px; }
+.journey-step span { width: 19px; height: 19px; font-size: .65rem; }
+.setup-panel { background: #fff; border-bottom: 1px solid #d8d9e2; }
+.setup-panel > summary { cursor: pointer; padding: .45rem .9rem; color: #4747bd; font-size: .82rem; font-weight: 700; }
+.setup-panel > summary span { margin-left: .8rem; font-size: .72rem; font-weight: 400; color: #737487; }
+.setup-panel > summary:focus-visible { outline: 2px solid #5b5bd6; outline-offset: -2px; }
+.setup-content { max-height: 32vh; overflow: auto; }
+.capture-bar { grid-template-columns: auto minmax(180px, 1fr) auto auto auto; padding: .5rem .9rem; }
+.capture-bar > span { grid-column: 2 / -1; }
+.project-bar { grid-template-columns: auto minmax(140px, .7fr) minmax(220px, 1.3fr) auto; padding: .5rem .9rem; }
+.project-bar > span { grid-column: 2 / -1; }
+.login-bar { padding: .5rem .9rem; flex-wrap: wrap; }
+.canvas-panel { min-height: 0; padding: .5rem; }
+.canvas-meta { min-height: 30px; gap: .45rem; font-size: .75rem; }
+.canvas-meta #file-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-meta .hint { display: none; }
+.badge, .save-state { flex-shrink: 0; }
+#page-frame { min-height: 0; }
+.project-sidebar, .inspector { min-height: 0; padding: .8rem; }
+.update-panel { max-height: 40vh; overflow: auto; }
+@media (max-width: 1350px) {
+  .topbar { align-items: flex-start; }
+  .topbar h1 { max-width: 155px; white-space: normal; }
+  .workspace { grid-template-columns: 180px minmax(0, 1fr) 270px; }
+}

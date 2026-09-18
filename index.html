@@ -20,6 +20,7 @@
         <button id="undo" type="button" disabled title="直前の編集を元に戻す（Ctrl/Cmd+Z）">1つ戻す</button>
         <button id="redo" type="button" disabled title="戻した編集をやり直す（Ctrl/Cmd+Shift+Z）">やり直す</button>
         <button id="reset" type="button" disabled>すべてリセット</button>
+        <button id="save-project-page" class="button-primary" type="button" disabled>案件フォルダに保存</button>
         <button id="download-package" class="button-package" type="button" disabled>共有用ファイル一式を保存</button>
         <details class="export-menu">
           <summary>その他の保存</summary>
@@ -69,6 +70,9 @@
       </div>
     </section>
 
+    <details id="setup-panel" class="setup-panel" open>
+      <summary>取り込み・案件設定 <span>URL取得／案件フォルダ／ログイン</span></summary>
+      <div class="setup-content">
     <section class="capture-bar" aria-label="Webページ取得">
       <label for="capture-url">WebページURL</label>
       <input id="capture-url" type="url" placeholder="https://example.com/page" />
@@ -83,7 +87,6 @@
       <label>案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
       <label>基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
       <button id="crawl-project-pages" type="button" disabled>関連ページを探す</button>
-      <button id="save-project-page" type="button" disabled>案件フォルダに保存</button>
       <span id="project-state">案件フォルダ未選択</span>
     </section>
 
@@ -94,6 +97,8 @@
       <button id="login-cancel" type="button" hidden disabled>ログイン待機を中止</button>
       <span id="login-state" role="status">ログイン待機なし</span>
     </section>
+      </div>
+    </details>
     <main class="workspace">
       <aside class="project-sidebar" aria-label="案件ページ一覧">
         <div class="project-heading">

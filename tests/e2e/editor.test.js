@@ -99,6 +99,25 @@ test("advanced image fields only appear for images", async () => {
   await page.close();
 });
 
+test("loaded page gets viewport height and setup can be reopened without losing edits", async () => {
+  const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
+  await page.goto(baseUrl);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  await page.waitForFunction(() => !document.querySelector("#setup-panel").open);
+  const frame = page.frameLocator("#page-frame");
+  await frame.locator("h1").first().click();
+  await page.locator("#text-value").fill("レイアウト確認");
+  await page.locator("#text-value").press("Tab");
+  const height = await page.locator("#page-frame").evaluate((el) => el.getBoundingClientRect().height);
+  assert.ok(height >= 550, `Expected at least 550px, got ${height}`);
+  assert.equal(await page.locator("#save-project-page").isVisible(), true);
+  await page.locator("#setup-panel > summary").click();
+  assert.equal(await page.locator("#capture-url").isVisible(), true);
+  await page.locator("#setup-panel > summary").click();
+  assert.equal(await frame.locator("h1").first().textContent(), "レイアウト確認");
+  await page.close();
+});
+
 test("login preparation waits for explicit completion and resets on URL change", async () => {
   const page = await browser.newPage();
   let completions = 0;
