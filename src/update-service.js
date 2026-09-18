@@ -118,6 +118,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
       version: SETTINGS_VERSION,
       githubRepository: OFFICIAL_REPOSITORY,
       checkUpdatesOnStartup: true,
+      lastCheckAttemptAt: null,
       lastCheckAt: null,
       lastDownloadedVersion: null,
       lastDownloadedUpdate: null,
@@ -155,6 +156,8 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     const settings = await readSettings();
     const repository = parseRepository(settings.githubRepository);
     if (!repository) throw new Error("設定画面でGitHubリポジトリを登録してください。");
+    const attemptedAt = new Date().toISOString();
+    await saveSettings({ ...settings, lastCheckAttemptAt: attemptedAt });
     const release = await fetchJson(`https://api.github.com/repos/${repository.owner}/${repository.repo}/releases/latest`);
     const manifest = await fetchManifest(release);
     const asset = releaseAsset(release);
@@ -174,7 +177,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
       downloadable: Boolean(asset),
       asset: asset ? { name: asset.name, size: asset.size, digest: asset.digest || null } : null,
     };
-    await saveSettings({ ...settings, lastCheckAt: new Date().toISOString() });
+    await saveSettings({ ...settings, lastCheckAttemptAt: attemptedAt, lastCheckAt: new Date().toISOString() });
     return result;
   }
 

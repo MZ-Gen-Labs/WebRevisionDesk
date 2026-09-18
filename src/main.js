@@ -4,6 +4,7 @@ import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineRe
 import { downloadProjectPackage } from "./project-package.js";
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
+import { shouldCheckForUpdatesOnStartup } from "./update-policy.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -85,7 +86,7 @@ async function loadAppInfo() {
     canApplyAppUpdate = data.canApplyUpdate === true;
     ui.updateRepository.value = data.settings.githubRepository || "";
     ui.checkUpdatesOnStartup.checked = data.settings.checkUpdatesOnStartup !== false;
-    if (data.settings.checkUpdatesOnStartup && data.settings.githubRepository) await checkAppUpdate({ quiet: true });
+    if (shouldCheckForUpdatesOnStartup(data.settings)) await checkAppUpdate({ quiet: true });
   } catch (error) {
     ui.appUpdateButton.textContent = "更新設定";
     console.warn("App information could not be loaded:", error);

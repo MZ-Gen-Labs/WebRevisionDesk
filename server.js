@@ -321,7 +321,11 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { settings: await updateService.saveSettings({ githubRepository, checkUpdatesOnStartup }) });
     }
     if (request.method === "POST" && request.url === "/api/update/check") {
-      return sendJson(response, 200, await updateService.check());
+      try {
+        return sendJson(response, 200, await updateService.check());
+      } catch (error) {
+        return sendJson(response, 503, { error: error.message || "更新情報を確認できませんでした。" });
+      }
     }
     if (request.method === "POST" && request.url === "/api/update/download") {
       return sendJson(response, 200, await updateService.download());
