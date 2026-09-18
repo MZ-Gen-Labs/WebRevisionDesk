@@ -48,6 +48,24 @@ npm test
 
 `npm test` は、URL階層・Windowsファイル名・更新判定・SHA-256拒否等の単体テスト、本番ビルド、HTML読込・編集・Undo/Redo・ZIP出力・詳細設定のブラウザテストを順に実行します。GitHub ActionsでもPull Requestと`main`へのpushごとに同じ主要テストを実行します。Windows Releaseでは生成した完全版ZIPを展開し、必須ファイルとサーバー起動を追加確認します。
 
+## バージョンとリリース
+
+`package.json` をアプリのバージョン番号の正本とします。画面表示、Windows ZIP名、`release.json`、更新確認はこの値を使用します。`npm run version:check` は `package.json`、`package-lock.json`、リリース時のGitタグが一致することを検証し、不一致の場合はCIとリリースを停止します。
+
+通常の機能追加版を公開する手順は次のとおりです。
+
+```bash
+npm version minor --no-git-tag-version
+npm test
+git add package.json package-lock.json
+git commit -m "Release vX.Y.Z"
+git tag -a vX.Y.Z -m "Web Revision Desk vX.Y.Z"
+git push origin main
+git push origin vX.Y.Z
+```
+
+修正のみは `minor` を `patch`、互換性を壊す変更は `major` に置き換えます。タグのpushによりWindows版のビルド、整合性検査、GitHub Release公開が自動実行されます。テストに失敗した場合はタグを作成しません。
+
 ## 操作方法
 
 URL取得・案件選択・ログインは「取り込み・案件設定」を開いて操作します。ページ読込後はこの設定欄が自動で閉じ、編集領域が画面の残りの高さまで広がります。必要なときは見出しを押して再表示できます。案件保存・修正前後・Undo/Redo・共有用保存は上部に常時表示します。
