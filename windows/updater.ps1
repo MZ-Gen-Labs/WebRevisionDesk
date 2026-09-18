@@ -64,7 +64,7 @@ try {
   $Next | ConvertTo-Json | Set-Content -LiteralPath $Temporary -Encoding UTF8
   Move-Item -LiteralPath $Temporary -Destination $CurrentFile -Force
   Write-UpdaterLog "Switched from v$Previous to v$Version."
-  Start-Process -FilePath (Join-Path $InstallRoot "Start-WebRevisionEditor.cmd") -WorkingDirectory $InstallRoot
+  Start-Process -FilePath (Join-Path $InstallRoot "Start-WebRevisionDesk.cmd") -WorkingDirectory $InstallRoot
   exit 0
 } catch {
   Write-UpdaterLog "ERROR: $($_.Exception.Message)"

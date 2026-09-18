@@ -12,7 +12,7 @@ const nodeVersion = (process.env.WEB_REVISION_NODE_VERSION || packageJson.portab
 const outputRoot = path.join(root, "release");
 const workRoot = path.join(outputRoot, ".build");
 const appDirectory = path.join(workRoot, "app");
-const completeDirectory = path.join(workRoot, "complete", "WebRevisionEditor");
+const completeDirectory = path.join(workRoot, "complete", "WebRevisionDesk");
 
 if (process.platform !== "win32") {
   throw new Error("Windowsポータブル版はWindows 11またはWindowsのCI環境で作成してください。");
@@ -91,17 +91,17 @@ await writeFile(path.join(appDirectory, "release.json"), `${JSON.stringify({
   builtAt: new Date().toISOString(),
 }, null, 2)}\n`);
 
-const updateZip = path.join(outputRoot, `WebRevisionEditor-${version}-win-x64.zip`);
+const updateZip = path.join(outputRoot, `WebRevisionDesk-${version}-win-x64.zip`);
 await rm(updateZip, { force: true });
 await run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path (Join-Path ${powerShellLiteral(appDirectory)} '*') -DestinationPath ${powerShellLiteral(updateZip)} -CompressionLevel Optimal`]);
 
 await mkdir(path.join(completeDirectory, "versions", version), { recursive: true });
 await cp(appDirectory, path.join(completeDirectory, "versions", version), { recursive: true });
-for (const name of ["Start-WebRevisionEditor.cmd", "launcher.ps1", "updater.ps1"]) {
+for (const name of ["Start-WebRevisionDesk.cmd", "launcher.ps1", "updater.ps1"]) {
   await cp(path.join(root, "windows", name), path.join(completeDirectory, name));
 }
 await writeFile(path.join(completeDirectory, "current.json"), `${JSON.stringify({ version, previousVersion: null }, null, 2)}\n`);
-const completeZip = path.join(outputRoot, `WebRevisionEditor-${version}-win-x64-complete.zip`);
+const completeZip = path.join(outputRoot, `WebRevisionDesk-${version}-win-x64-complete.zip`);
 await rm(completeZip, { force: true });
 await run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path ${powerShellLiteral(completeDirectory)} -DestinationPath ${powerShellLiteral(completeZip)} -CompressionLevel Optimal`]);
 

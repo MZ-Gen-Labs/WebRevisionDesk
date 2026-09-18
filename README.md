@@ -141,12 +141,12 @@ npm run build:portable
 
 `release/` に次が生成されます。
 
-- `WebRevisionEditor-<version>-win-x64-complete.zip`：初回配布用
-- `WebRevisionEditor-<version>-win-x64.zip`：アプリ内更新用
+- `WebRevisionDesk-<version>-win-x64-complete.zip`：初回配布用
+- `WebRevisionDesk-<version>-win-x64.zip`：アプリ内更新用
 - `update.json`：GitHub Releaseへ添付する更新種別情報
 - `SHA256SUMS.txt`：配布物のSHA-256
 
-初回配布用ZIPを展開し、`Start-WebRevisionEditor.cmd` を実行すると起動します。GitHub Releaseにはアプリ内更新用ZIP、`update.json`、`SHA256SUMS.txt`を添付します。完全版ZIPは初回利用者向けです。
+初回配布用ZIPを展開し、`Start-WebRevisionDesk.cmd` を実行すると起動します。GitHub Releaseにはアプリ内更新用ZIP、`update.json`、`SHA256SUMS.txt`を添付します。完全版ZIPは初回利用者向けです。
 
 ## 安全性と制約
 

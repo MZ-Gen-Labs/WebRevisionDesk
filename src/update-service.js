@@ -57,7 +57,7 @@ async function fetchJson(url, options = {}) {
     ...options,
     headers: {
       Accept: "application/vnd.github+json",
-      "User-Agent": "WebRevisionEditor",
+      "User-Agent": "WebRevisionDesk",
       "X-GitHub-Api-Version": "2022-11-28",
       ...options.headers,
     },
@@ -76,7 +76,7 @@ async function fetchManifest(release) {
   if (!asset) return {};
   try {
     const response = await fetch(asset.browser_download_url, {
-      headers: { "User-Agent": "WebRevisionEditor" },
+      headers: { "User-Agent": "WebRevisionDesk" },
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) return {};
@@ -191,7 +191,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     const destination = path.join(versionDirectory, fileName);
     const temporary = `${destination}.part`;
     const response = await fetch(asset.browser_download_url, {
-      headers: { "User-Agent": "WebRevisionEditor" },
+      headers: { "User-Agent": "WebRevisionDesk" },
       signal: AbortSignal.timeout(10 * 60 * 1000),
     });
     if (!response.ok || !response.body) throw new Error(`更新ZIPをダウンロードできませんでした（HTTP ${response.status}）。`);
