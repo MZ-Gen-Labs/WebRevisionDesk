@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Web Revision Editor</p>
-        <h1>Webサイト修正案エディター</h1>
+        <h1>Webサイト修正案エディター <button id="app-update-button" class="version-button" type="button">v--</button></h1>
       </div>
       <div class="toolbar" aria-label="ファイル操作">
         <label class="button button-primary" for="html-file">HTMLを読み込む</label>
@@ -30,6 +30,32 @@
     <div id="status" class="status" role="status" aria-live="polite">
       SingleFileで保存したHTMLを読み込んでください。
     </div>
+
+    <section id="update-panel" class="update-panel" aria-labelledby="update-title" hidden>
+      <div class="update-panel-heading">
+        <div>
+          <p class="eyebrow">Application Update</p>
+          <h2 id="update-title">アプリの更新</h2>
+        </div>
+        <button id="close-update-panel" type="button">閉じる</button>
+      </div>
+      <div class="update-settings">
+        <label>GitHubリポジトリURL
+          <input id="update-repository" type="url" placeholder="https://github.com/owner/repository" />
+        </label>
+        <label class="update-checkbox">
+          <input id="check-updates-on-startup" type="checkbox" checked />
+          起動時に更新を確認する
+        </label>
+        <button id="save-update-settings" type="button">設定を保存</button>
+        <button id="check-app-update" class="button-primary" type="button">今すぐ確認</button>
+      </div>
+      <div id="update-result" class="update-result">GitHubリポジトリを登録すると、公開された最新版を確認できます。</div>
+      <div class="update-actions">
+        <a id="open-update-release" class="button" href="#" target="_blank" rel="noopener" hidden>更新内容を開く</a>
+        <button id="download-app-update" class="button-primary" type="button" hidden>更新ZIPをダウンロード</button>
+      </div>
+    </section>
 
     <section class="capture-bar" aria-label="Webページ取得">
       <label for="capture-url">WebページURL</label>

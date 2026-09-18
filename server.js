@@ -1,16 +1,21 @@
 import http from "node:http";
-import { mkdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { createServer as createViteServer } from "vite";
 import { chromium } from "playwright";
 import { capturePage } from "./src/capture-page.js";
+import { createUpdateService } from "./src/update-service.js";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
-const profileDir = path.join(rootDir, "work", "capture-profile");
+const packageJson = JSON.parse(await readFile(path.join(rootDir, "package.json"), "utf8"));
+const updateService = await createUpdateService({
+  appVersion: packageJson.version,
+  legacyProfileDirectory: path.join(rootDir, "work", "capture-profile"),
+});
+const profileDir = updateService.profileDirectory;
 const sessions = new Map();
-await mkdir(profileDir, { recursive: true });
 
 const vite = await createViteServer({
   root: rootDir,
@@ -194,6 +199,22 @@ async function captureDirect(request, response) {
 
 const server = http.createServer(async (request, response) => {
   try {
+    if (request.method === "GET" && request.url === "/api/app-info") {
+      return sendJson(response, 200, {
+        version: updateService.appVersion,
+        dataDirectory: updateService.dataDirectory,
+        settings: await updateService.readSettings(),
+      });
+    }
+    if (request.method === "POST" && request.url === "/api/settings") {
+      return sendJson(response, 200, { settings: await updateService.saveSettings(await readJson(request)) });
+    }
+    if (request.method === "POST" && request.url === "/api/update/check") {
+      return sendJson(response, 200, await updateService.check());
+    }
+    if (request.method === "POST" && request.url === "/api/update/download") {
+      return sendJson(response, 200, await updateService.download());
+    }
     if (request.method === "POST" && request.url === "/api/capture/start") return await startCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/finish") return await finishCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/cancel") return await cancelCapture(request, response);

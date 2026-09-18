@@ -16,12 +16,24 @@ button.active { border-color: #5b5bd6; color: #4747bd; background: #eeeeff; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 2rem; padding: 1rem 1.4rem; background: #fff; border-bottom: 1px solid #dedfe7; }
 h1, h2, p { margin-top: 0; }
 h1 { margin-bottom: 0; font-size: 1.3rem; }
+.version-button { margin-left: .35rem; padding: .2rem .45rem; border-radius: 999px; color: #5050c9; background: #f1f1ff; font-size: .7rem; vertical-align: middle; }
 h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .eyebrow { margin-bottom: .25rem; color: #62637a; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; }
 .status { min-height: 42px; padding: .72rem 1.4rem; color: #55566c; background: #f8f8fb; border-bottom: 1px solid #dedfe7; }
 .status[data-kind="success"] { color: #196345; background: #ecf8f2; }
 .status[data-kind="error"] { color: #a12626; background: #fff0f0; }
+.update-panel { padding: 1rem 1.4rem; border-bottom: 1px solid #cfd0dc; background: #f7f7ff; box-shadow: inset 0 -1px 0 #fff; }
+.update-panel-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+.update-settings { display: grid; grid-template-columns: minmax(340px, 1fr) auto auto auto; align-items: end; gap: .65rem; }
+.update-settings label { gap: .25rem; }
+.update-checkbox { display: flex !important; align-items: center; align-self: center; gap: .45rem !important; white-space: nowrap; }
+.update-checkbox input { width: auto; }
+.update-result { margin-top: .8rem; padding: .75rem .85rem; border: 1px solid #ddddec; border-radius: 9px; color: #55566c; background: #fff; white-space: pre-wrap; }
+.update-result[data-kind="security"] { border-color: #e7a3a3; color: #912626; background: #fff4f4; }
+.update-result[data-kind="available"] { border-color: #e4c174; color: #74500c; background: #fff9e9; }
+.update-result[data-kind="current"] { border-color: #99cfad; color: #196345; background: #effaf4; }
+.update-actions { display: flex; gap: .55rem; margin-top: .65rem; }
 .capture-bar { display: grid; grid-template-columns: auto minmax(260px, 1fr) auto auto auto minmax(180px, auto); align-items: center; gap: .55rem; padding: .7rem 1.4rem; border-bottom: 1px solid #dedfe7; background: #fff; }
 .capture-bar label { display: block; }
 .capture-bar input { min-width: 0; }

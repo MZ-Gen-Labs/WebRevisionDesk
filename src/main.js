@@ -26,6 +26,11 @@ const ui = {
   projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
   selectAllProjectPages: $("#select-all-project-pages"), batchCapturePages: $("#batch-capture-pages"),
   checkProjectPages: $("#check-project-pages"), batchProgress: $("#batch-progress"),
+  appUpdateButton: $("#app-update-button"), updatePanel: $("#update-panel"),
+  closeUpdatePanel: $("#close-update-panel"), updateRepository: $("#update-repository"),
+  checkUpdatesOnStartup: $("#check-updates-on-startup"), saveUpdateSettings: $("#save-update-settings"),
+  checkAppUpdate: $("#check-app-update"), updateResult: $("#update-result"),
+  openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
 };
 
 const state = {
@@ -34,7 +39,79 @@ const state = {
   selectedProjectUrls: new Set(), batchRunning: false,
 };
 let captureSessionId = "";
+let latestAppUpdate = null;
 const projectStore = new ProjectStore();
+
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return "";
+  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)}KB`;
+  return `${(value / 1024 / 1024).toFixed(1)}MB`;
+}
+
+async function loadAppInfo() {
+  try {
+    const response = await fetch("/api/app-info", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    ui.appUpdateButton.textContent = `v${data.version}`;
+    ui.appUpdateButton.title = `設定保存先: ${data.dataDirectory}`;
+    ui.updateRepository.value = data.settings.githubRepository || "";
+    ui.checkUpdatesOnStartup.checked = data.settings.checkUpdatesOnStartup !== false;
+    if (data.settings.checkUpdatesOnStartup && data.settings.githubRepository) await checkAppUpdate({ quiet: true });
+  } catch (error) {
+    ui.appUpdateButton.textContent = "更新設定";
+    console.warn("App information could not be loaded:", error);
+  }
+}
+
+async function saveUpdateSettings() {
+  const response = await postJson("/api/settings", {
+    githubRepository: ui.updateRepository.value.trim(),
+    checkUpdatesOnStartup: ui.checkUpdatesOnStartup.checked,
+  });
+  const data = await response.json();
+  ui.updateRepository.value = data.settings.githubRepository || "";
+  ui.updateResult.dataset.kind = "current";
+  ui.updateResult.textContent = "更新設定を保存しました。設定はアプリ本体とは別の場所に保持されます。";
+}
+
+async function checkAppUpdate({ quiet = false } = {}) {
+  ui.checkAppUpdate.disabled = true;
+  if (!quiet) {
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = "GitHub Releasesを確認しています…";
+  }
+  try {
+    const response = await postJson("/api/update/check", {});
+    latestAppUpdate = await response.json();
+    const security = latestAppUpdate.updateType === "security";
+    const severity = latestAppUpdate.severity ? `・重要度 ${latestAppUpdate.severity.toUpperCase()}` : "";
+    const asset = latestAppUpdate.asset ? `\n配布ファイル: ${latestAppUpdate.asset.name}（${formatBytes(latestAppUpdate.asset.size)}）` : "";
+    if (latestAppUpdate.updateAvailable) {
+      ui.updateResult.dataset.kind = security ? "security" : "available";
+      ui.updateResult.textContent = `${security ? "セキュリティ更新" : "新しいバージョン"}があります。\n現在 v${latestAppUpdate.currentVersion} → 最新 v${latestAppUpdate.latestVersion}${severity}${asset}\n\n${latestAppUpdate.notes || "更新内容はGitHubで確認できます。"}`;
+      ui.downloadAppUpdate.hidden = !latestAppUpdate.downloadable;
+      if (quiet) {
+        ui.updatePanel.hidden = false;
+        setStatus(`${security ? "セキュリティ更新" : "更新版"} v${latestAppUpdate.latestVersion} が公開されています。`, security ? "error" : "info");
+      }
+    } else {
+      ui.updateResult.dataset.kind = "current";
+      ui.updateResult.textContent = `v${latestAppUpdate.currentVersion} は最新です。`;
+      ui.downloadAppUpdate.hidden = true;
+    }
+    ui.openUpdateRelease.href = latestAppUpdate.releaseUrl;
+    ui.openUpdateRelease.hidden = false;
+  } catch (error) {
+    latestAppUpdate = null;
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = `更新を確認できませんでした: ${error.message}`;
+    ui.downloadAppUpdate.hidden = true;
+    if (!quiet) setStatus(`アプリの更新確認に失敗しました: ${error.message}`, "error");
+  } finally {
+    ui.checkAppUpdate.disabled = false;
+  }
+}
 const editor = new PageEditor(ui.frame, {
   onSelect: showSelection,
   onChange: (change) => {
@@ -630,3 +707,49 @@ ui.image.addEventListener("change", () => {
   });
   reader.readAsDataURL(file);
 });
+
+ui.appUpdateButton.addEventListener("click", () => {
+  ui.updatePanel.hidden = !ui.updatePanel.hidden;
+});
+ui.closeUpdatePanel.addEventListener("click", () => { ui.updatePanel.hidden = true; });
+ui.saveUpdateSettings.addEventListener("click", async () => {
+  ui.saveUpdateSettings.disabled = true;
+  try {
+    await saveUpdateSettings();
+  } catch (error) {
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = `設定を保存できませんでした: ${error.message}`;
+  } finally {
+    ui.saveUpdateSettings.disabled = false;
+  }
+});
+ui.checkAppUpdate.addEventListener("click", async () => {
+  try {
+    await saveUpdateSettings();
+    await checkAppUpdate();
+  } catch (error) {
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = `更新を確認できませんでした: ${error.message}`;
+  }
+});
+ui.downloadAppUpdate.addEventListener("click", async () => {
+  if (!latestAppUpdate?.updateAvailable) return;
+  ui.downloadAppUpdate.disabled = true;
+  ui.downloadAppUpdate.textContent = "ダウンロード中…";
+  try {
+    const response = await postJson("/api/update/download", {});
+    const data = await response.json();
+    ui.updateResult.dataset.kind = "current";
+    ui.updateResult.textContent = `v${data.version} を安全にダウンロードしました。\nSHA-256を確認済みです。\n保存先: ${data.path}\n\n現在は準備段階のため、本体の切り替えはまだ自動実行しません。`;
+    setStatus(`更新版 v${data.version} をダウンロードしました。現在のバージョンはそのまま動作しています。`, "success");
+  } catch (error) {
+    ui.updateResult.dataset.kind = "";
+    ui.updateResult.textContent = `更新ZIPをダウンロードできませんでした: ${error.message}`;
+    setStatus(`更新版のダウンロードに失敗しました: ${error.message}`, "error");
+  } finally {
+    ui.downloadAppUpdate.disabled = false;
+    ui.downloadAppUpdate.textContent = "更新ZIPをダウンロード";
+  }
+});
+
+loadAppInfo();
