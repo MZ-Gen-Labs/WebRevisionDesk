@@ -90,6 +90,8 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .badge { display: inline-flex; border-radius: 999px; padding: .3rem .65rem; background: #e4e5eb; color: #55566a; font-weight: 700; }
 .badge[data-mode="modified"] { background: #e6e6ff; color: #4b4bc0; }
 .badge[data-mode="original"] { background: #fff0d8; color: #865d1a; }
+.badge[data-mode="preview"] { background: #e5f2ff; color: #185d91; }
+.primary-inline { flex: 0 0 auto; color: #fff; border-color: #5b5bd6; background: #5b5bd6; }
 .save-state { border-radius: 999px; padding: .25rem .55rem; color: #626376; background: #ebecf1; font-size: .72rem; font-weight: 700; }
 .save-state.dirty { color: #925514; background: #fff0cf; }
 .save-state.saved { color: #176142; background: #dff4e8; }

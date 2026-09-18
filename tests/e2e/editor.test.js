@@ -190,7 +190,7 @@ test("undo restores nested links and formatting, reload can be cancelled", async
   await page.close();
 });
 
-test("an uncaptured project page opens in the editor and can be reset to uncaptured", async () => {
+test("an uncaptured project page previews without saving, then can be imported and reset", async () => {
   const page = await browser.newPage();
   await page.addInitScript(() => {
     class MemoryFileHandle {
@@ -258,12 +258,19 @@ test("an uncaptured project page opens in the editor and can be reset to uncaptu
   await page.locator("#select-project-folder").click();
   const projectPage = page.locator(".project-page").filter({ hasText: "未取得テストページ" });
   await projectPage.waitFor();
-  assert.match(await projectPage.textContent(), /編集画面へ取り込み/);
+  assert.match(await projectPage.textContent(), /中央へ一時表示/);
   assert.equal(await page.locator(".project-page-actions").getByText("取得用ブラウザで開く").isVisible(), true);
 
   await projectPage.click();
   await page.frameLocator("#page-frame").locator("h1").filter({ hasText: "中央に表示されたページ" }).waitFor();
+  assert.equal(await page.locator(".project-page.saved").count(), 0);
+  assert.match(await page.locator("#save-state").textContent(), /未取得・一時プレビュー/);
+  assert.equal(await page.locator("#show-modified").isDisabled(), true);
+  assert.equal(await page.locator("#import-preview-page").isVisible(), true);
+
+  await page.locator("#import-preview-page").click();
   await page.locator(".project-page.saved").filter({ hasText: "Captured page" }).waitFor();
+  assert.equal(await page.locator("#show-modified").isEnabled(), true);
 
   await page.locator('.project-page-row input[type="checkbox"]').check();
   assert.equal(await page.locator("#reset-project-pages").isEnabled(), true);

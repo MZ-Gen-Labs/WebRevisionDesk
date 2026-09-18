@@ -35,13 +35,14 @@ const ui = {
   openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
   applyAppUpdate: $("#apply-app-update"),
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
+  importPreviewPage: $("#import-preview-page"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   stepImport: $("#step-import"), stepEdit: $("#step-edit"), stepExport: $("#step-export"),
 };
 
 const state = {
   fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
-  sourceUrl: "", activeProjectPageId: "", dirty: false,
+  sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false,
   selectedProjectUrls: new Set(), batchRunning: false,
 };
 let captureSessionId = "";
@@ -167,6 +168,12 @@ function updateGuidance() {
     ui.saveState.className = "save-state";
     return;
   }
+  if (state.previewOnly) {
+    ui.stepImport.classList.add("active");
+    ui.saveState.textContent = "未取得・一時プレビュー";
+    ui.saveState.className = "save-state";
+    return;
+  }
   ui.stepImport.classList.add("complete");
   if (changed) {
     ui.stepEdit.classList.add("complete");
@@ -184,7 +191,8 @@ function setStatus(message, kind = "info") {
 }
 
 function setControls(enabled) {
-  [ui.original, ui.modified, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
+  [ui.original, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
+  ui.modified.disabled = !enabled || state.previewOnly;
   ui.downloadPackage.disabled = !enabled;
   ui.downloadDiff.disabled = !enabled || state.changes.length === 0;
   ui.downloadRedline.disabled = !enabled || state.changes.length === 0;
@@ -196,7 +204,7 @@ function syncProjectControls() {
   const hasProject = Boolean(projectStore.project);
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
-  ui.saveProjectPage.disabled = !hasProject || !state.originalHtml;
+  ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
   ui.crawlProjectPages.disabled = !hasProject || loginBlocked();
   updateBatchControls();
 }
@@ -241,8 +249,8 @@ function renderHistory() {
 
 function setMode(mode) {
   state.mode = mode;
-  ui.badge.textContent = mode === "original" ? "修正前・参照専用" : "修正後・編集可能";
-  ui.badge.dataset.mode = mode;
+  ui.badge.textContent = state.previewOnly ? "公開ページ・一時プレビュー" : mode === "original" ? "修正前・参照専用" : "修正後・編集可能";
+  ui.badge.dataset.mode = state.previewOnly ? "preview" : mode;
   ui.original.classList.toggle("active", mode === "original");
   ui.modified.classList.toggle("active", mode === "modified");
   updateUndoControls();
@@ -250,6 +258,7 @@ function setMode(mode) {
 
 async function render(mode, { captureCurrent = true } = {}) {
   if (!state.originalHtml) return;
+  if (state.previewOnly && mode === "modified") return;
   // 初回読込前のiframeは空のabout:blank。これをmodifiedHtmlへ保存すると、
   // 読み込んだHTMLを空ページで上書きしてしまうため、準備済みの場合だけ同期する。
   if (captureCurrent && state.mode === "modified" && editor.hasLoadedDocument()) {
@@ -283,7 +292,9 @@ function showSelection(element) {
   };
   if (!element) {
     ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
-    ui.selectionHelp.textContent = state.mode === "original"
+    ui.selectionHelp.textContent = state.previewOnly
+      ? "一時プレビューです。編集するには「このページを取り込んで編集」を押してください。"
+      : state.mode === "original"
       ? "修正前は参照専用です。「修正後」を押すと編集できます。"
       : "ページ内の直したい文章や画像をクリックしてください。";
     document.querySelectorAll("[data-editor-field]").forEach((field) => { field.hidden = true; });
@@ -333,12 +344,14 @@ async function loadHtml(html, fileName, options = {}) {
   state.sourceUrl = options.sourceUrl ?? sourceUrlFromHtml(html);
   state.activeProjectPageId = options.activeProjectPageId || "";
   state.dirty = options.dirty ?? true;
+  state.previewOnly = options.previewOnly ?? false;
   renderHistory();
   ui.fileName.textContent = state.fileName;
   ui.empty.hidden = true;
   ui.frame.hidden = false;
+  ui.importPreviewPage.hidden = !state.previewOnly;
   setControls(true);
-  await render("modified", { captureCurrent: false });
+  await render(state.previewOnly ? "original" : "modified", { captureCurrent: false });
   renderProjectPages();
   updateGuidance();
   document.querySelector("#setup-panel").open = false;
@@ -397,9 +410,9 @@ function renderProjectPages() {
       changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
       error: "公開版の確認失敗",
     }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
-    status.textContent = page.saved ? savedStatus : "未取得・クリックして編集画面へ取り込み";
+    status.textContent = page.saved ? savedStatus : "未取得・クリックして中央へ一時表示";
     button.append(title, path, status);
-    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : openUncapturedProjectPage(page));
+    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page));
     row.append(checkbox, button);
     if (page.saved && page.checkStatus === "changed") {
       const actions = document.createElement("div");
@@ -438,21 +451,20 @@ async function captureUrlDirectly(url) {
   };
 }
 
-async function openUncapturedProjectPage(page) {
+async function previewUncapturedProjectPage(page) {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてからページを開いてください。", "error");
   try {
     if (!(await preserveCurrentPage())) return;
     state.batchRunning = true;
     updateBatchControls();
-    setStatus(`「${page.title}」を取り込み、編集画面へ表示しています…`, "info");
+    setStatus(`「${page.title}」を中央へ一時表示しています…`, "info");
     const captured = await captureUrlDirectly(page.url);
     ui.captureUrl.value = captured.url;
-    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
-    await saveCurrentToProject({ quiet: true });
-    setStatus(`「${page.title}」を取り込み、案件フォルダへ保存しました。`, "success");
+    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: false, previewOnly: true });
+    setStatus(`「${page.title}」を一時表示しました。まだ保存されていません。編集する場合は「このページを取り込んで編集」を押してください。`, "success");
   } catch (error) {
-    setStatus(`編集画面へ取り込めませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
+    setStatus(`中央へ一時表示できませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
   } finally {
     state.batchRunning = false;
     renderProjectPages();
@@ -464,13 +476,14 @@ function clearLoadedPage() {
   editor.unload();
   Object.assign(state, {
     fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
-    sourceUrl: "", activeProjectPageId: "", dirty: false,
+    sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false,
   });
   ui.fileName.textContent = "ファイル未選択";
   ui.badge.textContent = "未読込";
   delete ui.badge.dataset.mode;
   ui.empty.hidden = false;
   ui.frame.hidden = true;
+  ui.importPreviewPage.hidden = true;
   showSelection(null);
   renderHistory();
   setControls(false);
@@ -576,6 +589,28 @@ ui.batchCapturePages.addEventListener("click", () => processSelectedPages("captu
 ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check"));
 ui.resetProjectPages.addEventListener("click", resetSelectedProjectPages);
 
+ui.importPreviewPage.addEventListener("click", async () => {
+  if (!state.previewOnly || !state.originalHtml) return;
+  ui.importPreviewPage.disabled = true;
+  try {
+    state.previewOnly = false;
+    state.dirty = true;
+    ui.importPreviewPage.hidden = true;
+    setControls(true);
+    await saveCurrentToProject({ quiet: true });
+    await render("modified", { captureCurrent: false });
+    setStatus("ページを案件フォルダへ取り込みました。中央の画面で編集できます。", "success");
+  } catch (error) {
+    state.previewOnly = true;
+    state.dirty = false;
+    ui.importPreviewPage.hidden = false;
+    setControls(true);
+    setStatus(`ページを取り込めませんでした: ${error.message}`, "error");
+  } finally {
+    ui.importPreviewPage.disabled = false;
+  }
+});
+
 async function saveCurrentToProject({ quiet = false } = {}) {
   if (!state.originalHtml) throw new Error("保存するページがありません。");
   projectStore.setMetadata({
@@ -677,7 +712,7 @@ ui.crawlProjectPages.addEventListener("click", async () => {
     const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
     const limitText = result.truncated ? "（100件で打ち切り）" : "";
     ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
-    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると編集画面へ取り込みます。`, "success");
+    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると中央へ一時表示します。`, "success");
   } catch (error) {
     ui.projectState.textContent = "配下ページの検索に失敗しました";
     setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");
