@@ -12,11 +12,10 @@
         <p class="eyebrow">Web Revision Desk</p>
         <h1>Webサイト修正案エディター <button id="app-update-button" class="version-button" type="button">v--</button></h1>
       </div>
-      <div class="toolbar" aria-label="ファイル操作">
-        <label class="button button-primary" for="html-file">HTMLを読み込む</label>
-        <input id="html-file" type="file" accept=".html,.htm,text/html" hidden />
+      <div class="toolbar" aria-label="編集・保存操作">
         <button id="show-original" type="button" disabled>修正前</button>
         <button id="show-modified" type="button" disabled>修正後</button>
+        <button id="show-redline" class="button-redline" type="button" disabled>変更箇所</button>
         <button id="undo" type="button" disabled title="直前の編集を元に戻す（Ctrl/Cmd+Z）">1つ戻す</button>
         <button id="redo" type="button" disabled title="戻した編集をやり直す（Ctrl/Cmd+Shift+Z）">やり直す</button>
         <button id="reset" type="button" disabled>すべてリセット</button>
@@ -34,7 +33,7 @@
     </header>
 
     <div id="status" class="status" role="status" aria-live="polite">
-      SingleFileで保存したHTMLを読み込んでください。
+      案件フォルダを選択してください。
     </div>
 
     <nav class="journey" aria-label="作業の流れ">
@@ -79,7 +78,7 @@
       <button id="open-capture-browser" type="button">取得用ブラウザを開く</button>
       <button id="capture-current-page" class="button-primary" type="button" disabled>表示中ページを取り込む</button>
       <button id="cancel-capture" type="button" disabled>キャンセル</button>
-      <span id="capture-state">URL入力またはHTML読込を選べます</span>
+      <span id="capture-state">案件ページの取得方法を選べます</span>
     </section>
 
     <section class="project-bar" aria-label="案件フォルダ管理">
@@ -96,6 +95,16 @@
       <button id="login-done" type="button" hidden disabled>ログイン完了</button>
       <button id="login-cancel" type="button" hidden disabled>ログイン待機を中止</button>
       <span id="login-state" role="status">ログイン待機なし</span>
+    </section>
+    <section class="alternative-import" aria-label="その他の取り込み">
+      <details>
+        <summary>その他の取り込み</summary>
+        <div>
+          <span>SingleFile等で保存済みのHTMLを案件へ追加できます。元のURLを上の「WebページURL」へ入力してから選択してください。</span>
+          <label id="html-import-button" class="button" for="html-file" aria-disabled="true">保存済みHTMLを案件へ追加</label>
+          <input id="html-file" type="file" accept=".html,.htm,text/html" disabled hidden />
+        </div>
+      </details>
     </section>
       </div>
     </details>

@@ -26,6 +26,55 @@ async function waitForServer() {
   throw new Error("Test server did not start.");
 }
 
+async function prepareMemoryProject(page, sourceUrl = "https://example.com/pages/sample") {
+  const now = new Date().toISOString();
+  await page.addInitScript(({ project }) => {
+    class MemoryFileHandle {
+      constructor(name, content = "") { this.name = name; this.kind = "file"; this.content = content; }
+      async getFile() { return { text: async () => this.content }; }
+      async createWritable() {
+        return { write: async (content) => { this.content = content; }, close: async () => {} };
+      }
+    }
+    class MemoryDirectoryHandle {
+      constructor(name) { this.name = name; this.kind = "directory"; this.entries = new Map(); }
+      async requestPermission() { return "granted"; }
+      async getDirectoryHandle(name, { create = false } = {}) {
+        if (!this.entries.has(name) && create) this.entries.set(name, new MemoryDirectoryHandle(name));
+        const entry = this.entries.get(name);
+        if (!entry || entry.kind !== "directory") throw new DOMException("Not found", "NotFoundError");
+        return entry;
+      }
+      async getFileHandle(name, { create = false } = {}) {
+        if (!this.entries.has(name) && create) this.entries.set(name, new MemoryFileHandle(name));
+        const entry = this.entries.get(name);
+        if (!entry || entry.kind !== "file") throw new DOMException("Not found", "NotFoundError");
+        return entry;
+      }
+      async removeEntry(name, { recursive = false } = {}) {
+        const entry = this.entries.get(name);
+        if (!entry) throw new DOMException("Not found", "NotFoundError");
+        if (entry.kind === "directory" && entry.entries.size && !recursive) {
+          throw new DOMException("Directory is not empty", "InvalidModificationError");
+        }
+        this.entries.delete(name);
+      }
+    }
+    const root = new MemoryDirectoryHandle("test-project");
+    root.entries.set("project.json", new MemoryFileHandle("project.json", JSON.stringify(project)));
+    window.__testProjectDirectory = root;
+    window.showDirectoryPicker = async () => root;
+  }, { project: {
+    format: "web-revision-folder-project", version: 1, projectName: "Editor test",
+    baseUrl: "https://example.com/pages", createdAt: now, updatedAt: now, pages: [], discoveredPages: [],
+  } });
+  await page.goto(baseUrl);
+  assert.equal(await page.locator("#html-file").isDisabled(), true);
+  await page.locator("#select-project-folder").click();
+  assert.equal(await page.locator("#html-file").isEnabled(), true);
+  await page.locator("#capture-url").fill(sourceUrl);
+}
+
 before(async () => {
   dataDirectory = await mkdtemp(path.join(os.tmpdir(), "web-revision-test-"));
   server = spawn(process.execPath, ["server.js"], {
@@ -52,9 +101,9 @@ after(async () => {
   if (dataDirectory) await rm(dataDirectory, { recursive: true, force: true, maxRetries: 3 });
 });
 
-test("a user can load, edit, undo, redo and export a page", async () => {
+test("a user can add saved HTML to a project, edit, inspect changes and export", async () => {
   const page = await browser.newPage({ acceptDownloads: true });
-  await page.goto(baseUrl);
+  await prepareMemoryProject(page);
   await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
   await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
   assert.match(await page.locator("#step-edit").getAttribute("class"), /active/);
@@ -77,6 +126,13 @@ test("a user can load, edit, undo, redo and export a page", async () => {
   await page.locator("#redo").click();
   assert.equal(await heading.textContent(), "自動テストで変更した見出し");
 
+  await page.locator("#show-redline").click();
+  await page.frameLocator("#page-frame").locator("del").filter({ hasText: "より良い未来を、技術とともに。" }).waitFor();
+  await page.frameLocator("#page-frame").locator("ins").filter({ hasText: "自動テストで変更した見出し" }).waitFor();
+  assert.match(await page.locator("#mode-badge").textContent(), /変更箇所・参照専用/);
+  await page.locator("#show-modified").click();
+  assert.equal(await heading.textContent(), "自動テストで変更した見出し");
+
   const downloadPromise = page.waitForEvent("download");
   await page.locator("#download-package").click();
   const download = await downloadPromise;
@@ -86,7 +142,7 @@ test("a user can load, edit, undo, redo and export a page", async () => {
 
 test("advanced image fields only appear for images", async () => {
   const page = await browser.newPage();
-  await page.goto(baseUrl);
+  await prepareMemoryProject(page);
   await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
   await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
   const image = page.frameLocator("#page-frame").locator("img").first();
@@ -101,7 +157,7 @@ test("advanced image fields only appear for images", async () => {
 
 test("loaded page gets viewport height and setup can be reopened without losing edits", async () => {
   const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
-  await page.goto(baseUrl);
+  await prepareMemoryProject(page);
   await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
   await page.waitForFunction(() => !document.querySelector("#setup-panel").open);
   const frame = page.frameLocator("#page-frame");
@@ -186,9 +242,9 @@ test("screenshot preview returns a viewport image and reuses its short-lived cac
   assert.ok((await second.arrayBuffer()).byteLength > 1000);
 });
 
-test("undo restores nested links and formatting, reload can be cancelled", async () => {
+test("undo restores nested links and formatting, then project import can be repeated", async () => {
   const page = await browser.newPage();
-  await page.goto(baseUrl);
+  await prepareMemoryProject(page);
   const fixture = { name: "nested.html", mimeType: "text/html", buffer: Buffer.from('<!doctype html><html><body><h1>Before <a href="/target"><strong>link</strong></a></h1></body></html>') };
   await page.setInputFiles("#html-file", fixture);
   const heading = page.frameLocator("#page-frame").locator("h1");
@@ -199,12 +255,9 @@ test("undo restores nested links and formatting, reload can be cancelled", async
   assert.equal(await heading.locator("a strong").textContent(), "link");
   assert.equal(await heading.locator("a").getAttribute("href"), "/target");
   await page.locator("#redo").click();
-  page.once("dialog", (dialog) => dialog.dismiss());
   await page.setInputFiles("#html-file", fixture);
-  assert.equal(await heading.textContent(), "Changed");
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.locator("#clear-history").click();
-  assert.match(await page.locator("#save-state").textContent(), /未保存/);
+  await heading.filter({ hasText: "Before link" }).waitFor();
+  assert.match(await page.locator("#save-state").textContent(), /保存済み/);
   await page.close();
 });
 

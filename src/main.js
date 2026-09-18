@@ -1,17 +1,17 @@
 import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadHtml, EDITOR_CLASS } from "./html.js";
-import { changeLabel, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
+import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { downloadProjectPackage } from "./project-package.js";
-import { ProjectStore } from "./project-storage.js";
+import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
   loginRequired: $("#login-required"), loginOpen: $("#login-open"), loginDone: $("#login-done"),
   loginCancel: $("#login-cancel"), loginState: $("#login-state"),
-  file: $("#html-file"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
+  file: $("#html-file"), htmlImportButton: $("#html-import-button"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
   fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
-  modified: $("#show-modified"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"), download: $("#download"),
+  modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"), download: $("#download"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -194,6 +194,7 @@ function setStatus(message, kind = "info") {
 function setControls(enabled) {
   [ui.original, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
   ui.modified.disabled = !enabled || state.previewOnly;
+  ui.redline.disabled = !enabled || state.previewOnly || state.changes.length === 0;
   ui.downloadPackage.disabled = !enabled;
   ui.downloadDiff.disabled = !enabled || state.changes.length === 0;
   ui.downloadRedline.disabled = !enabled || state.changes.length === 0;
@@ -207,6 +208,8 @@ function syncProjectControls() {
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
   ui.crawlProjectPages.disabled = !hasProject || loginBlocked();
+  ui.file.disabled = !hasProject;
+  ui.htmlImportButton.setAttribute("aria-disabled", String(!hasProject));
   updateBatchControls();
 }
 
@@ -231,6 +234,7 @@ function renderHistory() {
   ui.clearHistory.disabled = state.changes.length === 0;
   ui.downloadDiff.disabled = !state.originalHtml || state.changes.length === 0;
   ui.downloadRedline.disabled = !state.originalHtml || state.changes.length === 0;
+  ui.redline.disabled = !state.originalHtml || state.previewOnly || state.changes.length === 0;
   updateUndoControls();
   updateGuidance();
   if (!state.changes.length) {
@@ -250,10 +254,17 @@ function renderHistory() {
 
 function setMode(mode) {
   state.mode = mode;
-  ui.badge.textContent = state.previewOnly ? "公開ページ・一時プレビュー" : mode === "original" ? "修正前・参照専用" : "修正後・編集可能";
+  ui.badge.textContent = state.previewOnly
+    ? "公開ページ・画像プレビュー"
+    : mode === "original"
+      ? "修正前・参照専用"
+      : mode === "redline"
+        ? "変更箇所・参照専用"
+        : "修正後・編集可能";
   ui.badge.dataset.mode = state.previewOnly ? "preview" : mode;
   ui.original.classList.toggle("active", mode === "original");
   ui.modified.classList.toggle("active", mode === "modified");
+  ui.redline.classList.toggle("active", mode === "redline");
   updateUndoControls();
 }
 
@@ -267,7 +278,12 @@ async function render(mode, { captureCurrent = true } = {}) {
   }
   setMode(mode);
   showSelection(null);
-  await editor.load(mode === "original" ? state.originalHtml : state.modifiedHtml, mode === "modified");
+  const html = mode === "original"
+    ? state.originalHtml
+    : mode === "redline"
+      ? createRedlineReport(state.modifiedHtml, state.changes, state.fileName)
+      : state.modifiedHtml;
+  await editor.load(html, mode === "modified");
   if (mode === "modified") refreshClassOptions();
 }
 
@@ -295,6 +311,8 @@ function showSelection(element) {
     ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
     ui.selectionHelp.textContent = state.previewOnly
       ? "一時プレビューです。編集するには「このページを取り込んで編集」を押してください。"
+      : state.mode === "redline"
+        ? "変更された文章、画像、リンク、追加・削除・移動箇所をページ上で確認できます。"
       : state.mode === "original"
       ? "修正前は参照専用です。「修正後」を押すと編集できます。"
       : "ページ内の直したい文章や画像をクリックしてください。";
@@ -768,7 +786,7 @@ ui.crawlProjectPages.addEventListener("click", async () => {
     const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
     const limitText = result.truncated ? "（100件で打ち切り）" : "";
     ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
-    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると中央へ一時表示します。`, "success");
+    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると画像プレビューを表示します。`, "success");
   } catch (error) {
     ui.projectState.textContent = "配下ページの検索に失敗しました";
     setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");
@@ -787,10 +805,16 @@ ui.file.addEventListener("change", async () => {
   if (!file) return;
   if (file.size > 100 * 1024 * 1024 && !window.confirm("100MBを超えるHTMLです。読み込みを続けますか？")) return;
   try {
+    if (!projectStore.project) throw new Error("先に案件フォルダを選択してください。");
     if (!(await preserveCurrentPage())) return;
     const html = await file.text();
-    await loadHtml(html, file.name);
-    setStatus("HTMLを読み込みました。ページ内の要素をクリックして編集できます。", "success");
+    const sourceUrl = sourceUrlFromHtml(html) || ui.captureUrl.value.trim();
+    if (!sourceUrl) throw new Error("上の「WebページURL」に、このHTMLの元URLを入力してください。");
+    projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
+    pagePathForUrl(sourceUrl, projectStore.project.baseUrl);
+    await loadHtml(html, file.name, { sourceUrl, dirty: true });
+    await saveCurrentToProject({ quiet: true });
+    setStatus("保存済みHTMLを案件へ追加しました。ページ内の要素を編集できます。", "success");
   } catch (error) {
     setStatus(`読み込みに失敗しました: ${error.message}`, "error");
   } finally {
@@ -869,6 +893,7 @@ ui.cancelCapture.addEventListener("click", async () => {
 
 ui.original.addEventListener("click", () => render("original"));
 ui.modified.addEventListener("click", () => render("modified"));
+ui.redline.addEventListener("click", () => render("redline"));
 ui.undo.addEventListener("click", () => applyUndoRedo("undo"));
 ui.redo.addEventListener("click", () => applyUndoRedo("redo"));
 ui.reset.addEventListener("click", async () => {
@@ -950,12 +975,13 @@ ui.duplicate.addEventListener("click", () => {
 ui.delete.addEventListener("click", () => {
   if (window.confirm("選択した要素を削除しますか？")) editor.deleteSelected();
 });
-ui.clearHistory.addEventListener("click", () => {
+ui.clearHistory.addEventListener("click", async () => {
   if (!window.confirm("変更履歴だけを消去しますか？ 編集内容はそのまま残ります。")) return;
   state.changes = [];
   state.redoChanges = [];
   state.dirty = true;
   renderHistory();
+  if (state.mode === "redline") await render("modified", { captureCurrent: false });
   setStatus("変更履歴を消去しました。編集内容は維持されています。", "success");
 });
 ui.advancedMode.addEventListener("change", () => {
