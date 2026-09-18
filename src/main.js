@@ -32,6 +32,9 @@ const ui = {
   checkAppUpdate: $("#check-app-update"), updateResult: $("#update-result"),
   openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
   applyAppUpdate: $("#apply-app-update"),
+  saveState: $("#save-state"), selectionHelp: $("#selection-help"),
+  advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
+  stepImport: $("#step-import"), stepEdit: $("#step-edit"), stepExport: $("#step-export"),
 };
 
 const state = {
@@ -128,9 +131,33 @@ const editor = new PageEditor(ui.frame, {
       state.dirty = true;
       renderHistory();
     }
-    setStatus("修正内容をブラウザ内に保持しました。保存ボタンでHTMLを出力できます。", "success");
+    updateGuidance();
+    setStatus("修正を反映しました。続けて編集するか、確認して保存できます。", "success");
   },
 });
+
+function updateGuidance() {
+  const loaded = Boolean(state.originalHtml);
+  const changed = state.changes.length > 0;
+  [ui.stepImport, ui.stepEdit, ui.stepExport].forEach((step) => step.classList.remove("active", "complete"));
+  if (!loaded) {
+    ui.stepImport.classList.add("active");
+    ui.saveState.textContent = "ページ未読込";
+    ui.saveState.className = "save-state";
+    return;
+  }
+  ui.stepImport.classList.add("complete");
+  if (changed) {
+    ui.stepEdit.classList.add("complete");
+    ui.stepExport.classList.add("active");
+  } else {
+    ui.stepEdit.classList.add("active");
+  }
+  ui.saveState.textContent = changed
+    ? (state.dirty ? "● 未保存の変更あり" : "保存済み")
+    : "変更なし";
+  ui.saveState.className = `save-state ${changed && state.dirty ? "dirty" : changed ? "saved" : ""}`;
+}
 
 function setStatus(message, kind = "info") {
   ui.status.textContent = message;
@@ -176,6 +203,7 @@ function renderHistory() {
   ui.downloadDiff.disabled = !state.originalHtml || state.changes.length === 0;
   ui.downloadRedline.disabled = !state.originalHtml || state.changes.length === 0;
   updateUndoControls();
+  updateGuidance();
   if (!state.changes.length) {
     ui.historyList.innerHTML = '<li class="history-empty">まだ変更はありません。</li>';
     return;
@@ -230,13 +258,35 @@ function showSelection(element) {
   const editable = Boolean(element) && state.mode === "modified";
   ui.fields.disabled = !editable;
   ui.label.textContent = element ? describeElement(element) : "未選択";
+  const fieldVisibility = {
+    text: false, link: false, image: false, alt: false, class: Boolean(element),
+  };
   if (!element) {
     ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
+    ui.selectionHelp.textContent = state.mode === "original"
+      ? "修正前は参照専用です。「修正後」を押すと編集できます。"
+      : "ページ内の直したい文章や画像をクリックしてください。";
+    document.querySelectorAll("[data-editor-field]").forEach((field) => { field.hidden = true; });
     return;
   }
   const classNames = [...element.classList].filter((name) => name !== EDITOR_CLASS);
   const link = element.closest("a");
   const image = selectedImage(element);
+  const textEditable = !["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
+  fieldVisibility.text = textEditable;
+  fieldVisibility.link = Boolean(link);
+  fieldVisibility.image = Boolean(image);
+  fieldVisibility.alt = Boolean(image);
+  document.querySelectorAll("[data-editor-field]").forEach((field) => {
+    field.hidden = !fieldVisibility[field.dataset.editorField];
+  });
+  ui.selectionHelp.textContent = image
+    ? "画像を選択中です。下の「画像を差し替える」から変更できます。"
+    : link
+      ? "リンク付きの要素を選択中です。文章とリンク先を変更できます。"
+      : textEditable
+        ? "文章を変更できます。ページ上でダブルクリックして直接編集することもできます。"
+        : "このブロックは複製、移動、削除ができます。";
   ui.text.value = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName) ? "" : element.textContent ?? "";
   ui.text.disabled = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
   ui.link.value = link?.getAttribute("href") ?? "";
@@ -270,6 +320,7 @@ async function loadHtml(html, fileName, options = {}) {
   setControls(true);
   await render("modified", { captureCurrent: false });
   renderProjectPages();
+  updateGuidance();
 }
 
 function sourceUrlFromHtml(html) {
@@ -451,6 +502,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
   state.sourceUrl = page.url;
   state.activeProjectPageId = page.id;
   state.dirty = false;
+  updateGuidance();
   renderProjectPages();
   ui.projectState.textContent = `${projectStore.project.projectName}：${projectStore.project.pages.length}ページ`;
   if (!quiet) setStatus(`案件フォルダの ${page.path} へ保存しました。`, "success");
@@ -702,6 +754,9 @@ ui.clearHistory.addEventListener("click", () => {
   renderHistory();
   setStatus("変更履歴を消去しました。編集内容は維持されています。", "success");
 });
+ui.advancedMode.addEventListener("change", () => {
+  ui.inspector.classList.toggle("show-advanced", ui.advancedMode.checked);
+});
 ui.image.addEventListener("change", () => {
   const file = ui.image.files?.[0];
   if (!file) return;
@@ -774,4 +829,12 @@ ui.applyAppUpdate.addEventListener("click", async () => {
   }
 });
 
+window.addEventListener("beforeunload", (event) => {
+  if (!state.dirty || state.changes.length === 0) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
+
 loadAppInfo();
+updateGuidance();
+showSelection(null);

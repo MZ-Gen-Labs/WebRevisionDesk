@@ -20,16 +20,27 @@
         <button id="undo" type="button" disabled title="直前の編集を元に戻す（Ctrl/Cmd+Z）">1つ戻す</button>
         <button id="redo" type="button" disabled title="戻した編集をやり直す（Ctrl/Cmd+Shift+Z）">やり直す</button>
         <button id="reset" type="button" disabled>すべてリセット</button>
-        <button id="download" class="button-accent" type="button" disabled>modified.htmlを保存</button>
-        <button id="download-diff" class="button-diff" type="button" disabled>差分HTMLを保存</button>
-        <button id="download-redline" class="button-redline" type="button" disabled>赤入れページを保存</button>
-        <button id="download-package" class="button-package" type="button" disabled>案件一式ZIPを保存</button>
+        <button id="download-package" class="button-package" type="button" disabled>共有用ファイル一式を保存</button>
+        <details class="export-menu">
+          <summary>その他の保存</summary>
+          <div class="export-menu-items">
+            <button id="download" type="button" disabled>修正後ページを保存</button>
+            <button id="download-diff" class="button-diff" type="button" disabled>修正内容一覧を保存</button>
+            <button id="download-redline" class="button-redline" type="button" disabled>変更箇所ページを保存</button>
+          </div>
+        </details>
       </div>
     </header>
 
     <div id="status" class="status" role="status" aria-live="polite">
       SingleFileで保存したHTMLを読み込んでください。
     </div>
+
+    <nav class="journey" aria-label="作業の流れ">
+      <div id="step-import" class="journey-step active"><span>1</span><strong>ページを取り込む</strong></div>
+      <div id="step-edit" class="journey-step"><span>2</span><strong>修正する</strong></div>
+      <div id="step-export" class="journey-step"><span>3</span><strong>確認して保存</strong></div>
+    </nav>
 
     <section id="update-panel" class="update-panel" aria-labelledby="update-title" hidden>
       <div class="update-panel-heading">
@@ -71,8 +82,8 @@
       <button id="select-project-folder" class="button-primary" type="button">案件フォルダを選択</button>
       <label>案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
       <label>基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
-      <button id="crawl-project-pages" type="button" disabled>配下ページを一括検索</button>
-      <button id="save-project-page" type="button" disabled>現在のページを案件へ保存</button>
+      <button id="crawl-project-pages" type="button" disabled>関連ページを探す</button>
+      <button id="save-project-page" type="button" disabled>案件フォルダに保存</button>
       <span id="project-state">案件フォルダ未選択</span>
     </section>
 
@@ -95,8 +106,9 @@
       <section class="canvas-panel" aria-label="ページプレビュー">
         <div class="canvas-meta">
           <span id="mode-badge" class="badge">未読込</span>
+          <span id="save-state" class="save-state">ページ未読込</span>
           <span id="file-name">ファイル未選択</span>
-          <span class="hint">クリックで選択・ダブルクリックで文章編集</span>
+          <span class="hint">直したい場所をクリックしてください</span>
         </div>
         <div id="empty-state" class="empty-state">
           <strong>既存ページをここに表示します</strong>
@@ -112,37 +124,39 @@
 
       <aside class="inspector" aria-label="選択要素の編集">
         <div class="inspector-heading">
-          <p class="eyebrow">Inspector</p>
-          <h2>選択要素</h2>
+          <p class="eyebrow">Edit menu</p>
+          <h2>編集メニュー</h2>
           <code id="element-label">未選択</code>
+          <p id="selection-help" class="selection-help">ページ内の直したい文章や画像をクリックしてください。</p>
+          <label class="advanced-toggle"><input id="advanced-mode" type="checkbox" /> 詳細設定を表示</label>
         </div>
 
         <fieldset id="inspector-fields" disabled>
-          <label>
-            テキスト
+          <label data-editor-field="text">
+            文章
             <textarea id="text-value" rows="5" placeholder="要素のテキスト"></textarea>
           </label>
-          <label>
+          <label data-editor-field="link">
             リンク先URL
             <input id="link-value" type="text" placeholder="https://example.com/" />
           </label>
-          <label>
+          <label class="advanced-field" data-editor-field="alt">
             画像のalt
             <input id="alt-value" type="text" placeholder="画像の説明" />
           </label>
-          <label>
+          <label data-editor-field="image">
             画像を差し替える
             <input id="image-file" type="file" accept="image/*" />
           </label>
-          <label>
-            CSS class（空白区切り）
+          <label class="advanced-field" data-editor-field="class">
+            デザイン・配置（CSS class）
             <input id="class-value" type="text" list="class-options" placeholder="既存classを入力" />
             <datalist id="class-options"></datalist>
           </label>
           <div class="element-actions">
             <button id="duplicate-element" class="duplicate" type="button">複製</button>
-            <button id="move-before" type="button">前へ移動</button>
-            <button id="move-after" type="button">後へ移動</button>
+            <button id="move-before" type="button">上／前へ移動</button>
+            <button id="move-after" type="button">下／後へ移動</button>
             <button id="delete-element" class="danger" type="button">削除</button>
           </div>
         </fieldset>
