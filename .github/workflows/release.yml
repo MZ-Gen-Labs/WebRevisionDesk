@@ -1,0 +1,88 @@
+name: Windows Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing version tag, for example v1.0.0"
+        required: true
+        type: string
+      update_type:
+        description: "Update type"
+        required: true
+        default: normal
+        type: choice
+        options: [normal, security]
+      severity:
+        description: "Security severity (blank for normal updates)"
+        required: false
+        default: none
+        type: choice
+        options: [none, low, moderate, high, critical]
+      mandatory:
+        description: "Mark the update as mandatory"
+        required: true
+        default: false
+        type: boolean
+      notes:
+        description: "Short update notice shown in the app"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: npm
+      - name: Validate version tag
+        shell: pwsh
+        run: |
+          $tag = if ("${{ inputs.tag }}") { "${{ inputs.tag }}" } else { "${{ github.ref_name }}" }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne "v$version") { throw "Tag $tag does not match package version v$version." }
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - name: Build Windows portable archives
+        shell: pwsh
+        run: |
+          $env:WEB_REVISION_UPDATE_TYPE = if ("${{ inputs.update_type }}") { "${{ inputs.update_type }}" } else { "normal" }
+          $env:WEB_REVISION_UPDATE_SEVERITY = if ("${{ inputs.severity }}" -eq "none") { "" } else { "${{ inputs.severity }}" }
+          $env:WEB_REVISION_UPDATE_MANDATORY = if ("${{ inputs.mandatory }}") { "${{ inputs.mandatory }}" } else { "false" }
+          $env:WEB_REVISION_UPDATE_NOTES = "${{ inputs.notes }}"
+          npm run build:portable
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WebRevisionDesk-${{ env.RELEASE_TAG }}-windows
+          path: |
+            release/*.zip
+            release/update.json
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem release -File | ForEach-Object { $_.FullName }
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG $files --clobber
+          } else {
+            gh release create $env:RELEASE_TAG $files --verify-tag --generate-notes --title "Web Revision Desk $env:RELEASE_TAG"
+          }

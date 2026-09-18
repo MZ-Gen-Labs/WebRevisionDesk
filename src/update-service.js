@@ -8,6 +8,7 @@ import path from "node:path";
 const APP_DIRECTORY = "WebRevisionEditor";
 const SETTINGS_VERSION = 1;
 const MAX_UPDATE_SIZE = 1024 * 1024 * 1024;
+const OFFICIAL_REPOSITORY = "https://github.com/MZ-Gen-Labs/WebRevisionDesk";
 
 function defaultDataDirectory() {
   if (process.env.WEB_REVISION_DATA_DIR) return path.resolve(process.env.WEB_REVISION_DATA_DIR);
@@ -112,7 +113,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
   async function readSettings() {
     const defaults = {
       version: SETTINGS_VERSION,
-      githubRepository: "",
+      githubRepository: OFFICIAL_REPOSITORY,
       checkUpdatesOnStartup: true,
       lastCheckAt: null,
       lastDownloadedVersion: null,
@@ -120,7 +121,12 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     };
     try {
       const saved = JSON.parse(await readFile(settingsFile, "utf8"));
-      return { ...defaults, ...saved, version: SETTINGS_VERSION };
+      return {
+        ...defaults,
+        ...saved,
+        githubRepository: saved.githubRepository || OFFICIAL_REPOSITORY,
+        version: SETTINGS_VERSION,
+      };
     } catch (error) {
       if (error.code !== "ENOENT") console.warn("Settings could not be read:", error.message);
       return defaults;

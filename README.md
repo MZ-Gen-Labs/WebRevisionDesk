@@ -1,6 +1,9 @@
-# Web Revision Editor PoC
+# Web Revision Desk
 
-既存Webページを読み込み、見た目を確認しながら限定編集し、修正後HTMLと差分資料を保存するPoCです。MVP-01〜06の主要機能が動作する段階まで実装しています。
+既存Webページを取り込み、見た目を確認しながら編集し、修正後HTML、視覚的な赤入れ、修正指示を作成するデスクトップ向けローカルWebアプリです。
+
+[![CI](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 SingleFileを使わず、URLを取得用Chromiumで開いて現在の表示を単一HTMLとして取り込む機能も備えています。この取得機能はApache-2.0のPlaywrightと本プロジェクト独自コードで構成しています。
 
@@ -59,12 +62,12 @@ npm run dev
 
 一括検索は基準URLと同じドメインかつ配下パスだけを再帰的にたどり、アンカー違い・追跡用クエリ等を正規化して重複を除外します。画像、PDF、動画、ZIP等はページ候補に含めません。1回の検索は最大100ページで停止します。ログインや画面操作が必要なページは、一覧から選んで取得用ブラウザを開いた後に操作できます。
 
-基準URLが `https://www.dipro.co.jp/product/solidedge` の場合、ページは次のように保存されます。
+基準URLが `https://example.com/products/widget` の場合、ページは次のように保存されます。
 
 ```text
 案件フォルダ/
 ├── project.json
-└── pages/product/solidedge/
+└── pages/products/widget/
     ├── index/
     │   ├── original.html
     │   ├── working.html
@@ -156,3 +159,7 @@ npm run build:portable
 VvvebJsではなく、`iframe + contenteditable + DOM API` を採用しています。今回の目的に不要なページビルダー機能を避け、SingleFile HTMLのDOMを直接扱い、出力内容を管理しやすくするためです。詳しい比較と受入条件は `docs/02-poc-implementation-specification.md` を参照してください。
 
 PoC確認後の優先課題と実運用への進め方は `docs/03-pilot-and-production-plan.md` を参照してください。
+
+## ライセンス
+
+Apache License 2.0で公開しています。個人利用、社内利用、商用利用、改変、再配布が可能です。詳しくは `LICENSE` を参照してください。
