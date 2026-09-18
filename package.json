@@ -20,7 +20,10 @@
     "dev": "node server.js",
     "build": "vite build",
     "build:portable": "node scripts/build-windows-portable.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "npm run test:unit && npm run build && npm run test:e2e",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:e2e": "node --test --test-timeout=60000 tests/e2e/*.test.js"
   },
   "dependencies": {
     "fflate": "^0.8.3",

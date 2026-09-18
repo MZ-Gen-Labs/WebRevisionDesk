@@ -38,6 +38,17 @@ npm run dev
 
 表示されたローカルURLをChromeまたはEdgeで開きます。最初の確認には `test-data/sample.html` を使用できます。
 
+## テスト
+
+依存モジュール更新後を含む通常の確認は、Chromiumをインストールしたうえで次を実行します。
+
+```bash
+npx playwright install chromium
+npm test
+```
+
+`npm test` は、URL階層・Windowsファイル名・更新判定・SHA-256拒否等の単体テスト、本番ビルド、HTML読込・編集・Undo/Redo・ZIP出力・詳細設定のブラウザテストを順に実行します。GitHub ActionsでもPull Requestと`main`へのpushごとに同じ主要テストを実行します。Windows Releaseでは生成した完全版ZIPを展開し、必須ファイルとサーバー起動を追加確認します。
+
 ## 操作方法
 
 1. 「HTMLを読み込む」からSingleFileで保存したHTMLを選ぶ

@@ -19,7 +19,7 @@ function defaultDataDirectory() {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), APP_DIRECTORY);
 }
 
-function parseRepository(value) {
+export function parseRepository(value) {
   const input = String(value || "").trim().replace(/\.git$/i, "").replace(/\/$/, "");
   if (!input) return null;
   const match = input.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/i);
@@ -27,12 +27,16 @@ function parseRepository(value) {
   return { owner: match[1], repo: match[2], url: `https://github.com/${match[1]}/${match[2]}` };
 }
 
-function normalizedVersion(value) {
+export function normalizedVersion(value) {
   return String(value || "0.0.0").trim().replace(/^v/i, "");
 }
 
-function compareVersions(left, right) {
-  const parts = (value) => normalizedVersion(value).split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+export function compareVersions(left, right) {
+  const parts = (value) => {
+    const result = normalizedVersion(value).split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+    while (result.length < 3) result.push(0);
+    return result;
+  };
   const a = parts(left);
   const b = parts(right);
   for (let index = 0; index < 3; index++) {
@@ -41,7 +45,7 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function releaseAsset(release) {
+export function releaseAsset(release) {
   const candidates = (release.assets || []).filter((asset) => /\.zip$/i.test(asset.name));
   const updates = candidates.filter((asset) => !/(?:complete|full)/i.test(asset.name));
   return updates.find((asset) => /win(?:dows)?[-_]?x64/i.test(asset.name))

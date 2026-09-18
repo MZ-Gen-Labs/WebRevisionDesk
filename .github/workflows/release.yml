@@ -59,6 +59,7 @@ jobs:
           "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - run: npm ci
       - run: npm audit --audit-level=high
+      - run: npm run test:unit
       - name: Build Windows portable archives
         shell: pwsh
         run: |
@@ -67,6 +68,9 @@ jobs:
           $env:WEB_REVISION_UPDATE_MANDATORY = if ("${{ inputs.mandatory }}") { "${{ inputs.mandatory }}" } else { "false" }
           $env:WEB_REVISION_UPDATE_NOTES = "${{ inputs.notes }}"
           npm run build:portable
+      - name: Smoke test Windows portable archive
+        shell: pwsh
+        run: ./scripts/test-windows-portable.ps1
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
