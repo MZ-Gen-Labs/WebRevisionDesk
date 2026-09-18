@@ -41,6 +41,14 @@ export class PageEditor {
     });
   }
 
+  unload() {
+    this.clearSelection();
+    this.editable = false;
+    this.loaded = false;
+    this.editingSnapshot = null;
+    this.frame.srcdoc = "";
+  }
+
   #prepareDocument() {
     const doc = this.frame.contentDocument;
     if (!doc) return;

@@ -27,7 +27,7 @@ const ui = {
   crawlProjectPages: $("#crawl-project-pages"),
   projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
   selectAllProjectPages: $("#select-all-project-pages"), batchCapturePages: $("#batch-capture-pages"),
-  checkProjectPages: $("#check-project-pages"), batchProgress: $("#batch-progress"),
+  checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"), batchProgress: $("#batch-progress"),
   appUpdateButton: $("#app-update-button"), updatePanel: $("#update-panel"),
   closeUpdatePanel: $("#close-update-panel"), updateRepository: $("#update-repository"),
   checkUpdatesOnStartup: $("#check-updates-on-startup"), saveUpdateSettings: $("#save-update-settings"),
@@ -208,6 +208,7 @@ function updateBatchControls() {
   ui.selectAllProjectPages.textContent = selected.length === listed.length && listed.length ? "すべて解除" : "すべて選択";
   ui.batchCapturePages.disabled = loginBlocked() || state.batchRunning || selected.length === 0;
   ui.checkProjectPages.disabled = loginBlocked() || state.batchRunning || !selected.some((page) => page.saved);
+  ui.resetProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
 }
 
 function updateUndoControls() {
@@ -396,9 +397,9 @@ function renderProjectPages() {
       changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
       error: "公開版の確認失敗",
     }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
-    status.textContent = page.saved ? savedStatus : "未取得・クリックしてブラウザ表示";
+    status.textContent = page.saved ? savedStatus : "未取得・クリックして編集画面へ取り込み";
     button.append(title, path, status);
-    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : startCaptureForUrl(page.url));
+    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : openUncapturedProjectPage(page));
     row.append(checkbox, button);
     if (page.saved && page.checkStatus === "changed") {
       const actions = document.createElement("div");
@@ -411,6 +412,15 @@ function renderProjectPages() {
       keep.addEventListener("click", () => keepCurrentProjectPage(page.id));
       replace.addEventListener("click", () => replaceProjectPage(page.id));
       actions.append(keep, replace);
+      row.append(actions);
+    } else if (!page.saved) {
+      const actions = document.createElement("div");
+      actions.className = "project-page-actions";
+      const manual = document.createElement("button");
+      manual.type = "button";
+      manual.textContent = "取得用ブラウザで開く";
+      manual.addEventListener("click", () => startCaptureForUrl(page.url));
+      actions.append(manual);
       row.append(actions);
     }
     return row;
@@ -426,6 +436,67 @@ async function captureUrlDirectly(url) {
     fileName: decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html"),
     url: decodeURIComponent(response.headers.get("X-Captured-Url") || url),
   };
+}
+
+async function openUncapturedProjectPage(page) {
+  if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
+  if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてからページを開いてください。", "error");
+  try {
+    if (!(await preserveCurrentPage())) return;
+    state.batchRunning = true;
+    updateBatchControls();
+    setStatus(`「${page.title}」を取り込み、編集画面へ表示しています…`, "info");
+    const captured = await captureUrlDirectly(page.url);
+    ui.captureUrl.value = captured.url;
+    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
+    await saveCurrentToProject({ quiet: true });
+    setStatus(`「${page.title}」を取り込み、案件フォルダへ保存しました。`, "success");
+  } catch (error) {
+    setStatus(`編集画面へ取り込めませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
+  } finally {
+    state.batchRunning = false;
+    renderProjectPages();
+    updateBatchControls();
+  }
+}
+
+function clearLoadedPage() {
+  editor.unload();
+  Object.assign(state, {
+    fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
+    sourceUrl: "", activeProjectPageId: "", dirty: false,
+  });
+  ui.fileName.textContent = "ファイル未選択";
+  ui.badge.textContent = "未読込";
+  delete ui.badge.dataset.mode;
+  ui.empty.hidden = false;
+  ui.frame.hidden = true;
+  showSelection(null);
+  renderHistory();
+  setControls(false);
+}
+
+async function resetSelectedProjectPages() {
+  const targets = listedProjectPages().filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  if (!targets.length) return;
+  const message = `${targets.length}ページを未取得状態へ戻します。\n\n原本・編集中・修正後・差分・変更履歴・旧版バックアップが案件フォルダから削除されます。URLは一覧に残ります。続けますか？`;
+  if (!window.confirm(message)) return;
+  state.batchRunning = true;
+  updateBatchControls();
+  try {
+    const activeReset = targets.some((page) => page.id === state.activeProjectPageId);
+    const reset = await projectStore.resetPages(targets.map((page) => page.id));
+    reset.forEach((page) => state.selectedProjectUrls.delete(page.url));
+    if (activeReset) clearLoadedPage();
+    ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
+    setStatus(`${reset.length}ページの保存データを削除し、未取得状態へ戻しました。`, "success");
+  } catch (error) {
+    setStatus(`ページをリセットできませんでした: ${error.message}`, "error");
+  } finally {
+    state.batchRunning = false;
+    renderProjectPages();
+    updateBatchControls();
+  }
 }
 
 async function processSelectedPages(mode) {
@@ -503,6 +574,7 @@ ui.selectAllProjectPages.addEventListener("click", () => {
 });
 ui.batchCapturePages.addEventListener("click", () => processSelectedPages("capture"));
 ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check"));
+ui.resetProjectPages.addEventListener("click", resetSelectedProjectPages);
 
 async function saveCurrentToProject({ quiet = false } = {}) {
   if (!state.originalHtml) throw new Error("保存するページがありません。");
@@ -605,7 +677,7 @@ ui.crawlProjectPages.addEventListener("click", async () => {
     const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
     const limitText = result.truncated ? "（100件で打ち切り）" : "";
     ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
-    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックするとブラウザで開きます。`, "success");
+    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると編集画面へ取り込みます。`, "success");
   } catch (error) {
     ui.projectState.textContent = "配下ページの検索に失敗しました";
     setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");

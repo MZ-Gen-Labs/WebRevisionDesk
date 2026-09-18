@@ -71,6 +71,26 @@ async function ensureDirectory(root, segments) {
   return current;
 }
 
+async function clearPageDirectory(root, segments) {
+  if (segments[0] !== "pages" || segments.length < 2) throw new Error("削除対象のページフォルダが不正です。");
+  let parent = root;
+  for (const segment of segments.slice(0, -1)) parent = await parent.getDirectoryHandle(segment);
+  const directory = await parent.getDirectoryHandle(segments.at(-1));
+  const fileNames = [
+    "original.html", "working.html", "modified.html", "diff.html", "redline.html",
+    "latest-online.html", "page.json", "versions",
+  ];
+  for (const name of fileNames) {
+    try { await directory.removeEntry(name, { recursive: name === "versions" }); } catch (error) {
+      if (error.name !== "NotFoundError") throw error;
+    }
+  }
+  // 子ページのURLがこのフォルダ配下にある場合は、空でないため削除せず残す。
+  try { await parent.removeEntry(segments.at(-1)); } catch (error) {
+    if (error.name !== "InvalidModificationError") throw error;
+  }
+}
+
 function documentTitle(html, fallback) {
   return new DOMParser().parseFromString(html, "text/html").title || fallback;
 }
@@ -202,6 +222,42 @@ export class ProjectStore {
     ]);
     const data = JSON.parse(dataText);
     return { page, originalHtml, workingHtml, changes: data.changes || [] };
+  }
+
+  async resetPages(pageIds) {
+    if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
+    const ids = new Set(pageIds);
+    const targets = this.project.pages.filter((page) => ids.has(page.id));
+    if (!targets.length) return [];
+
+    const resetPages = [];
+    for (const page of targets) {
+      try {
+        await clearPageDirectory(this.directory, page.path.split("/").filter(Boolean));
+      } catch (error) {
+        if (error.name !== "NotFoundError") throw error;
+      }
+      resetPages.push(page);
+    }
+
+    const discoveredByUrl = new Map((this.project.discoveredPages || []).map((page) => [page.url, page]));
+    const now = new Date().toISOString();
+    for (const page of resetPages) {
+      if (!discoveredByUrl.has(page.url)) {
+        discoveredByUrl.set(page.url, {
+          url: page.url,
+          title: page.title || page.url,
+          httpStatus: 0,
+          discoveredAt: now,
+          checkedAt: now,
+        });
+      }
+    }
+    this.project.discoveredPages = [...discoveredByUrl.values()].sort((a, b) => a.url.localeCompare(b.url, "ja"));
+    const resetIds = new Set(resetPages.map((page) => page.id));
+    this.project.pages = this.project.pages.filter((page) => !resetIds.has(page.id));
+    await this.saveProject();
+    return resetPages;
   }
 
   async checkSource(pageId, currentHtml, comparison) {

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeClasses } from "../../src/html.js";
-import { pagePathForUrl } from "../../src/project-storage.js";
+import { pagePathForUrl, ProjectStore } from "../../src/project-storage.js";
 import { compareVersions, normalizedVersion, parseRepository, releaseAsset } from "../../src/update-service.js";
 
 test("class names are normalized without duplicates", () => {
@@ -30,6 +30,69 @@ test("query parameters are represented by stable path suffixes", () => {
   const second = pagePathForUrl("https://example.com/product/item?a=2", "https://example.com/product");
   assert.match(first.at(-1), /^item--query-/);
   assert.notEqual(first.at(-1), second.at(-1));
+});
+
+class MemoryFileHandle {
+  constructor(name, content = "") { this.name = name; this.kind = "file"; this.content = content; }
+  async getFile() { return { text: async () => this.content }; }
+  async createWritable() {
+    return { write: async (content) => { this.content = content; }, close: async () => {} };
+  }
+}
+
+class MemoryDirectoryHandle {
+  constructor(name) { this.name = name; this.kind = "directory"; this.entries = new Map(); }
+  async getDirectoryHandle(name, { create = false } = {}) {
+    if (!this.entries.has(name) && create) this.entries.set(name, new MemoryDirectoryHandle(name));
+    const entry = this.entries.get(name);
+    if (!entry || entry.kind !== "directory") throw new DOMException("Not found", "NotFoundError");
+    return entry;
+  }
+  async getFileHandle(name, { create = false } = {}) {
+    if (!this.entries.has(name) && create) this.entries.set(name, new MemoryFileHandle(name));
+    const entry = this.entries.get(name);
+    if (!entry || entry.kind !== "file") throw new DOMException("Not found", "NotFoundError");
+    return entry;
+  }
+  async removeEntry(name, { recursive = false } = {}) {
+    const entry = this.entries.get(name);
+    if (!entry) throw new DOMException("Not found", "NotFoundError");
+    if (entry.kind === "directory" && entry.entries.size && !recursive) {
+      throw new DOMException("Directory is not empty", "InvalidModificationError");
+    }
+    this.entries.delete(name);
+  }
+}
+
+test("resetting a parent page removes its artifacts but preserves nested pages", async () => {
+  const root = new MemoryDirectoryHandle("project");
+  const pages = await root.getDirectoryHandle("pages", { create: true });
+  const parent = await pages.getDirectoryHandle("parent", { create: true });
+  await parent.getFileHandle("original.html", { create: true });
+  await parent.getFileHandle("working.html", { create: true });
+  const child = await parent.getDirectoryHandle("child", { create: true });
+  await child.getFileHandle("original.html", { create: true });
+
+  const store = new ProjectStore();
+  store.directory = root;
+  store.project = {
+    format: "web-revision-folder-project", version: 1, projectName: "test", baseUrl: "https://example.com/",
+    pages: [
+      { id: "parent", url: "https://example.com/parent", title: "Parent", path: "pages/parent" },
+      { id: "child", url: "https://example.com/parent/child", title: "Child", path: "pages/parent/child" },
+    ],
+    discoveredPages: [],
+  };
+
+  const reset = await store.resetPages(["parent"]);
+  assert.deepEqual(reset.map((page) => page.id), ["parent"]);
+  assert.deepEqual(store.project.pages.map((page) => page.id), ["child"]);
+  assert.equal(store.project.discoveredPages[0].url, "https://example.com/parent");
+  assert.equal(parent.entries.has("original.html"), false);
+  assert.equal(parent.entries.has("working.html"), false);
+  assert.equal(parent.entries.has("child"), true);
+  assert.equal(child.entries.has("original.html"), true);
+  assert.equal(root.entries.has("project.json"), true);
 });
 
 test("GitHub repository URLs are strictly validated", () => {

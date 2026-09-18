@@ -189,3 +189,88 @@ test("undo restores nested links and formatting, reload can be cancelled", async
   assert.match(await page.locator("#save-state").textContent(), /未保存/);
   await page.close();
 });
+
+test("an uncaptured project page opens in the editor and can be reset to uncaptured", async () => {
+  const page = await browser.newPage();
+  await page.addInitScript(() => {
+    class MemoryFileHandle {
+      constructor(name, content = "") { this.name = name; this.kind = "file"; this.content = content; }
+      async getFile() { return { text: async () => this.content }; }
+      async createWritable() {
+        return { write: async (content) => { this.content = content; }, close: async () => {} };
+      }
+    }
+    class MemoryDirectoryHandle {
+      constructor(name) { this.name = name; this.kind = "directory"; this.entries = new Map(); }
+      async requestPermission() { return "granted"; }
+      async getDirectoryHandle(name, { create = false } = {}) {
+        if (!this.entries.has(name) && create) this.entries.set(name, new MemoryDirectoryHandle(name));
+        const entry = this.entries.get(name);
+        if (!entry || entry.kind !== "directory") throw new DOMException("Not found", "NotFoundError");
+        return entry;
+      }
+      async getFileHandle(name, { create = false } = {}) {
+        if (!this.entries.has(name) && create) this.entries.set(name, new MemoryFileHandle(name));
+        const entry = this.entries.get(name);
+        if (!entry || entry.kind !== "file") throw new DOMException("Not found", "NotFoundError");
+        return entry;
+      }
+      async removeEntry(name, { recursive = false } = {}) {
+        const entry = this.entries.get(name);
+        if (!entry) throw new DOMException("Not found", "NotFoundError");
+        if (entry.kind === "directory" && entry.entries.size && !recursive) {
+          throw new DOMException("Directory is not empty", "InvalidModificationError");
+        }
+        this.entries.delete(name);
+      }
+    }
+    const root = new MemoryDirectoryHandle("test-project");
+    root.entries.set("project.json", new MemoryFileHandle("project.json", JSON.stringify({
+      format: "web-revision-folder-project",
+      version: 1,
+      projectName: "Direct capture test",
+      baseUrl: "https://example.com/base",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pages: [],
+      discoveredPages: [{
+        url: "https://example.com/base/one",
+        title: "未取得テストページ",
+        httpStatus: 200,
+        discoveredAt: new Date().toISOString(),
+        checkedAt: new Date().toISOString(),
+      }],
+    })));
+    window.__testProjectDirectory = root;
+    window.showDirectoryPicker = async () => root;
+  });
+  await page.route("**/api/capture/direct", (route) => route.fulfill({
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Captured-Filename": encodeURIComponent("one.html"),
+      "X-Captured-Url": encodeURIComponent("https://example.com/base/one"),
+    },
+    body: "<!doctype html><html><head><title>Captured page</title></head><body><h1>中央に表示されたページ</h1></body></html>",
+  }));
+
+  await page.goto(baseUrl);
+  await page.locator("#select-project-folder").click();
+  const projectPage = page.locator(".project-page").filter({ hasText: "未取得テストページ" });
+  await projectPage.waitFor();
+  assert.match(await projectPage.textContent(), /編集画面へ取り込み/);
+  assert.equal(await page.locator(".project-page-actions").getByText("取得用ブラウザで開く").isVisible(), true);
+
+  await projectPage.click();
+  await page.frameLocator("#page-frame").locator("h1").filter({ hasText: "中央に表示されたページ" }).waitFor();
+  await page.locator(".project-page.saved").filter({ hasText: "Captured page" }).waitFor();
+
+  await page.locator('.project-page-row input[type="checkbox"]').check();
+  assert.equal(await page.locator("#reset-project-pages").isEnabled(), true);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#reset-project-pages").click();
+  await page.locator(".project-page:not(.saved)").filter({ hasText: "未取得テストページ" }).waitFor();
+  assert.equal(await page.locator("#empty-state").isVisible(), true);
+  assert.match(await page.locator("#status").textContent(), /未取得状態へ戻しました/);
+  await page.close();
+});
