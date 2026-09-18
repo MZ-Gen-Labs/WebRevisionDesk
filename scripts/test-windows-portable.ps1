@@ -29,25 +29,26 @@ foreach ($script in @((Join-Path $installRoot "launcher.ps1"), (Join-Path $insta
   if ($parseErrors.Count -gt 0) { throw "PowerShell script could not be parsed: $script - $($parseErrors[0].Message)" }
 }
 
-$port = 23187
 $dataRoot = Join-Path $testRoot "data"
-$env:PORT = "$port"
-$env:WEB_REVISION_PRODUCTION = "1"
 $env:WEB_REVISION_DATA_DIR = $dataRoot
-$process = Start-Process -FilePath (Join-Path $versionRoot "node/node.exe") -ArgumentList "server.js" -WorkingDirectory $versionRoot -PassThru -WindowStyle Hidden
+$env:WEB_REVISION_NO_BROWSER = "1"
 try {
+  & (Join-Path $installRoot "Start-WebRevisionDesk.cmd")
+  if ($LASTEXITCODE -ne 0) { throw "Start-WebRevisionDesk.cmd failed with exit code $LASTEXITCODE." }
   $healthy = $false
   for ($attempt = 0; $attempt -lt 40; $attempt++) {
     try {
-      $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 2
+      $health = Invoke-RestMethod "http://127.0.0.1:5173/api/health" -TimeoutSec 2
       if ($health.ok -and $health.version -eq $package.version) { $healthy = $true; break }
     } catch { Start-Sleep -Milliseconds 250 }
   }
   if (-not $healthy) { throw "Portable server did not become healthy." }
-  $page = Invoke-WebRequest "http://127.0.0.1:$port/" -UseBasicParsing
+  $page = Invoke-WebRequest "http://127.0.0.1:5173/" -UseBasicParsing
   if ($page.StatusCode -ne 200 -or $page.Content -notmatch "Web Revision Desk") { throw "Portable UI was not served correctly." }
 } finally {
-  if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+  Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique |
+    ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 }
 
 Write-Host "Windows portable smoke test passed."

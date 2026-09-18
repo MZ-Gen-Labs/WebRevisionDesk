@@ -8,3 +8,11 @@ for (const file of ["windows/launcher.ps1", "windows/updater.ps1"]) {
     assert.equal(content.every((byte) => byte === 9 || byte === 10 || byte === 13 || (byte >= 32 && byte <= 126)), true);
   });
 }
+
+for (const file of ["windows/Start-WebRevisionDesk.cmd", "windows/Start-WebRevisionEditor.cmd"]) {
+  test(`${file} lets launcher.ps1 resolve its own installation directory`, async () => {
+    const content = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
+    assert.match(content, /-File "%~dp0launcher\.ps1"/);
+    assert.doesNotMatch(content, /-InstallRoot/);
+  });
+}

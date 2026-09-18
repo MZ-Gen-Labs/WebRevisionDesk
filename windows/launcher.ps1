@@ -4,7 +4,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$InstallRoot = [IO.Path]::GetFullPath($InstallRoot.TrimEnd('\'))
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+$PathRoot = [IO.Path]::GetPathRoot($InstallRoot)
+if ($InstallRoot -ne $PathRoot) { $InstallRoot = $InstallRoot.TrimEnd([char[]]"\/") }
 $CurrentFile = Join-Path $InstallRoot "current.json"
 $DataRoot = Join-Path $env:LOCALAPPDATA "WebRevisionEditor"
 $LogDirectory = Join-Path $DataRoot "logs"
@@ -50,7 +52,7 @@ try {
     } catch {}
   }
   if ($Ready) {
-    Start-Process "http://127.0.0.1:5173/"
+    if ($env:WEB_REVISION_NO_BROWSER -ne "1") { Start-Process "http://127.0.0.1:5173/" }
     Write-LauncherLog "v$Version is ready."
     exit 0
   }

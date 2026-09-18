@@ -7,7 +7,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$InstallRoot = [IO.Path]::GetFullPath($InstallRoot.TrimEnd('\'))
+$InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
+$PathRoot = [IO.Path]::GetPathRoot($InstallRoot)
+if ($InstallRoot -ne $PathRoot) { $InstallRoot = $InstallRoot.TrimEnd([char[]]"\/") }
 $ZipPath = [IO.Path]::GetFullPath($ZipPath)
 $VersionsRoot = Join-Path $InstallRoot "versions"
 $CurrentFile = Join-Path $InstallRoot "current.json"
