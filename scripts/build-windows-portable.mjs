@@ -20,7 +20,8 @@ if (process.platform !== "win32") {
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: root, stdio: "inherit", shell: false, ...options });
+    const shell = process.platform === "win32" && command.toLowerCase().endsWith(".cmd");
+    const child = spawn(command, args, { cwd: root, stdio: "inherit", shell, ...options });
     child.on("error", reject);
     child.on("exit", (code) => code === 0 ? resolve() : reject(new Error(`${command} が終了コード ${code} で失敗しました。`)));
   });
