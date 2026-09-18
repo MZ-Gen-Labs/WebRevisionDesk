@@ -7,6 +7,8 @@ import { comparePageHtml } from "./page-comparison.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
+  loginRequired: $("#login-required"), loginOpen: $("#login-open"), loginDone: $("#login-done"),
+  loginCancel: $("#login-cancel"), loginState: $("#login-state"),
   file: $("#html-file"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
   fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
   modified: $("#show-modified"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"), download: $("#download"),
@@ -43,6 +45,25 @@ const state = {
   selectedProjectUrls: new Set(), batchRunning: false,
 };
 let captureSessionId = "";
+let loginSessionId = "";
+let loginReady = false;
+let loginBusy = false;
+
+function loginBlocked() {
+  return loginBusy || Boolean(loginSessionId) || (ui.loginRequired.checked && !loginReady);
+}
+
+function syncLoginControls() {
+  const enabled = ui.loginRequired.checked;
+  ui.loginOpen.hidden = ui.loginDone.hidden = ui.loginCancel.hidden = !enabled;
+  ui.loginRequired.disabled = loginBusy || Boolean(loginSessionId) || state.batchRunning;
+  ui.loginOpen.disabled = loginBusy || Boolean(loginSessionId) || Boolean(captureSessionId) || state.batchRunning;
+  ui.loginDone.disabled = ui.loginCancel.disabled = loginBusy || !loginSessionId;
+  ui.openCapture.disabled = loginBusy || Boolean(loginSessionId) || Boolean(captureSessionId);
+  ui.selectProjectFolder.disabled = !ProjectStore.isSupported() || loginBusy || Boolean(loginSessionId);
+  ui.loginState.textContent = loginBusy ? "処理中…" : loginSessionId ? "ブラウザで認証後、「ログイン完了」を押してください" : !enabled ? "ログイン待機なし" : loginReady ? "ログイン完了を確認済み（利用者確認）" : "ログイン完了待ち：検索・一括取得は待機中";
+  syncProjectControls();
+}
 let latestAppUpdate = null;
 let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
@@ -178,7 +199,7 @@ function syncProjectControls() {
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml;
-  ui.crawlProjectPages.disabled = !hasProject;
+  ui.crawlProjectPages.disabled = !hasProject || loginBlocked();
   updateBatchControls();
 }
 
@@ -187,8 +208,8 @@ function updateBatchControls() {
   const selected = listed.filter((page) => state.selectedProjectUrls.has(page.url));
   ui.selectAllProjectPages.disabled = state.batchRunning || listed.length === 0;
   ui.selectAllProjectPages.textContent = selected.length === listed.length && listed.length ? "すべて解除" : "すべて選択";
-  ui.batchCapturePages.disabled = state.batchRunning || selected.length === 0;
-  ui.checkProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
+  ui.batchCapturePages.disabled = loginBlocked() || state.batchRunning || selected.length === 0;
+  ui.checkProjectPages.disabled = loginBlocked() || state.batchRunning || !selected.some((page) => page.saved);
 }
 
 function updateUndoControls() {
@@ -409,6 +430,7 @@ async function captureUrlDirectly(url) {
 }
 
 async function processSelectedPages(mode) {
+  if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてから一括処理してください。", "error");
   const selected = listedProjectPages().filter((page) => state.selectedProjectUrls.has(page.url));
   const targets = mode === "check" ? selected.filter((page) => page.saved) : selected;
@@ -533,6 +555,9 @@ ui.selectProjectFolder.addEventListener("click", async () => {
     const project = await projectStore.selectDirectory();
     ui.projectName.value = project.projectName;
     ui.projectBaseUrl.value = project.baseUrl;
+    ui.loginRequired.checked = project.loginRequired === true;
+    loginReady = false;
+    syncLoginControls();
     ui.projectState.textContent = `${project.projectName}：保存済み${project.pages.length}ページ`;
     syncProjectControls();
     renderProjectPages();
@@ -554,6 +579,7 @@ ui.saveProjectPage.addEventListener("click", async () => {
 });
 
 ui.crawlProjectPages.addEventListener("click", async () => {
+  if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   ui.crawlProjectPages.disabled = true;
   try {
     projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
@@ -610,6 +636,7 @@ async function postJson(url, body) {
 }
 
 async function startCaptureForUrl(url) {
+  if (loginBusy || loginSessionId) return setStatus("ログイン完了または中止を押してください。", "error");
   if (!url) return setStatus("取得するURLを入力してください。", "error");
   ui.captureUrl.value = url;
   ui.openCapture.disabled = true;
@@ -836,5 +863,40 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 loadAppInfo();
+ui.loginRequired.addEventListener("change", async () => {
+  loginReady = false;
+  syncLoginControls();
+  if (projectStore.project) {
+    projectStore.project.loginRequired = ui.loginRequired.checked;
+    try { await projectStore.saveProject(); }
+    catch (error) { setStatus(`ログイン設定の保存に失敗しました: ${error.message}`, "error"); }
+  }
+});
+ui.loginOpen.addEventListener("click", async () => {
+  loginBusy = true;
+  loginReady = false;
+  syncLoginControls();
+  try {
+    const response = await postJson("/api/capture/start", { url: ui.projectBaseUrl.value.trim() || ui.captureUrl.value.trim() });
+    loginSessionId = (await response.json()).sessionId;
+  } catch (error) { setStatus(`ログイン用ブラウザを開けませんでした: ${error.message}`, "error"); }
+  finally { loginBusy = false; syncLoginControls(); }
+});
+async function finishLogin(completed) {
+  loginBusy = true;
+  syncLoginControls();
+  try {
+    await postJson(completed ? "/api/login/finish" : "/api/capture/cancel", { sessionId: loginSessionId });
+    loginSessionId = "";
+    loginReady = completed;
+    setStatus(completed ? "ログイン準備が完了しました。検索・一括取得を開始できます。" : "ログイン待機を中止しました。", "success");
+  } catch (error) { setStatus(`ログイン準備に失敗しました: ${error.message}`, "error"); }
+  finally { loginBusy = false; syncLoginControls(); }
+}
+ui.loginDone.addEventListener("click", () => finishLogin(true));
+ui.loginCancel.addEventListener("click", () => finishLogin(false));
+ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
+ui.captureUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
+syncLoginControls();
 updateGuidance();
 showSelection(null);

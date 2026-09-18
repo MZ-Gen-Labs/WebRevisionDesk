@@ -93,3 +93,39 @@ test("advanced image fields only appear for images", async () => {
   assert.equal(await page.locator('[data-editor-field="class"]').isVisible(), true);
   await page.close();
 });
+
+test("login preparation waits for explicit completion and resets on URL change", async () => {
+  const page = await browser.newPage();
+  let completions = 0;
+  await page.route("**/api/capture/start", (route) => route.fulfill({ json: { sessionId: "login-test" } }));
+  await page.route("**/api/login/finish", (route) => {
+    completions++;
+    return route.fulfill({ json: { ok: true } });
+  });
+  await page.goto(baseUrl);
+  await page.locator("#capture-url").fill("https://example.com/private");
+  await page.locator("#login-required").check();
+  assert.match(await page.locator("#login-state").textContent(), /ログイン完了待ち/);
+  await page.locator("#login-open").click();
+  await page.locator("#login-done").waitFor({ state: "visible" });
+  await page.waitForFunction(() => !document.querySelector("#login-done").disabled);
+  assert.equal(completions, 0);
+  assert.equal(await page.locator("#open-capture-browser").isDisabled(), true);
+  assert.equal(await page.locator("#crawl-project-pages").isDisabled(), true);
+  await page.locator("#login-done").click();
+  await page.locator("#login-state").filter({ hasText: "利用者確認" }).waitFor();
+  assert.equal(completions, 1);
+  assert.equal(await page.locator("#open-capture-browser").isEnabled(), true);
+  await page.locator("#capture-url").fill("https://example.com/another");
+  assert.match(await page.locator("#login-state").textContent(), /ログイン完了待ち/);
+  await page.close();
+});
+
+test("login finish rejects an unknown session", async () => {
+  const response = await fetch(`${baseUrl}/api/login/finish`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: "missing" }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /開き直して/);
+});

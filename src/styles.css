@@ -55,7 +55,11 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .project-bar label { gap: .25rem; }
 .project-bar input { padding: .5rem .6rem; }
 .project-bar span { align-self: center; color: #6b6c7d; font-size: .75rem; }
-.workspace { display: grid; grid-template-columns: 230px minmax(650px, 1fr) 330px; height: calc(100vh - 326px); }
+.login-bar { display: flex; align-items: center; gap: .7rem; padding: .5rem 1.4rem; background: #fff; border-bottom: 1px solid #dedfe7; }
+.login-bar label { display: flex; align-items: center; gap: .4rem; }
+.login-bar input { width: auto; }
+.login-bar span { font-size: .8rem; color: #55566c; }
+.workspace { display: grid; grid-template-columns: 230px minmax(650px, 1fr) 330px; height: calc(100vh - 390px); min-height: 400px; }
 .project-sidebar { overflow: auto; padding: 1rem; border-right: 1px solid #d8d9e2; background: #f8f9fc; }
 .project-heading { padding-bottom: .7rem; border-bottom: 1px solid #dedfe7; }
 .project-heading h2 span { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 999px; color: #fff; background: #5b5bd6; font-size: .75rem; }

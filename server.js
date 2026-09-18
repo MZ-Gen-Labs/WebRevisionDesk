@@ -207,6 +207,15 @@ async function cancelCapture(request, response) {
   sendJson(response, 200, { ok: true });
 }
 
+async function finishLogin(request, response) {
+  const { sessionId } = await readJson(request);
+  const session = sessions.get(sessionId);
+  if (!session) throw new Error("ログイン用ブラウザを開き直してください。");
+  await session.context.close();
+  sessions.delete(sessionId);
+  sendJson(response, 200, { ok: true });
+}
+
 async function captureDirect(request, response) {
   const { url: inputUrl } = await readJson(request);
   const url = validateUrl(inputUrl);
@@ -257,6 +266,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === "POST" && request.url === "/api/capture/start") return await startCapture(request, response);
+    if (request.method === "POST" && request.url === "/api/login/finish") return await finishLogin(request, response);
     if (request.method === "POST" && request.url === "/api/capture/finish") return await finishCapture(request, response);
     if (request.method === "POST" && request.url === "/api/capture/cancel") return await cancelCapture(request, response);
     if (request.method === "POST" && request.url === "/api/crawl") return await crawlSite(request, response);

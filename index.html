@@ -87,6 +87,13 @@
       <span id="project-state">案件フォルダ未選択</span>
     </section>
 
+    <section class="login-bar" aria-label="ログイン準備">
+      <label><input id="login-required" type="checkbox" /> このサイトはログインが必要</label>
+      <button id="login-open" type="button" hidden>ログイン用ブラウザを開く</button>
+      <button id="login-done" type="button" hidden disabled>ログイン完了</button>
+      <button id="login-cancel" type="button" hidden disabled>ログイン待機を中止</button>
+      <span id="login-state" role="status">ログイン待機なし</span>
+    </section>
     <main class="workspace">
       <aside class="project-sidebar" aria-label="案件ページ一覧">
         <div class="project-heading">
