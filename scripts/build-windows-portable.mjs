@@ -41,6 +41,10 @@ async function download(url, destination) {
   await writeFile(destination, Buffer.concat(chunks));
 }
 
+function powerShellLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
 await rm(workRoot, { recursive: true, force: true });
 await mkdir(appDirectory, { recursive: true });
 await mkdir(path.join(appDirectory, "src"), { recursive: true });
@@ -77,7 +81,7 @@ const checksums = await fetch(`${nodeBaseUrl}/SHASUMS256.txt`, { signal: AbortSi
 const expectedNodeHash = checksums.split(/\r?\n/).find((line) => line.endsWith(`  ${nodeArchiveName}`))?.split(/\s+/)[0];
 if (!expectedNodeHash || await sha256(nodeArchive) !== expectedNodeHash) throw new Error("Node.js公式ZIPのSHA-256が一致しません。");
 const nodeExtract = path.join(workRoot, "node-extract");
-await run("powershell.exe", ["-NoProfile", "-Command", "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force", nodeArchive, nodeExtract]);
+await run("powershell.exe", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath ${powerShellLiteral(nodeArchive)} -DestinationPath ${powerShellLiteral(nodeExtract)} -Force`]);
 await cp(path.join(nodeExtract, `node-v${nodeVersion}-win-x64`), path.join(appDirectory, "node"), { recursive: true });
 
 await writeFile(path.join(appDirectory, "release.json"), `${JSON.stringify({
@@ -89,7 +93,7 @@ await writeFile(path.join(appDirectory, "release.json"), `${JSON.stringify({
 
 const updateZip = path.join(outputRoot, `WebRevisionEditor-${version}-win-x64.zip`);
 await rm(updateZip, { force: true });
-await run("powershell.exe", ["-NoProfile", "-Command", "Compress-Archive -Path (Join-Path $args[0] '*') -DestinationPath $args[1] -CompressionLevel Optimal", appDirectory, updateZip]);
+await run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path (Join-Path ${powerShellLiteral(appDirectory)} '*') -DestinationPath ${powerShellLiteral(updateZip)} -CompressionLevel Optimal`]);
 
 await mkdir(path.join(completeDirectory, "versions", version), { recursive: true });
 await cp(appDirectory, path.join(completeDirectory, "versions", version), { recursive: true });
@@ -99,7 +103,7 @@ for (const name of ["Start-WebRevisionEditor.cmd", "launcher.ps1", "updater.ps1"
 await writeFile(path.join(completeDirectory, "current.json"), `${JSON.stringify({ version, previousVersion: null }, null, 2)}\n`);
 const completeZip = path.join(outputRoot, `WebRevisionEditor-${version}-win-x64-complete.zip`);
 await rm(completeZip, { force: true });
-await run("powershell.exe", ["-NoProfile", "-Command", "Compress-Archive -Path $args[0] -DestinationPath $args[1] -CompressionLevel Optimal", completeDirectory, completeZip]);
+await run("powershell.exe", ["-NoProfile", "-Command", `Compress-Archive -Path ${powerShellLiteral(completeDirectory)} -DestinationPath ${powerShellLiteral(completeZip)} -CompressionLevel Optimal`]);
 
 const sums = `${await sha256(updateZip)}  ${path.basename(updateZip)}\n${await sha256(completeZip)}  ${path.basename(completeZip)}\n`;
 await writeFile(path.join(outputRoot, "SHA256SUMS.txt"), sums);
