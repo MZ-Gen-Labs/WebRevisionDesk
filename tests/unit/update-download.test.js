@@ -38,6 +38,11 @@ test("an update with a mismatched SHA-256 is rejected and not retained", async (
     await assert.rejects(() => service.download(), /SHA-256/);
     const settings = await service.readSettings();
     assert.equal(settings.lastDownloadedUpdate, null);
+    release.assets[0].digest = null;
+    await assert.rejects(() => service.download(), /SHA-256検証情報/);
+    release.assets[0].digest = `sha256:${"0".repeat(64)}`;
+    release.tag_name = "v9.0.0/../../outside";
+    await assert.rejects(() => service.download(), /バージョンが不正/);
   } finally {
     globalThis.fetch = previousFetch;
     if (previousDirectory === undefined) delete process.env.WEB_REVISION_DATA_DIR;

@@ -4,6 +4,8 @@ import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/prom
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const APP_DIRECTORY = "WebRevisionEditor";
 const SETTINGS_VERSION = 1;
@@ -46,13 +48,10 @@ export function compareVersions(left, right) {
 }
 
 export function releaseAsset(release) {
-  const candidates = (release.assets || []).filter((asset) => /\.zip$/i.test(asset.name));
+  const candidates = (release.assets || []).filter((asset) => /[-_]win[-_]x64\.zip$/i.test(asset.name));
   const updates = candidates.filter((asset) => !/(?:complete|full)/i.test(asset.name));
   return updates.find((asset) => /win(?:dows)?[-_]?x64/i.test(asset.name))
     || updates.find((asset) => /win(?:dows)?/i.test(asset.name))
-    || updates[0]
-    || candidates.find((asset) => /win(?:dows)?/i.test(asset.name))
-    || candidates[0]
     || null;
 }
 
@@ -159,7 +158,7 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     const release = await fetchJson(`https://api.github.com/repos/${repository.owner}/${repository.repo}/releases/latest`);
     const manifest = await fetchManifest(release);
     const asset = releaseAsset(release);
-    const latestVersion = normalizedVersion(manifest.version || release.tag_name);
+    const latestVersion = normalizedVersion(release.tag_name);
     const result = {
       currentVersion: appVersion,
       latestVersion,
@@ -188,6 +187,8 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     if (!asset) throw new Error("ReleaseにWindows用ZIPが添付されていません。");
     if (asset.size > MAX_UPDATE_SIZE) throw new Error("更新ZIPが許容サイズを超えています。");
     const version = normalizedVersion(release.tag_name);
+    if (!/^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)) throw new Error("更新バージョンが不正です。");
+    if (!/^sha256:[a-f0-9]{64}$/i.test(asset.digest || "")) throw new Error("更新ZIPのSHA-256検証情報がありません。適用しません。");
     if (compareVersions(version, appVersion) <= 0) throw new Error("ダウンロードが必要な新しいバージョンはありません。");
     const versionDirectory = path.join(updatesDirectory, version);
     await mkdir(versionDirectory, { recursive: true });
@@ -203,13 +204,14 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     const output = createWriteStream(temporary, { flags: "w", mode: 0o600 });
     let size = 0;
     try {
-      for await (const chunk of response.body) {
-        size += chunk.length;
-        if (size > MAX_UPDATE_SIZE) throw new Error("更新ZIPが許容サイズを超えています。");
-        hash.update(chunk);
-        if (!output.write(chunk)) await new Promise((resolve) => output.once("drain", resolve));
-      }
-      await new Promise((resolve, reject) => output.end((error) => error ? reject(error) : resolve()));
+      await pipeline(response.body, new Transform({
+        transform(chunk, encoding, callback) {
+          size += chunk.length;
+          if (size > MAX_UPDATE_SIZE) return callback(new Error("更新ZIPが許容サイズを超えています。"));
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      }), output);
     } catch (error) {
       output.destroy();
       await unlink(temporary).catch(() => {});

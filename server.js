@@ -16,6 +16,7 @@ const updateService = await createUpdateService({
 });
 const profileDir = updateService.profileDirectory;
 const sessions = new Map();
+let browserOperationRunning = false;
 
 const productionMode = process.env.WEB_REVISION_PRODUCTION === "1";
 const vite = productionMode ? null : await import("vite").then(({ createServer }) => createServer({
@@ -167,6 +168,7 @@ async function startCapture(request, response) {
   const page = context.pages()[0] ?? await context.newPage();
   const sessionId = randomUUID();
   sessions.set(sessionId, { context, page });
+  context.on("close", () => sessions.delete(sessionId));
   try {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
   } catch (error) {
@@ -238,7 +240,24 @@ async function captureDirect(request, response) {
 }
 
 const server = http.createServer(async (request, response) => {
+  let ownsBrowserOperation = false;
   try {
+    const expectedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
+    if (!expectedHosts.has(request.headers.host)) return sendJson(response, 403, { error: "許可されていない接続先です。" });
+    if (request.url.startsWith("/api/")) {
+      const origin = request.headers.origin;
+      if ((origin && origin !== `http://${request.headers.host}`) || request.headers["sec-fetch-site"] === "cross-site") {
+        return sendJson(response, 403, { error: "外部サイトからの操作は許可されていません。" });
+      }
+      if (request.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
+        return sendJson(response, 415, { error: "JSON形式で送信してください。" });
+      }
+    }
+    if (request.method === "POST" && /^(?:\/api\/capture\/|\/api\/login\/|\/api\/crawl$)/.test(request.url)) {
+      if (browserOperationRunning) return sendJson(response, 409, { error: "ブラウザ処理中です。完了してから再実行してください。" });
+      browserOperationRunning = true;
+      ownsBrowserOperation = true;
+    }
     if (request.method === "GET" && request.url === "/api/app-info") {
       return sendJson(response, 200, {
         version: updateService.appVersion,
@@ -251,7 +270,8 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, 200, { ok: true, version: updateService.appVersion });
     }
     if (request.method === "POST" && request.url === "/api/settings") {
-      return sendJson(response, 200, { settings: await updateService.saveSettings(await readJson(request)) });
+      const { githubRepository, checkUpdatesOnStartup } = await readJson(request);
+      return sendJson(response, 200, { settings: await updateService.saveSettings({ githubRepository, checkUpdatesOnStartup }) });
     }
     if (request.method === "POST" && request.url === "/api/update/check") {
       return sendJson(response, 200, await updateService.check());
@@ -279,6 +299,8 @@ const server = http.createServer(async (request, response) => {
   } catch (error) {
     console.error(error);
     sendJson(response, 400, { error: error.message || "処理に失敗しました。" });
+  } finally {
+    if (ownsBrowserOperation) browserOperationRunning = false;
   }
 });
 

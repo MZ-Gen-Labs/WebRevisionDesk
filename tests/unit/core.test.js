@@ -57,4 +57,6 @@ test("update release prefers non-complete Windows x64 archive", () => {
   ] });
   assert.equal(selected.name, "WebRevisionDesk-1.0.0-win-x64.zip");
   assert.equal(releaseAsset({ assets: [] }), null);
+  assert.equal(releaseAsset({ assets: [{ name: "app-linux-x64.zip" }] }), null);
+  assert.equal(releaseAsset({ assets: [{ name: "app-win-x64-complete.zip" }] }), null);
 });

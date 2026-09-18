@@ -73,7 +73,7 @@ export class PageEditor {
       if (!element || TEXT_BLOCKLIST.has(element.tagName)) return;
       event.preventDefault();
       this.select(element);
-      this.editingSnapshot = { element, before: element.textContent ?? "" };
+      this.editingSnapshot = { element, before: element.textContent ?? "", beforeHtml: element.innerHTML };
       element.contentEditable = "true";
       element.focus();
     }, true);
@@ -84,8 +84,9 @@ export class PageEditor {
         element.removeAttribute("contenteditable");
         const before = this.editingSnapshot?.element === element ? this.editingSnapshot.before : "";
         const after = element.textContent ?? "";
+        const beforeHtml = this.editingSnapshot?.beforeHtml;
         this.editingSnapshot = null;
-        if (before !== after) this.#emitChange("text-change", element, before, after);
+        if (before !== after || beforeHtml !== element.innerHTML) this.#emitChange("text-change", element, before, after, { beforeHtml, afterHtml: element.innerHTML });
         this.callbacks.onSelect?.(element);
       }
     }, true);
@@ -129,13 +130,13 @@ export class PageEditor {
 
   #ensureElementIds(doc) {
     let maxId = 0;
-    doc.querySelectorAll("body *").forEach((element) => {
+    doc.querySelectorAll("body, body *").forEach((element) => {
       const current = element.getAttribute(EDITOR_ID_ATTR);
       const numericId = current?.match(/^wr-(\d+)$/)?.[1];
       if (numericId) maxId = Math.max(maxId, Number(numericId));
     });
     this.nextElementId = maxId + 1;
-    doc.querySelectorAll("body *").forEach((element) => this.#ensureElementId(element));
+    doc.querySelectorAll("body, body *").forEach((element) => this.#ensureElementId(element));
   }
 
   #ensureElementId(element) {
@@ -211,8 +212,9 @@ export class PageEditor {
     if (!this.selected || TEXT_BLOCKLIST.has(this.selected.tagName)) return false;
     const before = this.selected.textContent ?? "";
     if (before === value) return false;
+    const beforeHtml = this.selected.innerHTML;
     this.selected.textContent = value;
-    this.#emitChange("text-change", this.selected, before, value);
+    this.#emitChange("text-change", this.selected, before, value, { beforeHtml, afterHtml: this.selected.innerHTML });
     return true;
   }
 
@@ -383,7 +385,9 @@ export class PageEditor {
       element.remove();
       parent.insertBefore(element, parent.children[index] ?? null);
     } else if (change.type === "text-change") {
-      element.textContent = value;
+      const html = undo ? change.beforeHtml : change.afterHtml;
+      if (typeof html === "string") element.innerHTML = html;
+      else element.textContent = value;
     } else if (change.type === "link-change") {
       value ? element.setAttribute("href", value) : element.removeAttribute("href");
     } else if (change.type === "alt-change") {

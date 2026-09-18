@@ -174,10 +174,8 @@ function updateGuidance() {
   } else {
     ui.stepEdit.classList.add("active");
   }
-  ui.saveState.textContent = changed
-    ? (state.dirty ? "● 未保存の変更あり" : "保存済み")
-    : "変更なし";
-  ui.saveState.className = `save-state ${changed && state.dirty ? "dirty" : changed ? "saved" : ""}`;
+  ui.saveState.textContent = state.dirty ? "● 案件フォルダへ未保存" : "保存済み";
+  ui.saveState.className = `save-state ${state.dirty ? "dirty" : "saved"}`;
 }
 
 function setStatus(message, kind = "info") {
@@ -534,7 +532,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
 async function openProjectPage(pageId) {
   if (pageId === state.activeProjectPageId) return;
   try {
-    if (state.dirty && state.originalHtml) await saveCurrentToProject({ quiet: true });
+    if (!(await preserveCurrentPage())) return;
     const saved = await projectStore.loadPage(pageId);
     await loadHtml(saved.originalHtml, saved.page.fileName, {
       workingHtml: saved.workingHtml,
@@ -550,9 +548,22 @@ async function openProjectPage(pageId) {
   }
 }
 
+async function preserveCurrentPage() {
+  if (!state.dirty || !state.originalHtml) return true;
+  if (projectStore.project && state.activeProjectPageId) {
+    await saveCurrentToProject({ quiet: true });
+    return true;
+  }
+  return window.confirm("現在のページは案件フォルダへ保存されていません。別のページへ進むと現在の編集状態は失われます。続けますか？");
+}
+
 ui.selectProjectFolder.addEventListener("click", async () => {
   try {
+    if (!(await preserveCurrentPage())) return;
     const project = await projectStore.selectDirectory();
+    state.activeProjectPageId = "";
+    if (state.originalHtml) state.dirty = true;
+    updateGuidance();
     ui.projectName.value = project.projectName;
     ui.projectBaseUrl.value = project.baseUrl;
     ui.loginRequired.checked = project.loginRequired === true;
@@ -612,6 +623,7 @@ ui.file.addEventListener("change", async () => {
   if (!file) return;
   if (file.size > 100 * 1024 * 1024 && !window.confirm("100MBを超えるHTMLです。読み込みを続けますか？")) return;
   try {
+    if (!(await preserveCurrentPage())) return;
     const html = await file.text();
     await loadHtml(html, file.name);
     setStatus("HTMLを読み込みました。ページ内の要素をクリックして編集できます。", "success");
@@ -664,7 +676,7 @@ ui.finishCapture.addEventListener("click", async () => {
   ui.captureState.textContent = "CSS・画像を埋め込んでいます…";
   setStatus("表示中ページを取り込んでいます。ページによっては少し時間がかかります。", "info");
   try {
-    if (state.dirty && state.activeProjectPageId) await saveCurrentToProject({ quiet: true });
+    if (!(await preserveCurrentPage())) { ui.finishCapture.disabled = false; return; }
     const response = await postJson("/api/capture/finish", { sessionId: captureSessionId });
     const html = await response.text();
     const fileName = decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html");
@@ -857,7 +869,7 @@ ui.applyAppUpdate.addEventListener("click", async () => {
 });
 
 window.addEventListener("beforeunload", (event) => {
-  if (!state.dirty || state.changes.length === 0) return;
+  if (!state.dirty || !state.originalHtml) return;
   event.preventDefault();
   event.returnValue = "";
 });

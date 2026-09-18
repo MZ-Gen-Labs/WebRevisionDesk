@@ -1,6 +1,7 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -43,8 +44,12 @@ before(async () => {
 
 after(async () => {
   await browser?.close();
-  server?.kill("SIGTERM");
-  await rm(dataDirectory, { recursive: true, force: true });
+  if (server && server.exitCode === null && server.signalCode === null) {
+    const exited = once(server, "exit");
+    server.kill("SIGTERM");
+    await exited;
+  }
+  if (dataDirectory) await rm(dataDirectory, { recursive: true, force: true, maxRetries: 3 });
 });
 
 test("a user can load, edit, undo, redo and export a page", async () => {
@@ -128,4 +133,40 @@ test("login finish rejects an unknown session", async () => {
   });
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /開き直して/);
+});
+
+test("cross-site API writes and form requests are rejected", async () => {
+  const crossSite = await fetch(`${baseUrl}/api/settings`, {
+    method: "POST", headers: { Origin: "https://untrusted.example", "Content-Type": "application/json" }, body: "{}",
+  });
+  assert.equal(crossSite.status, 403);
+  const form = await fetch(`${baseUrl}/api/settings`, { method: "POST", body: "{}" });
+  assert.equal(form.status, 415);
+  const settings = await fetch(`${baseUrl}/api/settings`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ githubRepository: "https://github.com/MZ-Gen-Labs/WebRevisionDesk", checkUpdatesOnStartup: false, lastDownloadedUpdate: { path: "untrusted" } }),
+  });
+  assert.equal((await settings.json()).settings.lastDownloadedUpdate, null);
+});
+
+test("undo restores nested links and formatting, reload can be cancelled", async () => {
+  const page = await browser.newPage();
+  await page.goto(baseUrl);
+  const fixture = { name: "nested.html", mimeType: "text/html", buffer: Buffer.from('<!doctype html><html><body><h1>Before <a href="/target"><strong>link</strong></a></h1></body></html>') };
+  await page.setInputFiles("#html-file", fixture);
+  const heading = page.frameLocator("#page-frame").locator("h1");
+  await heading.click({ position: { x: 5, y: 5 } });
+  await page.locator("#text-value").fill("Changed");
+  await page.locator("#text-value").press("Tab");
+  await page.locator("#undo").click();
+  assert.equal(await heading.locator("a strong").textContent(), "link");
+  assert.equal(await heading.locator("a").getAttribute("href"), "/target");
+  await page.locator("#redo").click();
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.setInputFiles("#html-file", fixture);
+  assert.equal(await heading.textContent(), "Changed");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#clear-history").click();
+  assert.match(await page.locator("#save-state").textContent(), /未保存/);
+  await page.close();
 });
