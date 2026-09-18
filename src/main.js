@@ -20,8 +20,9 @@ const ui = {
   classes: $("#class-value"), classOptions: $("#class-options"), before: $("#move-before"),
   after: $("#move-after"), duplicate: $("#duplicate-element"), delete: $("#delete-element"),
   historyCount: $("#history-count"), historyList: $("#history-list"), clearHistory: $("#clear-history"),
-  captureUrl: $("#capture-url"), openCapture: $("#open-capture-browser"),
-  finishCapture: $("#capture-current-page"), cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
+  manualPageUrl: $("#manual-page-url"), addProjectUrl: $("#add-project-url"),
+  captureSessionActions: $("#capture-session-actions"), finishCapture: $("#capture-current-page"),
+  cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
   selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
@@ -60,7 +61,6 @@ function syncLoginControls() {
   ui.loginRequired.disabled = loginBusy || Boolean(loginSessionId) || state.batchRunning;
   ui.loginOpen.disabled = loginBusy || Boolean(loginSessionId) || Boolean(captureSessionId) || state.batchRunning;
   ui.loginDone.disabled = ui.loginCancel.disabled = loginBusy || !loginSessionId;
-  ui.openCapture.disabled = loginBusy || Boolean(loginSessionId) || Boolean(captureSessionId);
   ui.selectProjectFolder.disabled = !ProjectStore.isSupported() || loginBusy || Boolean(loginSessionId);
   ui.loginState.textContent = loginBusy ? "処理中…" : loginSessionId ? "ブラウザで認証後、「ログイン完了」を押してください" : !enabled ? "ログイン待機なし" : loginReady ? "ログイン完了を確認済み（利用者確認）" : "ログイン完了待ち：検索・一括取得は待機中";
   syncProjectControls();
@@ -196,6 +196,8 @@ function syncProjectControls() {
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
   ui.crawlProjectPages.disabled = !hasProject || loginBlocked();
+  ui.manualPageUrl.disabled = !hasProject;
+  ui.addProjectUrl.disabled = !hasProject || !ui.manualPageUrl.value.trim();
   ui.file.disabled = !hasProject;
   ui.htmlImportButton.setAttribute("aria-disabled", String(!hasProject));
   updateBatchControls();
@@ -441,6 +443,7 @@ function renderProjectPages() {
       const manual = document.createElement("button");
       manual.type = "button";
       manual.textContent = "取得用ブラウザで開く";
+      manual.disabled = loginBusy || Boolean(loginSessionId) || Boolean(captureSessionId) || state.batchRunning;
       manual.addEventListener("click", () => startCaptureForUrl(page.url));
       actions.append(manual);
       row.append(actions);
@@ -484,7 +487,7 @@ function showScreenshotPreview(preview) {
     fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "original", changes: [], redoChanges: [],
     sourceUrl: preview.url, activeProjectPageId: "", dirty: false, previewOnly: true, previewObjectUrl: preview.imageUrl,
   });
-  ui.captureUrl.value = preview.url;
+  ui.manualPageUrl.value = preview.url;
   ui.fileName.textContent = preview.title;
   ui.badge.textContent = "公開ページ・画像プレビュー";
   ui.badge.dataset.mode = "preview";
@@ -680,8 +683,8 @@ async function saveCurrentToProject({ quiet = false } = {}) {
     baseUrl: ui.projectBaseUrl.value,
   });
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  const sourceUrl = state.sourceUrl || ui.captureUrl.value.trim();
-  if (!sourceUrl) throw new Error("ページURLが不明です。WebページURLを入力してください。");
+  const sourceUrl = state.sourceUrl || ui.manualPageUrl.value.trim();
+  if (!sourceUrl) throw new Error("ページURLが不明です。「その他の取り込み」でページURLを指定してください。");
   const page = await projectStore.savePage({
     fileName: state.fileName,
     sourceUrl,
@@ -711,7 +714,7 @@ async function openProjectPage(pageId) {
       activeProjectPageId: saved.page.id,
       dirty: false,
     });
-    ui.captureUrl.value = saved.page.url;
+    ui.manualPageUrl.value = saved.page.url;
     setStatus(`案件ページ「${saved.page.title}」を開きました。`, "success");
   } catch (error) {
     setStatus(`案件ページを開けませんでした: ${error.message}`, "error");
@@ -783,6 +786,20 @@ ui.crawlProjectPages.addEventListener("click", async () => {
   }
 });
 
+ui.addProjectUrl.addEventListener("click", async () => {
+  try {
+    if (!projectStore.project) throw new Error("先に案件フォルダを選択してください。");
+    const url = new URL(ui.manualPageUrl.value.trim()).toString();
+    projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
+    await projectStore.mergeDiscoveredPages([{ url, title: url, status: 0 }]);
+    renderProjectPages();
+    ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
+    setStatus("URLを未取得ページとして一覧へ追加しました。クリックすると画像プレビューを確認できます。", "success");
+  } catch (error) {
+    setStatus(`URLをページ一覧へ追加できませんでした: ${error.message}`, "error");
+  }
+});
+
 if (!ProjectStore.isSupported()) {
   ui.selectProjectFolder.disabled = true;
   ui.projectState.textContent = "フォルダ保存にはChromeまたはEdgeが必要です";
@@ -796,8 +813,8 @@ ui.file.addEventListener("change", async () => {
     if (!projectStore.project) throw new Error("先に案件フォルダを選択してください。");
     if (!(await preserveCurrentPage())) return;
     const html = await file.text();
-    const sourceUrl = sourceUrlFromHtml(html) || ui.captureUrl.value.trim();
-    if (!sourceUrl) throw new Error("上の「WebページURL」に、このHTMLの元URLを入力してください。");
+    const sourceUrl = sourceUrlFromHtml(html) || ui.manualPageUrl.value.trim();
+    if (!sourceUrl) throw new Error("「その他の取り込み」のページURLに、このHTMLの元URLを入力してください。");
     projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
     pagePathForUrl(sourceUrl, projectStore.project.baseUrl);
     await loadHtml(html, file.name, { sourceUrl, dirty: true });
@@ -824,11 +841,12 @@ async function postJson(url, body) {
 }
 
 async function startCaptureForUrl(url) {
-  document.querySelector("#setup-panel").open = true;
   if (loginBusy || loginSessionId) return setStatus("ログイン完了または中止を押してください。", "error");
   if (!url) return setStatus("取得するURLを入力してください。", "error");
-  ui.captureUrl.value = url;
-  ui.openCapture.disabled = true;
+  ui.manualPageUrl.value = url;
+  ui.captureSessionActions.hidden = false;
+  ui.finishCapture.disabled = true;
+  ui.cancelCapture.disabled = true;
   ui.captureState.textContent = "取得用ブラウザを起動しています…";
   try {
     const response = await postJson("/api/capture/start", { url });
@@ -837,15 +855,14 @@ async function startCaptureForUrl(url) {
     ui.finishCapture.disabled = false;
     ui.cancelCapture.disabled = false;
     ui.captureState.textContent = "取得用ブラウザでログインや表示調整後、取り込みを押してください";
+    renderProjectPages();
     setStatus("取得用ブラウザを開きました。対象画面を表示してから「表示中ページを取り込む」を押してください。", "success");
   } catch (error) {
-    ui.openCapture.disabled = false;
-    ui.captureState.textContent = "取得用ブラウザを開けませんでした";
+    ui.captureSessionActions.hidden = true;
+    renderProjectPages();
     setStatus(`ページ取得の開始に失敗しました: ${error.message}`, "error");
   }
 }
-
-ui.openCapture.addEventListener("click", () => startCaptureForUrl(ui.captureUrl.value.trim()));
 
 ui.finishCapture.addEventListener("click", async () => {
   if (!captureSessionId) return;
@@ -857,12 +874,12 @@ ui.finishCapture.addEventListener("click", async () => {
     const response = await postJson("/api/capture/finish", { sessionId: captureSessionId });
     const html = await response.text();
     const fileName = decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html");
+    const sourceUrl = decodeURIComponent(response.headers.get("X-Captured-Url") || ui.manualPageUrl.value.trim());
     captureSessionId = "";
-    await loadHtml(html, fileName);
-    ui.captureState.textContent = "取り込み完了";
-    ui.openCapture.disabled = false;
-    ui.cancelCapture.disabled = true;
-    setStatus("Webページを単一HTMLとして取り込みました。編集を開始できます。", "success");
+    await loadHtml(html, fileName, { sourceUrl, dirty: true });
+    if (projectStore.project) await saveCurrentToProject({ quiet: true });
+    ui.captureSessionActions.hidden = true;
+    setStatus("表示中ページを案件へ取り込みました。編集を開始できます。", "success");
   } catch (error) {
     ui.finishCapture.disabled = false;
     ui.captureState.textContent = "取り込みに失敗しました";
@@ -873,10 +890,11 @@ ui.finishCapture.addEventListener("click", async () => {
 ui.cancelCapture.addEventListener("click", async () => {
   if (captureSessionId) await postJson("/api/capture/cancel", { sessionId: captureSessionId }).catch(() => {});
   captureSessionId = "";
-  ui.openCapture.disabled = false;
   ui.finishCapture.disabled = true;
   ui.cancelCapture.disabled = true;
-  ui.captureState.textContent = "取得をキャンセルしました";
+  ui.captureSessionActions.hidden = true;
+  renderProjectPages();
+  setStatus("取得用ブラウザをキャンセルしました。", "success");
 });
 
 ui.original.addEventListener("click", () => render("original"));
@@ -1068,7 +1086,7 @@ ui.loginOpen.addEventListener("click", async () => {
   loginReady = false;
   syncLoginControls();
   try {
-    const response = await postJson("/api/capture/start", { url: ui.projectBaseUrl.value.trim() || ui.captureUrl.value.trim() });
+    const response = await postJson("/api/capture/start", { url: ui.projectBaseUrl.value.trim() });
     loginSessionId = (await response.json()).sessionId;
   } catch (error) { setStatus(`ログイン用ブラウザを開けませんでした: ${error.message}`, "error"); }
   finally { loginBusy = false; syncLoginControls(); }
@@ -1087,7 +1105,7 @@ async function finishLogin(completed) {
 ui.loginDone.addEventListener("click", () => finishLogin(true));
 ui.loginCancel.addEventListener("click", () => finishLogin(false));
 ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
-ui.captureUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
+ui.manualPageUrl.addEventListener("input", syncProjectControls);
 syncLoginControls();
 updateGuidance();
 showSelection(null);

@@ -72,7 +72,8 @@ async function prepareMemoryProject(page, sourceUrl = "https://example.com/pages
   assert.equal(await page.locator("#html-file").isDisabled(), true);
   await page.locator("#select-project-folder").click();
   assert.equal(await page.locator("#html-file").isEnabled(), true);
-  await page.locator("#capture-url").fill(sourceUrl);
+  await page.locator(".alternative-import summary").click();
+  await page.locator("#manual-page-url").fill(sourceUrl);
 }
 
 before(async () => {
@@ -167,7 +168,7 @@ test("loaded page gets viewport height and setup can be reopened without losing 
   assert.ok(height >= 550, `Expected at least 550px, got ${height}`);
   assert.equal(await page.locator("#save-project-page").isVisible(), true);
   await page.locator("#setup-panel > summary").click();
-  assert.equal(await page.locator("#capture-url").isVisible(), true);
+  assert.equal(await page.locator("#project-base-url").isVisible(), true);
   await page.locator("#setup-panel > summary").click();
   assert.equal(await frame.locator("h1").first().textContent(), "レイアウト確認");
   await page.close();
@@ -181,22 +182,39 @@ test("login preparation waits for explicit completion and resets on URL change",
     completions++;
     return route.fulfill({ json: { ok: true } });
   });
-  await page.goto(baseUrl);
-  await page.locator("#capture-url").fill("https://example.com/private");
+  await prepareMemoryProject(page, "https://example.com/pages/private");
   await page.locator("#login-required").check();
   assert.match(await page.locator("#login-state").textContent(), /ログイン完了待ち/);
   await page.locator("#login-open").click();
   await page.locator("#login-done").waitFor({ state: "visible" });
   await page.waitForFunction(() => !document.querySelector("#login-done").disabled);
   assert.equal(completions, 0);
-  assert.equal(await page.locator("#open-capture-browser").isDisabled(), true);
   assert.equal(await page.locator("#crawl-project-pages").isDisabled(), true);
   await page.locator("#login-done").click();
   await page.locator("#login-state").filter({ hasText: "利用者確認" }).waitFor();
   assert.equal(completions, 1);
-  assert.equal(await page.locator("#open-capture-browser").isEnabled(), true);
-  await page.locator("#capture-url").fill("https://example.com/another");
+  assert.equal(await page.locator("#crawl-project-pages").isEnabled(), true);
+  await page.locator("#project-base-url").fill("https://example.com/another");
   assert.match(await page.locator("#login-state").textContent(), /ログイン完了待ち/);
+  await page.close();
+});
+
+test("a URL not found by crawling can be added to the project page list", async () => {
+  const page = await browser.newPage();
+  await page.route(`${baseUrl}/api/capture/start`, (route) => route.fulfill({ json: { sessionId: "manual-session" } }));
+  await page.route(`${baseUrl}/api/capture/cancel`, (route) => route.fulfill({ json: { ok: true } }));
+  await prepareMemoryProject(page, "https://example.com/pages/manual");
+  await page.locator("#add-project-url").click();
+  const added = page.locator(".project-page-row").filter({ hasText: "https://example.com/pages/manual" });
+  await added.waitFor();
+  assert.match(await added.locator(".project-page").textContent(), /未取得.*画像プレビュー/);
+  await added.getByRole("button", { name: "取得用ブラウザで開く" }).click();
+  await page.locator("#capture-session-actions").waitFor();
+  await page.waitForFunction(() => !document.querySelector("#capture-current-page").disabled);
+  assert.equal(await page.locator("#capture-current-page").isEnabled(), true);
+  await page.locator("#cancel-capture").click();
+  await page.locator("#capture-session-actions").waitFor({ state: "hidden" });
+  assert.equal(await page.locator("#capture-session-actions").isHidden(), true);
   await page.close();
 });
 

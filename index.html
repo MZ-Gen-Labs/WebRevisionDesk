@@ -64,17 +64,8 @@
     </section>
 
     <details id="setup-panel" class="setup-panel" open>
-      <summary>取り込み・案件設定 <span>URL取得／案件フォルダ／ログイン</span></summary>
+      <summary>取り込み・案件設定 <span>案件フォルダ／ログイン／その他</span></summary>
       <div class="setup-content">
-    <section class="capture-bar" aria-label="Webページ取得">
-      <label for="capture-url">WebページURL</label>
-      <input id="capture-url" type="url" placeholder="https://example.com/page" />
-      <button id="open-capture-browser" type="button">取得用ブラウザを開く</button>
-      <button id="capture-current-page" class="button-primary" type="button" disabled>表示中ページを取り込む</button>
-      <button id="cancel-capture" type="button" disabled>キャンセル</button>
-      <span id="capture-state">案件ページの取得方法を選べます</span>
-    </section>
-
     <section class="project-bar" aria-label="案件フォルダ管理">
       <button id="select-project-folder" class="button-primary" type="button">案件フォルダを選択</button>
       <label>案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
@@ -93,8 +84,12 @@
     <section class="alternative-import" aria-label="その他の取り込み">
       <details>
         <summary>その他の取り込み</summary>
-        <div>
-          <span>SingleFile等で保存済みのHTMLを案件へ追加できます。元のURLを上の「WebページURL」へ入力してから選択してください。</span>
+        <div class="alternative-import-options">
+          <label>ページURL
+            <input id="manual-page-url" type="url" placeholder="https://example.com/product/page" disabled />
+          </label>
+          <button id="add-project-url" type="button" disabled>URLをページ一覧へ追加</button>
+          <span>一覧にないページの追加、または保存済みHTMLの元URLとして使用します。</span>
           <label id="html-import-button" class="button" for="html-file" aria-disabled="true">保存済みHTMLを案件へ追加</label>
           <input id="html-file" type="file" accept=".html,.htm,text/html" disabled hidden />
         </div>
@@ -126,6 +121,11 @@
           <span id="file-name">ファイル未選択</span>
           <button id="import-preview-page" class="small-button primary-inline" type="button" hidden>このページを取り込んで編集</button>
           <button id="refresh-preview" class="small-button" type="button" hidden>画像を更新</button>
+          <div id="capture-session-actions" class="capture-session-actions" hidden>
+            <span id="capture-state">取得用ブラウザで対象画面を表示してください</span>
+            <button id="capture-current-page" class="small-button primary-inline" type="button" disabled>表示中ページを取り込む</button>
+            <button id="cancel-capture" class="small-button" type="button" disabled>キャンセル</button>
+          </div>
           <span class="hint">直したい場所をクリックしてください</span>
         </div>
         <div id="empty-state" class="empty-state">
