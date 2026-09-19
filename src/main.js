@@ -5,6 +5,7 @@ import { downloadProjectPackage } from "./project-package.js";
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { shouldCheckForUpdatesOnStartup } from "./update-policy.js";
+import { appFetch } from "./runtime-api.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -79,7 +80,7 @@ function formatBytes(value) {
 
 async function loadAppInfo() {
   try {
-    const response = await fetch("/api/app-info", { cache: "no-store" });
+    const response = await appFetch("/api/app-info", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     ui.appUpdateButton.textContent = `v${data.version}`;
@@ -869,7 +870,7 @@ ui.file.addEventListener("change", async () => {
 async function postJson(url, body, { browserPriority } = {}) {
   const headers = { "Content-Type": "application/json" };
   if (browserPriority) headers["X-Browser-Task-Priority"] = browserPriority;
-  const response = await fetch(url, {
+  const response = await appFetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify(body),

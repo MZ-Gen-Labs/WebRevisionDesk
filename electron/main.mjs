@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -11,9 +11,12 @@ import {
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const rootDirectory = path.resolve(currentDirectory, "..");
-const uiDirectory = path.join(currentDirectory, "ui");
+const feasibilityUiDirectory = path.join(currentDirectory, "ui");
+const editorUiDirectory = path.join(rootDirectory, "dist");
 const packageJson = JSON.parse(await readFile(path.join(rootDirectory, "package.json"), "utf8"));
-const CAPTURE_PARTITION = "persist:web-revision-electron-feasibility";
+const feasibilityMode = process.argv.includes("--feasibility-ui") || process.argv.includes("--feasibility-smoke-test");
+const uiDirectory = feasibilityMode ? feasibilityUiDirectory : editorUiDirectory;
+const CAPTURE_PARTITION = "persist:web-revision-desk";
 const MAX_RESOURCE_BYTES = 15 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 60 * 1024 * 1024;
 const navigationTimeoutMs = 45_000;
@@ -24,14 +27,16 @@ let captureSession;
 let lastInspection;
 let lastCapture;
 let lastCrawl;
+let activeCaptureSessionId = "";
+let projectDirectory = "";
 const diagnosticEvents = [];
 
 protocol.registerSchemesAsPrivileged([{
   scheme: "wrd",
   privileges: { standard: true, secure: true, supportFetchAPI: true },
 }]);
-app.setName("WebRevisionDeskElectronFeasibility");
-app.setPath("userData", path.join(app.getPath("appData"), "WebRevisionDesk", "electron-feasibility"));
+app.setName("WebRevisionDesk");
+app.setPath("userData", path.join(app.getPath("appData"), "WebRevisionDesk"));
 
 function progress(message, detail = {}) {
   mainWindow?.webContents.send("feasibility:progress", { message, ...detail });
@@ -364,7 +369,185 @@ async function saveArtifacts() {
   return { canceled: false, directory: outputDirectory };
 }
 
+function encodedHeader(value) {
+  return encodeURIComponent(String(value || ""));
+}
+
+function capturedFileName(metadata) {
+  return `${safeArtifactBaseName(metadata.title || "captured-page")}.html`;
+}
+
+function ipcResponse(body, { status = 200, headers = {} } = {}) {
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ""), "utf8");
+  return { status, headers, bodyBase64: buffer.toString("base64") };
+}
+
+function jsonResponse(value, status = 200) {
+  return ipcResponse(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
+}
+
+async function readEditorSettings() {
+  try {
+    return {
+      githubRepository: "MZ-Gen-Labs/WebRevisionDesk",
+      checkUpdatesOnStartup: true,
+      ...JSON.parse(await readFile(path.join(app.getPath("userData"), "settings.json"), "utf8")),
+    };
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    return { githubRepository: "MZ-Gen-Labs/WebRevisionDesk", checkUpdatesOnStartup: true };
+  }
+}
+
+async function writeEditorSettings(settings) {
+  const next = {
+    githubRepository: String(settings.githubRepository || "MZ-Gen-Labs/WebRevisionDesk").trim(),
+    checkUpdatesOnStartup: settings.checkUpdatesOnStartup !== false,
+  };
+  await mkdir(app.getPath("userData"), { recursive: true });
+  await writeFile(path.join(app.getPath("userData"), "settings.json"), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return next;
+}
+
+async function openCapturePage(url, { show = true } = {}) {
+  const target = normalizeHttpUrl(url, url).href;
+  const win = ensurePageWindow();
+  if (show) win.show();
+  progress("対象ページを開いています…", { url: redactUrl(target) });
+  await withNavigationTimeout(win.webContents, target);
+  if (show) win.focus();
+  lastInspection = await inspectContents(win.webContents);
+  lastCapture = undefined;
+  await record("page-opened", { url: redactUrl(lastInspection.url), title: lastInspection.title });
+  return lastInspection;
+}
+
+async function handleEditorApi({ url, method, bodyBase64 }) {
+  const body = bodyBase64 ? JSON.parse(Buffer.from(bodyBase64, "base64").toString("utf8")) : {};
+  if (method === "GET" && url === "/api/app-info") {
+    return jsonResponse({
+      version: packageJson.version,
+      dataDirectory: app.getPath("userData"),
+      canApplyUpdate: false,
+      settings: await readEditorSettings(),
+    });
+  }
+  if (method === "POST" && url === "/api/settings") {
+    return jsonResponse({ settings: await writeEditorSettings(body) });
+  }
+  if (method === "POST" && url === "/api/update/check") {
+    return jsonResponse({
+      currentVersion: packageJson.version,
+      latestVersion: packageJson.version,
+      updateAvailable: false,
+      downloadable: false,
+      releaseUrl: "https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases",
+    });
+  }
+  if (method === "POST" && url === "/api/capture/start") {
+    const metadata = await openCapturePage(body.url, { show: true });
+    activeCaptureSessionId = crypto.randomUUID();
+    return jsonResponse({ sessionId: activeCaptureSessionId, url: metadata.url });
+  }
+  if (method === "POST" && url === "/api/capture/finish") {
+    if (!activeCaptureSessionId || body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが見つかりません。");
+    await captureCurrentPage();
+    activeCaptureSessionId = "";
+    pageWindow?.hide();
+    return ipcResponse(lastCapture.html, { headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Captured-Filename": encodedHeader(capturedFileName(lastCapture.metadata)),
+      "X-Captured-Url": encodedHeader(lastCapture.metadata.url),
+    } });
+  }
+  if (method === "POST" && (url === "/api/capture/cancel" || url === "/api/login/finish")) {
+    if (body.sessionId && activeCaptureSessionId && body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが一致しません。");
+    activeCaptureSessionId = "";
+    pageWindow?.hide();
+    return jsonResponse({ ok: true });
+  }
+  if (method === "POST" && url === "/api/capture/direct") {
+    await openCapturePage(body.url, { show: false });
+    await captureCurrentPage();
+    pageWindow?.hide();
+    return ipcResponse(lastCapture.html, { headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Captured-Filename": encodedHeader(capturedFileName(lastCapture.metadata)),
+      "X-Captured-Url": encodedHeader(lastCapture.metadata.url),
+    } });
+  }
+  if (method === "POST" && url === "/api/preview/screenshot") {
+    await openCapturePage(body.url, { show: false });
+    const metadata = lastInspection;
+    const image = (await ensurePageWindow().webContents.capturePage()).toJPEG(78);
+    pageWindow?.hide();
+    return ipcResponse(image, { headers: {
+      "Content-Type": "image/jpeg",
+      "X-Preview-Title": encodedHeader(metadata.title),
+      "X-Preview-Url": encodedHeader(metadata.url),
+    } });
+  }
+  if (method === "POST" && url === "/api/crawl") return jsonResponse(await crawl(body.baseUrl, body.maxPages));
+  if (url.startsWith("/api/update/")) return jsonResponse({ error: "Electron移行版では更新機能を準備中です。" }, 501);
+  return jsonResponse({ error: "対応していない操作です。" }, 404);
+}
+
+function validatedProjectPath(parts = []) {
+  if (!projectDirectory) throw new Error("先に案件フォルダを選択してください。");
+  if (!Array.isArray(parts) || parts.some((part) => !part || part === "." || part === ".." || /[\\/\0]/.test(part))) {
+    throw new Error("不正なファイルパスです。");
+  }
+  const target = path.resolve(projectDirectory, ...parts);
+  if (target !== projectDirectory && !target.startsWith(`${projectDirectory}${path.sep}`)) throw new Error("案件フォルダ外にはアクセスできません。");
+  return target;
+}
+
+function fileResultError(error) {
+  const errorName = error.code === "ENOENT" ? "NotFoundError"
+    : ["ENOTEMPTY", "EEXIST"].includes(error.code) ? "InvalidModificationError"
+      : error.name || "Error";
+  return { ok: false, errorName, message: error.message };
+}
+
+async function handleFileSystem({ operation, parts = [], create = false, content = "", recursive = false }) {
+  try {
+    if (operation === "select") {
+      const selected = await dialog.showOpenDialog(mainWindow, { title: "案件フォルダを選択", properties: ["openDirectory", "createDirectory"] });
+      if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: null };
+      projectDirectory = path.resolve(selected.filePaths[0]);
+      return { ok: true, value: { name: path.basename(projectDirectory) } };
+    }
+    const target = validatedProjectPath(parts);
+    if (operation === "ensure-directory") {
+      if (create) await mkdir(target, { recursive: true });
+      else if (!(await stat(target)).isDirectory()) throw Object.assign(new Error("フォルダではありません。"), { code: "ENOENT" });
+    } else if (operation === "ensure-file") {
+      if (create) {
+        await mkdir(path.dirname(target), { recursive: true });
+        try { await stat(target); } catch (error) { if (error.code === "ENOENT") await writeFile(target, "", { flag: "wx" }); else throw error; }
+      } else if (!(await stat(target)).isFile()) throw Object.assign(new Error("ファイルではありません。"), { code: "ENOENT" });
+    } else if (operation === "read-text") return { ok: true, value: await readFile(target, "utf8") };
+    else if (operation === "write-text") {
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, String(content), "utf8");
+    } else if (operation === "remove") await rm(target, { recursive, force: false });
+    else throw new Error("対応していないファイル操作です。");
+    return { ok: true, value: true };
+  } catch (error) {
+    return fileResultError(error);
+  }
+}
+
 function registerIpc() {
+  ipcMain.handle("editor:api-request", async (event, request) => {
+    assertTrustedSender(event);
+    try { return await handleEditorApi(request); }
+    catch (error) { return jsonResponse({ error: error.message || "処理に失敗しました。" }, 400); }
+  });
+  ipcMain.handle("editor:file-system", async (event, request) => {
+    assertTrustedSender(event);
+    return handleFileSystem(request);
+  });
   ipcMain.handle("feasibility:get-info", async (event) => {
     assertTrustedSender(event);
     return diagnostics();
@@ -410,17 +593,18 @@ function registerIpc() {
 
 async function createMainWindow({ show = true } = {}) {
   mainWindow = new BrowserWindow({
-    width: 1040,
-    height: 820,
+    width: feasibilityMode ? 1040 : 1600,
+    height: feasibilityMode ? 820 : 1000,
     minWidth: 820,
     minHeight: 640,
     show,
-    title: "Web Revision Desk - Electron機能検証",
+    title: feasibilityMode ? "Web Revision Desk - Electron機能検証" : "Web Revision Desk",
     webPreferences: {
-      preload: path.join(currentDirectory, "preload.cjs"),
+      preload: path.join(currentDirectory, feasibilityMode ? "preload.cjs" : "editor-preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      webSecurity: true,
     },
   });
   await mainWindow.loadURL("wrd://app/index.html");
@@ -462,6 +646,19 @@ app.whenReady().then(async () => {
     const title = await mainWindow.webContents.executeJavaScript("document.title");
     if (title !== "Electron機能検証") throw new Error(`Unexpected feasibility page title: ${title}`);
     console.log(`Electron feasibility smoke test passed: ${process.versions.electron} / ${title}`);
+    app.quit();
+    return;
+  }
+  if (process.argv.includes("--editor-smoke-test")) {
+    await createMainWindow({ show: false });
+    const title = await mainWindow.webContents.executeJavaScript("document.title");
+    if (title !== "Web Revision Desk") throw new Error(`Unexpected editor page title: ${title}`);
+    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.fileSystem)");
+    if (!desktopApi) throw new Error("Electron editor bridge was not exposed.");
+    const appInfo = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request({ url: "/api/app-info", method: "GET", headers: {}, bodyBase64: "" })`);
+    const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));
+    if (appInfo.status !== 200 || appInfoBody.version !== packageJson.version) throw new Error("Electron editor API did not return application information.");
+    console.log(`Electron editor smoke test passed: ${process.versions.electron} / ${title}`);
     app.quit();
     return;
   }

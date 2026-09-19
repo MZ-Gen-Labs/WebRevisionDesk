@@ -1,5 +1,6 @@
 import { cleanHtmlString } from "./html.js";
 import { createDiffReport, createRedlineReport } from "./diff-report.js";
+import { desktopFileSystemAvailable, selectDesktopProjectDirectory } from "./desktop-file-system.js";
 
 const PROJECT_FILE = "project.json";
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -102,12 +103,14 @@ export class ProjectStore {
   }
 
   static isSupported() {
-    return "showDirectoryPicker" in window;
+    return desktopFileSystemAvailable() || "showDirectoryPicker" in window;
   }
 
   async selectDirectory() {
     if (!ProjectStore.isSupported()) throw new Error("このブラウザはフォルダ保存に対応していません。ChromeまたはEdgeを使用してください。");
-    const directory = await window.showDirectoryPicker({ mode: "readwrite" });
+    const directory = desktopFileSystemAvailable()
+      ? await selectDesktopProjectDirectory()
+      : await window.showDirectoryPicker({ mode: "readwrite" });
     const permission = await directory.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error("フォルダへの読み書きが許可されませんでした。");
     this.directory = directory;

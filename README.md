@@ -9,14 +9,14 @@ SingleFileを使わず、URLを取得用Chromiumで開いて現在の表示を�
 
 ## Electron機能検証
 
-`codex/electron-feasibility`では、Playwright、外部ブラウザ、localhost APIを使わずにページ取得機能を実現できるか検証しています。現行版を置き換えるものではなく、Electron内蔵Chromiumによるページ表示、ログイン状態保持、リンク抽出、配下ページ確認、HTML・スクリーンショット・診断情報の保存に対象を限定しています。
+`codex/electron-feasibility`での会社PC検証に合格したため、`codex/electron-migration`で既存編集画面のElectron移行を進めています。移行版はPlaywright、外部ブラウザ、localhost APIを使わず、Electron内蔵Chromiumでページ検索・プレビュー・取り込みを行います。案件フォルダもOS標準のフォルダ選択画面から利用します。
 
 ```bash
 npm ci
 npm run electron:dev
 ```
 
-Windows検証ZIPは、このブランチへのpush後にGitHub Actionsの`Electron Feasibility Windows`から取得できます。詳細と合格条件は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)を参照してください。
+元の機能検証画面は`npm run electron:feasibility`で残しています。Windows移行版ZIPは、このブランチへのpush後にGitHub Actionsの`Electron Migration Windows`から取得できます。検証結果は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)、移行範囲は[`docs/06-electron-migration.md`](docs/06-electron-migration.md)を参照してください。
 
 ## できること
 

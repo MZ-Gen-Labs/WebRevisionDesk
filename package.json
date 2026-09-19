@@ -19,8 +19,10 @@
   },
   "scripts": {
     "dev": "node server.js",
-    "electron:dev": "electron electron/main.mjs",
+    "electron:dev": "npm run build && electron electron/main.mjs",
+    "electron:feasibility": "electron electron/main.mjs --feasibility-ui",
     "electron:package:win": "node scripts/build-electron-feasibility.mjs",
+    "electron:migration:package:win": "npm run build && node scripts/build-electron-migration.mjs",
     "build": "vite build",
     "build:portable": "node scripts/build-windows-portable.mjs",
     "version:check": "node scripts/check-version.mjs",

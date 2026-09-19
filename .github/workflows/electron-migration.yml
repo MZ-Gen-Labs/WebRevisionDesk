@@ -1,0 +1,42 @@
+name: Electron Migration Windows
+
+on:
+  push:
+    branches:
+      - codex/electron-migration
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-package:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test:unit
+      - run: npm run electron:migration:package:win
+      - name: Smoke test packaged Electron editor
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem release-electron-migration -Filter *.zip | Select-Object -First 1
+          if (-not $archive) { throw "Electron migration ZIP was not created." }
+          $target = Join-Path $env:RUNNER_TEMP "electron-migration-smoke"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
+          $executable = Get-ChildItem $target -Filter WebRevisionDesk-Electron.exe -Recurse | Select-Object -First 1
+          if (-not $executable) { throw "Packaged Electron executable was not found." }
+          $process = Start-Process -FilePath $executable.FullName -ArgumentList "--editor-smoke-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Electron editor smoke test failed with exit code $($process.ExitCode)." }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: WebRevisionDesk-electron-migration-windows-${{ github.run_number }}
+          path: release-electron-migration/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
