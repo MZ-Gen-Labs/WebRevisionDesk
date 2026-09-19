@@ -78,6 +78,7 @@ test("apply waits for the updater log before allowing the application to exit", 
     const service = await createUpdateService({
       appVersion: "0.3.6",
       installRoot,
+      platform: "win32",
       spawnProcess,
       updaterStartTimeoutMs: 1000,
     });

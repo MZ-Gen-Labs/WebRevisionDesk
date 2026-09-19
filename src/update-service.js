@@ -177,6 +177,7 @@ export async function createUpdateService({
   appVersion,
   legacyProfileDirectory,
   installRoot = process.env.WEB_REVISION_INSTALL_ROOT,
+  platform = process.platform,
   spawnProcess = spawn,
   updaterStartTimeoutMs = UPDATER_START_TIMEOUT_MS,
 }) {
@@ -323,7 +324,7 @@ export async function createUpdateService({
   }
 
   async function canApply() {
-    if (process.platform !== "win32" || !installRoot) return false;
+    if (platform !== "win32" || !installRoot) return false;
     try {
       await access(path.join(path.resolve(installRoot), "updater.ps1"));
       return true;
