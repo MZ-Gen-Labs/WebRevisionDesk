@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -104,6 +104,13 @@ async function readOptionalText(file) {
     if (error.code === "ENOENT") return "";
     throw error;
   }
+}
+
+export async function pruneUpdateDownloads(updatesDirectory, keepVersion) {
+  const entries = await readdir(updatesDirectory, { withFileTypes: true });
+  await Promise.all(entries
+    .filter((entry) => entry.name !== keepVersion)
+    .map((entry) => rm(path.join(updatesDirectory, entry.name), { recursive: true, force: true })));
 }
 
 function waitForSpawn(child) {
@@ -320,6 +327,9 @@ export async function createUpdateService({
     await rename(temporary, destination);
     const downloadedUpdate = { version, fileName, size, digest, path: destination, downloadedAt: new Date().toISOString() };
     await saveSettings({ ...settings, lastDownloadedVersion: version, lastDownloadedUpdate: downloadedUpdate });
+    await pruneUpdateDownloads(updatesDirectory, version).catch((error) => {
+      console.warn("Old update downloads could not be removed:", error.message);
+    });
     return downloadedUpdate;
   }
 

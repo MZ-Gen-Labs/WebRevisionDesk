@@ -1,12 +1,33 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { createUpdateService, updaterLauncherArguments, updaterPowerShellArguments } from "../../src/update-service.js";
+import { createUpdateService, pruneUpdateDownloads, updaterLauncherArguments, updaterPowerShellArguments } from "../../src/update-service.js";
+
+test("only the newest downloaded update is retained", async () => {
+  const updatesDirectory = await mkdtemp(path.join(os.tmpdir(), "web-revision-update-prune-test-"));
+  const oldDirectory = path.join(updatesDirectory, "0.3.8");
+  const latestDirectory = path.join(updatesDirectory, "0.4.0");
+  await Promise.all([mkdir(oldDirectory), mkdir(latestDirectory)]);
+  await Promise.all([
+    writeFile(path.join(oldDirectory, "old.zip"), "old"),
+    writeFile(path.join(latestDirectory, "latest.zip"), "latest"),
+    writeFile(path.join(updatesDirectory, "abandoned.part"), "partial"),
+  ]);
+
+  try {
+    await pruneUpdateDownloads(updatesDirectory, "0.4.0");
+    await access(path.join(latestDirectory, "latest.zip"));
+    await assert.rejects(access(oldDirectory), { code: "ENOENT" });
+    await assert.rejects(access(path.join(updatesDirectory, "abandoned.part")), { code: "ENOENT" });
+  } finally {
+    await rm(updatesDirectory, { recursive: true, force: true });
+  }
+});
 
 test("Windows updater is launched with the same execution-policy allowance as the main launcher", () => {
   const args = updaterPowerShellArguments({
