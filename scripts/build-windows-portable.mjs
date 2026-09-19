@@ -66,10 +66,6 @@ await run("npm.cmd", ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--n
   cwd: appDirectory,
   env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1" },
 });
-await run(path.join(appDirectory, "node_modules", ".bin", "playwright.cmd"), ["install", "chromium"], {
-  cwd: appDirectory,
-  env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: "0" },
-});
 
 const nodeArchiveName = `node-v${nodeVersion}-win-x64.zip`;
 const nodeArchive = path.join(workRoot, nodeArchiveName);
@@ -83,7 +79,8 @@ const expectedNodeHash = checksums.split(/\r?\n/).find((line) => line.endsWith(`
 if (!expectedNodeHash || await sha256(nodeArchive) !== expectedNodeHash) throw new Error("Node.js公式ZIPのSHA-256が一致しません。");
 const nodeExtract = path.join(workRoot, "node-extract");
 await run("powershell.exe", ["-NoProfile", "-Command", `Expand-Archive -LiteralPath ${powerShellLiteral(nodeArchive)} -DestinationPath ${powerShellLiteral(nodeExtract)} -Force`]);
-await cp(path.join(nodeExtract, `node-v${nodeVersion}-win-x64`), path.join(appDirectory, "node"), { recursive: true });
+await mkdir(path.join(appDirectory, "node"), { recursive: true });
+await cp(path.join(nodeExtract, `node-v${nodeVersion}-win-x64`, "node.exe"), path.join(appDirectory, "node", "node.exe"));
 
 await writeFile(path.join(appDirectory, "release.json"), `${JSON.stringify({
   format: "web-revision-portable-release",

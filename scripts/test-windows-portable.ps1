@@ -23,6 +23,11 @@ $required = @(
 )
 foreach ($file in $required) { if (-not (Test-Path $file)) { throw "Required portable file is missing: $file" } }
 
+$bundledBrowsers = Join-Path $versionRoot "node_modules/playwright-core/.local-browsers"
+if (Test-Path $bundledBrowsers) { throw "Browser binaries must not be included in the portable archive." }
+$nodeFiles = @(Get-ChildItem (Join-Path $versionRoot "node") -File -Recurse)
+if ($nodeFiles.Count -ne 1 -or $nodeFiles[0].Name -ne "node.exe") { throw "Only node.exe may be included in the portable Node directory." }
+
 foreach ($script in @((Join-Path $installRoot "launcher.ps1"), (Join-Path $installRoot "updater.ps1"))) {
   $tokens = $null
   $parseErrors = $null
@@ -35,6 +40,7 @@ $env:WEB_REVISION_DATA_DIR = $dataRoot
 $env:WEB_REVISION_NO_BROWSER = "1"
 $env:WEB_REVISION_NO_MENU = "1"
 $env:WEB_REVISION_NO_PAUSE = "1"
+$env:WEB_REVISION_SKIP_BROWSER_INSTALL = "1"
 try {
   & (Join-Path $installRoot "Start-WebRevisionDesk.cmd")
   if ($LASTEXITCODE -ne 0) { throw "Start-WebRevisionDesk.cmd failed with exit code $LASTEXITCODE." }

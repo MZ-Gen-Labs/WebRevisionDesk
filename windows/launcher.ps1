@@ -75,6 +75,49 @@ function Open-Application {
   if ($env:WEB_REVISION_NO_BROWSER -ne "1") { Start-Process $ApplicationUrl }
 }
 
+function Get-PlaywrightBrowserExecutable([string]$Node, [string]$VersionDirectory) {
+  Push-Location $VersionDirectory
+  try {
+    $Executable = & $Node -e "const { chromium } = require('playwright'); process.stdout.write(chromium.executablePath());" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return [string]$Executable
+  } finally {
+    Pop-Location
+  }
+}
+
+function Install-MissingBrowser([string]$Node, [string]$VersionDirectory) {
+  $BrowserExecutable = Get-PlaywrightBrowserExecutable $Node $VersionDirectory
+  if (-not [string]::IsNullOrWhiteSpace($BrowserExecutable) -and (Test-Path -LiteralPath $BrowserExecutable)) {
+    Write-LauncherLog "Browser runtime is ready: $BrowserExecutable"
+    return
+  }
+
+  if ($env:WEB_REVISION_SKIP_BROWSER_INSTALL -eq "1") {
+    Write-LauncherLog "Browser runtime installation was skipped by environment setting."
+    return
+  }
+
+  $PlaywrightCli = Join-Path $VersionDirectory "node_modules\playwright\cli.js"
+  if (-not (Test-Path -LiteralPath $PlaywrightCli)) { throw "The browser setup program was not found." }
+
+  Write-Host "Preparing the browser required by Web Revision Desk. This is needed only once for this version."
+  Write-LauncherLog "Browser runtime is missing. Starting download for v$Version."
+  Push-Location $VersionDirectory
+  try {
+    & $Node $PlaywrightCli install --force chromium
+    if ($LASTEXITCODE -ne 0) { throw "The browser download failed with exit code $LASTEXITCODE." }
+  } finally {
+    Pop-Location
+  }
+
+  $BrowserExecutable = Get-PlaywrightBrowserExecutable $Node $VersionDirectory
+  if ([string]::IsNullOrWhiteSpace($BrowserExecutable) -or -not (Test-Path -LiteralPath $BrowserExecutable)) {
+    throw "The browser download completed, but the required browser could not be found."
+  }
+  Write-LauncherLog "Browser runtime download completed: $BrowserExecutable"
+}
+
 function Invoke-ApplicationMenu {
   if ($env:WEB_REVISION_NO_MENU -eq "1") { return }
   while ($true) {
@@ -140,6 +183,7 @@ try {
     throw "A managed process is listening on port 5173 but is not responding. Stop it before retrying."
   }
 
+  Install-MissingBrowser $Node $VersionDirectory
   $Process = Start-Process -FilePath $Node -ArgumentList "server.js" -WorkingDirectory $VersionDirectory -PassThru -WindowStyle Hidden
   Write-LauncherLog "Started v$Version (PID $($Process.Id))."
 

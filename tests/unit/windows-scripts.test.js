@@ -25,6 +25,13 @@ test("launcher verifies ownership before controlling the port listener", async (
   assert.match(content, /Stop Web Revision Desk\? \(Y\/N\)/);
 });
 
+test("launcher installs a missing Playwright browser before starting the server", async () => {
+  const content = await readFile(new URL("../../windows/launcher.ps1", import.meta.url), "utf8");
+  assert.match(content, /chromium\.executablePath\(\)/);
+  assert.match(content, /\$Node \$PlaywrightCli install --force chromium/);
+  assert.match(content, /Install-MissingBrowser \$Node \$VersionDirectory\s+\$Process = Start-Process/);
+});
+
 test("updater hashes archives without relying on an auto-loaded Get-FileHash command", async () => {
   const content = await readFile(new URL("../../windows/updater.ps1", import.meta.url), "utf8");
   assert.match(content, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
