@@ -113,6 +113,32 @@ export async function pruneUpdateDownloads(updatesDirectory, keepVersion) {
     .map((entry) => rm(path.join(updatesDirectory, entry.name), { recursive: true, force: true })));
 }
 
+export async function pruneInstalledVersions(installRoot, appVersion) {
+  const root = path.resolve(installRoot);
+  let current;
+  try {
+    current = JSON.parse(await readFile(path.join(root, "current.json"), "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  if (normalizedVersion(current.version) !== normalizedVersion(appVersion)) return [];
+  const keep = new Set([current.version, current.previousVersion]
+    .map((version) => String(version || ""))
+    .filter((version) => /^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$/.test(version)));
+  const versionsDirectory = path.join(root, "versions");
+  let entries;
+  try {
+    entries = await readdir(versionsDirectory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const removed = entries.filter((entry) => entry.isDirectory() && !keep.has(entry.name));
+  await Promise.all(removed.map((entry) => rm(path.join(versionsDirectory, entry.name), { recursive: true, force: true })));
+  return removed.map((entry) => entry.name);
+}
+
 function waitForSpawn(child) {
   return new Promise((resolve, reject) => {
     const onSpawn = () => {
@@ -196,6 +222,11 @@ export async function createUpdateService({
     mkdir(profileDirectory, { recursive: true }),
     mkdir(updatesDirectory, { recursive: true }),
   ]);
+  if (installRoot) {
+    await pruneInstalledVersions(installRoot, appVersion).catch((error) => {
+      console.warn("Old installed versions could not be removed:", error.message);
+    });
+  }
 
   // 既存PoCのログイン状態は、移行先が空の場合だけ引き継ぐ。
   if (legacyProfileDirectory) {

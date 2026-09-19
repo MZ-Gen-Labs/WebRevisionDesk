@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { createUpdateService, pruneUpdateDownloads, updaterLauncherArguments, updaterPowerShellArguments } from "../../src/update-service.js";
+import { createUpdateService, pruneInstalledVersions, pruneUpdateDownloads, updaterLauncherArguments, updaterPowerShellArguments } from "../../src/update-service.js";
 
 test("only the newest downloaded update is retained", async () => {
   const updatesDirectory = await mkdtemp(path.join(os.tmpdir(), "web-revision-update-prune-test-"));
@@ -26,6 +26,26 @@ test("only the newest downloaded update is retained", async () => {
     await assert.rejects(access(path.join(updatesDirectory, "abandoned.part")), { code: "ENOENT" });
   } finally {
     await rm(updatesDirectory, { recursive: true, force: true });
+  }
+});
+
+test("only the active and rollback application versions are retained", async () => {
+  const installRoot = await mkdtemp(path.join(os.tmpdir(), "web-revision-version-prune-test-"));
+  const versionsDirectory = path.join(installRoot, "versions");
+  await Promise.all([
+    mkdir(path.join(versionsDirectory, "0.3.7"), { recursive: true }),
+    mkdir(path.join(versionsDirectory, "0.3.8"), { recursive: true }),
+    mkdir(path.join(versionsDirectory, "0.4.0"), { recursive: true }),
+  ]);
+  await writeFile(path.join(installRoot, "current.json"), JSON.stringify({ version: "0.4.0", previousVersion: "0.3.8" }));
+
+  try {
+    assert.deepEqual(await pruneInstalledVersions(installRoot, "0.4.0"), ["0.3.7"]);
+    await access(path.join(versionsDirectory, "0.4.0"));
+    await access(path.join(versionsDirectory, "0.3.8"));
+    await assert.rejects(access(path.join(versionsDirectory, "0.3.7")), { code: "ENOENT" });
+  } finally {
+    await rm(installRoot, { recursive: true, force: true });
   }
 });
 
