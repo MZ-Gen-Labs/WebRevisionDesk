@@ -27,6 +27,7 @@ await Promise.all([
   cp(path.join(root, "electron"), path.join(application, "electron"), { recursive: true }),
   cp(path.join(root, "dist"), path.join(application, "dist"), { recursive: true }),
   cp(path.join(root, "src", "electron-feasibility-core.js"), path.join(application, "src", "electron-feasibility-core.js")),
+  cp(path.join(root, "src", "browser-task-queue.js"), path.join(application, "src", "browser-task-queue.js")),
   cp(path.join(root, "LICENSE"), path.join(application, "LICENSE")),
   cp(path.join(root, "THIRD_PARTY_NOTICES.md"), path.join(application, "THIRD_PARTY_NOTICES.md")),
   writeFile(path.join(application, "package.json"), `${JSON.stringify({
@@ -60,4 +61,3 @@ await run("powershell.exe", [
 ], { cwd: root });
 
 console.log(`Created ${zipPath}`);
-

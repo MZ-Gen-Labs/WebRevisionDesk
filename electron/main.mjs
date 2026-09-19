@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
 import { appendFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
 import path from "node:path";
+import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import {
   isCrawlTarget,
   normalizeHttpUrl,
@@ -20,6 +22,7 @@ const CAPTURE_PARTITION = "persist:web-revision-desk";
 const MAX_RESOURCE_BYTES = 15 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 60 * 1024 * 1024;
 const navigationTimeoutMs = 45_000;
+const browserTaskQueue = new BrowserTaskQueue();
 
 let mainWindow;
 let pageWindow;
@@ -205,7 +208,7 @@ async function fetchResource(url) {
   }
 }
 
-async function captureCurrentPage() {
+async function captureCurrentPage({ includeScreenshot = true } = {}) {
   const win = ensurePageWindow();
   if (!/^https?:/i.test(win.webContents.getURL())) throw new Error("先に対象ページを開いてください。");
   progress("表示中ページを解析しています…");
@@ -267,7 +270,9 @@ async function captureCurrentPage() {
     const meta = document.createElement("meta"); meta.name = "web-revision-source-url"; meta.content = payload.capturedUrl; cloneRoot.querySelector("head")?.prepend(meta);
     return "<!doctype html>\\n" + cloneRoot.outerHTML;
   })()`);
-  const screenshot = (await win.webContents.capturePage()).toPNG();
+  // The editor only needs HTML here. On Windows, capturing a hidden window a
+  // second time can fail with UnknownVizError because its compositor is idle.
+  const screenshot = includeScreenshot ? (await win.webContents.capturePage()).toPNG() : undefined;
   lastInspection = metadata;
   lastCapture = {
     html,
@@ -451,7 +456,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   }
   if (method === "POST" && url === "/api/capture/finish") {
     if (!activeCaptureSessionId || body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが見つかりません。");
-    await captureCurrentPage();
+    await captureCurrentPage({ includeScreenshot: false });
     activeCaptureSessionId = "";
     pageWindow?.hide();
     return ipcResponse(lastCapture.html, { headers: {
@@ -468,7 +473,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   }
   if (method === "POST" && url === "/api/capture/direct") {
     await openCapturePage(body.url, { show: false });
-    await captureCurrentPage();
+    await captureCurrentPage({ includeScreenshot: false });
     pageWindow?.hide();
     return ipcResponse(lastCapture.html, { headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -541,7 +546,13 @@ async function handleFileSystem({ operation, parts = [], create = false, content
 function registerIpc() {
   ipcMain.handle("editor:api-request", async (event, request) => {
     assertTrustedSender(event);
-    try { return await handleEditorApi(request); }
+    const browserPaths = new Set([
+      "/api/capture/start", "/api/login/finish", "/api/capture/finish", "/api/capture/cancel",
+      "/api/crawl", "/api/preview/screenshot", "/api/capture/direct",
+    ]);
+    const run = () => handleEditorApi(request);
+    const priority = request.headers?.["x-browser-task-priority"] === "interactive" ? "interactive" : "normal";
+    try { return browserPaths.has(request.url) ? await browserTaskQueue.enqueue(run, { priority }) : await run(); }
     catch (error) { return jsonResponse({ error: error.message || "処理に失敗しました。" }, 400); }
   });
   ipcMain.handle("editor:file-system", async (event, request) => {
@@ -612,6 +623,34 @@ async function createMainWindow({ show = true } = {}) {
   mainWindow.on("closed", () => { mainWindow = undefined; });
 }
 
+async function verifySequentialEditorCaptures() {
+  const server = createServer((request, response) => {
+    const label = request.url === "/two" ? "Page Two" : "Page One";
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(`<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  try {
+    const { port } = server.address();
+    const requests = ["one", "two"].map((page) => ({
+      url: "/api/capture/direct",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      bodyBase64: Buffer.from(JSON.stringify({ url: `http://127.0.0.1:${port}/${page}` })).toString("base64"),
+    }));
+    const replies = await mainWindow.webContents.executeJavaScript(`Promise.all(${toScriptValue(requests)}.map((request) => window.webRevisionDesktop.request(request)))`);
+    const pages = replies.map((reply) => Buffer.from(reply.bodyBase64, "base64").toString("utf8"));
+    if (replies.some((reply) => reply.status !== 200) || !pages[0].includes("Page One") || !pages[1].includes("Page Two")) {
+      throw new Error("Sequential Electron page capture failed.");
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 app.on("certificate-error", (_event, _contents, url, error, _certificate, callback) => {
   record("certificate-error", { url: redactUrl(url), error });
   callback(false);
@@ -658,6 +697,7 @@ app.whenReady().then(async () => {
     const appInfo = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request({ url: "/api/app-info", method: "GET", headers: {}, bodyBase64: "" })`);
     const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));
     if (appInfo.status !== 200 || appInfoBody.version !== packageJson.version) throw new Error("Electron editor API did not return application information.");
+    await verifySequentialEditorCaptures();
     console.log(`Electron editor smoke test passed: ${process.versions.electron} / ${title}`);
     app.quit();
     return;
