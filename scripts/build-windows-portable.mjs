@@ -54,6 +54,7 @@ await run("npm.cmd", ["run", "build"]);
 await Promise.all([
   cp(path.join(root, "dist"), path.join(appDirectory, "dist"), { recursive: true }),
   cp(path.join(root, "server.js"), path.join(appDirectory, "server.js")),
+  cp(path.join(root, "src", "browser-task-queue.js"), path.join(appDirectory, "src", "browser-task-queue.js")),
   cp(path.join(root, "src", "capture-page.js"), path.join(appDirectory, "src", "capture-page.js")),
   cp(path.join(root, "src", "update-service.js"), path.join(appDirectory, "src", "update-service.js")),
   cp(path.join(root, "README.md"), path.join(appDirectory, "README.md")),

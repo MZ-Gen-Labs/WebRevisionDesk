@@ -207,7 +207,7 @@ test("a URL not found by crawling can be added to the project page list", async 
   await page.locator("#add-project-url").click();
   const added = page.locator(".project-page-row").filter({ hasText: "https://example.com/pages/manual" });
   await added.waitFor();
-  assert.match(await added.locator(".project-page").textContent(), /未取得.*画像プレビュー/);
+  assert.match(await added.locator(".project-page").textContent(), /未取得.*画像とページを取得/);
   await added.getByRole("button", { name: "取得用ブラウザで開く" }).click();
   await page.locator("#capture-session-actions").waitFor();
   await page.waitForFunction(() => !document.querySelector("#capture-current-page").disabled);
@@ -278,7 +278,7 @@ test("undo restores nested links and formatting, then project import can be repe
   await page.close();
 });
 
-test("an uncaptured project page previews without saving, then can be imported and reset", async () => {
+test("clicking an uncaptured project page previews it, captures it, saves it, and allows reset", async () => {
   const page = await browser.newPage();
   await page.addInitScript(() => {
     class MemoryFileHandle {
@@ -332,18 +332,26 @@ test("an uncaptured project page previews without saving, then can be imported a
     window.__testProjectDirectory = root;
     window.showDirectoryPicker = async () => root;
   });
-  await page.route("**/api/capture/direct", (route) => route.fulfill({
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "X-Captured-Filename": encodeURIComponent("one.html"),
-      "X-Captured-Url": encodeURIComponent("https://example.com/base/one"),
-    },
-    body: "<!doctype html><html><head><title>Captured page</title></head><body><h1>中央に表示されたページ</h1></body></html>",
-  }));
+  const requestOrder = [];
+  await page.route("**/api/capture/direct", async (route) => {
+    requestOrder.push("page");
+    assert.equal(route.request().headers()["x-browser-task-priority"], "interactive");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return route.fulfill({
+      status: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Captured-Filename": encodeURIComponent("one.html"),
+        "X-Captured-Url": encodeURIComponent("https://example.com/base/one"),
+      },
+      body: "<!doctype html><html><head><title>Captured page</title></head><body><h1>中央に表示されたページ</h1></body></html>",
+    });
+  });
   let previewRequests = 0;
   await page.route("**/api/preview/screenshot", (route) => {
     previewRequests++;
+    requestOrder.push("image");
+    assert.equal(route.request().headers()["x-browser-task-priority"], "interactive");
     return route.fulfill({
       status: 200,
       headers: {
@@ -359,27 +367,18 @@ test("an uncaptured project page previews without saving, then can be imported a
   await page.locator("#select-project-folder").click();
   const projectPage = page.locator(".project-page").filter({ hasText: "未取得テストページ" });
   await projectPage.waitFor();
-  assert.match(await projectPage.textContent(), /画像プレビュー/);
+  assert.match(await projectPage.textContent(), /画像とページを取得/);
   assert.equal(await page.locator(".project-page-actions").getByText("取得用ブラウザで開く").isVisible(), true);
 
   await projectPage.click();
   await page.locator("#screenshot-preview").waitFor({ state: "visible" });
   assert.match(await page.locator("#screenshot-preview-image").getAttribute("src"), /^blob:/);
-  assert.equal(await page.locator("#page-frame").isHidden(), true);
-  assert.equal(await page.locator(".project-page.saved").count(), 0);
-  assert.match(await page.locator("#save-state").textContent(), /未取得・画像プレビュー/);
-  assert.equal(await page.locator("#show-modified").isDisabled(), true);
-  assert.equal(await page.locator("#import-preview-page").isVisible(), true);
-  assert.equal(previewRequests, 1);
-
-  await page.locator("#refresh-preview").click();
-  await page.locator("#status").filter({ hasText: "スクリーンショットを更新しました" }).waitFor();
-  assert.equal(previewRequests, 2);
-
-  await page.locator("#import-preview-page").click();
   await page.frameLocator("#page-frame").locator("h1").filter({ hasText: "中央に表示されたページ" }).waitFor();
   await page.locator(".project-page.saved").filter({ hasText: "Captured page" }).waitFor();
   assert.equal(await page.locator("#show-modified").isEnabled(), true);
+  assert.equal(await page.locator("#import-preview-page").isHidden(), true);
+  assert.equal(previewRequests, 1);
+  assert.deepEqual(requestOrder, ["image", "page"]);
 
   await page.locator('.project-page-row input[type="checkbox"]').check();
   assert.equal(await page.locator("#reset-project-pages").isEnabled(), true);

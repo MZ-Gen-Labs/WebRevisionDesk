@@ -17,6 +17,7 @@ $required = @(
   (Join-Path $installRoot "updater.ps1"),
   (Join-Path $versionRoot "node/node.exe"),
   (Join-Path $versionRoot "server.js"),
+  (Join-Path $versionRoot "src/browser-task-queue.js"),
   (Join-Path $versionRoot "dist/index.html"),
   (Join-Path $versionRoot "release.json")
 )

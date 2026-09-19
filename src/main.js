@@ -45,12 +45,13 @@ const ui = {
 const state = {
   fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
   sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
-  selectedProjectUrls: new Set(), batchRunning: false,
+  selectedProjectUrls: new Set(), batchRunning: false, queuedCaptureUrls: new Set(), activeCaptureUrl: "",
 };
 let captureSessionId = "";
 let loginSessionId = "";
 let loginReady = false;
 let loginBusy = false;
+let interactiveCaptureQueue = Promise.resolve();
 
 function loginBlocked() {
   return loginBusy || Boolean(loginSessionId) || (ui.loginRequired.checked && !loginReady);
@@ -422,7 +423,13 @@ function renderProjectPages() {
       changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
       error: "公開版の確認失敗",
     }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
-    status.textContent = page.saved ? savedStatus : "未取得・クリックして画像プレビュー";
+    status.textContent = page.saved
+      ? savedStatus
+      : state.activeCaptureUrl === page.url
+        ? "画像・ページを取得中"
+        : state.queuedCaptureUrls.has(page.url)
+          ? "優先取得待ち"
+          : "未取得・クリックして画像とページを取得";
     button.append(title, path, status);
     button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page));
     row.append(checkbox, button);
@@ -454,8 +461,8 @@ function renderProjectPages() {
   updateBatchControls();
 }
 
-async function captureUrlDirectly(url) {
-  const response = await postJson("/api/capture/direct", { url });
+async function captureUrlDirectly(url, priority = "normal") {
+  const response = await postJson("/api/capture/direct", { url }, { browserPriority: priority });
   const html = await response.text();
   return {
     html,
@@ -464,8 +471,8 @@ async function captureUrlDirectly(url) {
   };
 }
 
-async function captureScreenshot(url, refresh = false) {
-  const response = await postJson("/api/preview/screenshot", { url, refresh });
+async function captureScreenshot(url, refresh = false, priority = "interactive") {
+  const response = await postJson("/api/preview/screenshot", { url, refresh }, { browserPriority: priority });
   const image = await response.blob();
   return {
     imageUrl: URL.createObjectURL(image),
@@ -506,21 +513,44 @@ function showScreenshotPreview(preview) {
 async function previewUncapturedProjectPage(page) {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてからページを開いてください。", "error");
-  try {
-    if (!(await preserveCurrentPage())) return;
-    state.batchRunning = true;
-    updateBatchControls();
-    setStatus(`「${page.title}」を中央へ一時表示しています…`, "info");
-    const preview = await captureScreenshot(page.url);
-    showScreenshotPreview(preview);
-    setStatus(`「${page.title}」の画像プレビューを表示しました。まだ保存されていません。`, "success");
-  } catch (error) {
-    setStatus(`中央へ一時表示できませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
-  } finally {
-    state.batchRunning = false;
-    renderProjectPages();
-    updateBatchControls();
+  if (state.queuedCaptureUrls.has(page.url) || state.activeCaptureUrl === page.url) {
+    return setStatus(`「${page.title}」は取得待ち、または取得中です。`, "info");
   }
+  state.queuedCaptureUrls.add(page.url);
+  renderProjectPages();
+  setStatus(state.batchRunning
+    ? `一括取得の現在ページが終わり次第、「${page.title}」を優先取得します。`
+    : `「${page.title}」の画像・ページ取得を開始します。`, "info");
+
+  const run = async () => {
+    state.queuedCaptureUrls.delete(page.url);
+    state.activeCaptureUrl = page.url;
+    renderProjectPages();
+    try {
+      const latest = listedProjectPages().find((item) => item.url === page.url);
+      if (latest?.saved) {
+        await openProjectPage(latest.id);
+        return;
+      }
+      if (!(await preserveCurrentPage())) return;
+      if (state.batchRunning) ui.batchProgress.textContent = `一括取得を一時待機：「${page.title}」を優先取得中`;
+      setStatus(`「${page.title}」の画像を取得しています…`, "info");
+      const preview = await captureScreenshot(page.url, false, "interactive");
+      showScreenshotPreview(preview);
+      setStatus(`「${page.title}」の編集用ページを取得しています…`, "info");
+      const captured = await captureUrlDirectly(preview.url, "interactive");
+      await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
+      await saveCurrentToProject({ quiet: true });
+      setStatus(`「${page.title}」を案件フォルダへ取得しました。中央の画面で編集できます。`, "success");
+    } catch (error) {
+      setStatus(`「${page.title}」を取得できませんでした: ${error.message}。「取得用ブラウザで開く」も利用できます。`, "error");
+    } finally {
+      state.activeCaptureUrl = "";
+      renderProjectPages();
+      updateBatchControls();
+    }
+  };
+  interactiveCaptureQueue = interactiveCaptureQueue.then(run, run);
 }
 
 function clearLoadedPage() {
@@ -577,6 +607,13 @@ async function processSelectedPages(mode) {
   let failed = 0;
   for (let index = 0; index < targets.length; index++) {
     const page = targets[index];
+    await interactiveCaptureQueue;
+    const latest = listedProjectPages().find((item) => item.url === page.url);
+    if (!page.saved && latest?.saved) {
+      completed++;
+      renderProjectPages();
+      continue;
+    }
     ui.batchProgress.textContent = `${targets.length}件中 ${index + 1}件目：${page.title}`;
     try {
       const captured = await captureUrlDirectly(page.url);
@@ -600,6 +637,7 @@ async function processSelectedPages(mode) {
     }
     renderProjectPages();
   }
+  await interactiveCaptureQueue;
   state.batchRunning = false;
   ui.batchProgress.textContent = `完了 ${completed}件${failed ? `・失敗 ${failed}件` : ""}`;
   updateBatchControls();
@@ -828,10 +866,12 @@ ui.file.addEventListener("change", async () => {
   }
 });
 
-async function postJson(url, body) {
+async function postJson(url, body, { browserPriority } = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (browserPriority) headers["X-Browser-Task-Priority"] = browserPriority;
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(body),
   });
   if (!response.ok) {

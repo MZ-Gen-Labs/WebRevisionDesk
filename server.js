@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { chromium } from "playwright";
 import { capturePage } from "./src/capture-page.js";
+import { BrowserTaskQueue } from "./src/browser-task-queue.js";
 import { createUpdateService } from "./src/update-service.js";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
@@ -17,7 +18,7 @@ const updateService = await createUpdateService({
 const profileDir = updateService.profileDirectory;
 const sessions = new Map();
 const screenshotCache = new Map();
-let browserOperationRunning = false;
+const browserTasks = new BrowserTaskQueue();
 
 const productionMode = process.env.WEB_REVISION_PRODUCTION === "1";
 const vite = productionMode ? null : await import("vite").then(({ createServer }) => createServer({
@@ -287,7 +288,6 @@ async function previewScreenshot(request, response) {
 }
 
 const server = http.createServer(async (request, response) => {
-  let ownsBrowserOperation = false;
   try {
     const expectedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
     if (!expectedHosts.has(request.headers.host)) return sendJson(response, 403, { error: "許可されていない接続先です。" });
@@ -299,11 +299,6 @@ const server = http.createServer(async (request, response) => {
       if (request.method === "POST" && !/^application\/json(?:\s*;|$)/i.test(request.headers["content-type"] || "")) {
         return sendJson(response, 415, { error: "JSON形式で送信してください。" });
       }
-    }
-    if (request.method === "POST" && /^(?:\/api\/capture\/|\/api\/login\/|\/api\/preview\/|\/api\/crawl$)/.test(request.url)) {
-      if (browserOperationRunning) return sendJson(response, 409, { error: "ブラウザ処理中です。完了してから再実行してください。" });
-      browserOperationRunning = true;
-      ownsBrowserOperation = true;
     }
     if (request.method === "GET" && request.url === "/api/app-info") {
       return sendJson(response, 200, {
@@ -336,13 +331,19 @@ const server = http.createServer(async (request, response) => {
       setTimeout(() => shutdown(), 750);
       return;
     }
-    if (request.method === "POST" && request.url === "/api/capture/start") return await startCapture(request, response);
-    if (request.method === "POST" && request.url === "/api/login/finish") return await finishLogin(request, response);
-    if (request.method === "POST" && request.url === "/api/capture/finish") return await finishCapture(request, response);
-    if (request.method === "POST" && request.url === "/api/capture/cancel") return await cancelCapture(request, response);
-    if (request.method === "POST" && request.url === "/api/crawl") return await crawlSite(request, response);
-    if (request.method === "POST" && request.url === "/api/preview/screenshot") return await previewScreenshot(request, response);
-    if (request.method === "POST" && request.url === "/api/capture/direct") return await captureDirect(request, response);
+    const browserTask = request.method === "POST" && new Map([
+      ["/api/capture/start", startCapture],
+      ["/api/login/finish", finishLogin],
+      ["/api/capture/finish", finishCapture],
+      ["/api/capture/cancel", cancelCapture],
+      ["/api/crawl", crawlSite],
+      ["/api/preview/screenshot", previewScreenshot],
+      ["/api/capture/direct", captureDirect],
+    ]).get(request.url);
+    if (browserTask) {
+      const priority = request.headers["x-browser-task-priority"] === "interactive" ? "interactive" : "normal";
+      return await browserTasks.enqueue(() => browserTask(request, response), { priority });
+    }
     if (productionMode) return await serveProductionFile(request, response);
     vite.middlewares(request, response, () => {
       response.writeHead(404);
@@ -351,8 +352,6 @@ const server = http.createServer(async (request, response) => {
   } catch (error) {
     console.error(error);
     sendJson(response, 400, { error: error.message || "処理に失敗しました。" });
-  } finally {
-    if (ownsBrowserOperation) browserOperationRunning = false;
   }
 });
 
