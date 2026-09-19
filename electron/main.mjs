@@ -162,6 +162,18 @@ function ensurePageWindow() {
   return pageWindow;
 }
 
+function createBackgroundPageWindow(title) {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 900,
+    show: false,
+    title,
+    webPreferences: secureWebPreferences(),
+  });
+  attachRemoteGuards(window.webContents);
+  return window;
+}
+
 async function executeInPage(contents, code) {
   return contents.executeJavaScriptInIsolatedWorld(1001, [{ code }], false);
 }
@@ -208,8 +220,8 @@ async function fetchResource(url) {
   }
 }
 
-async function captureCurrentPage({ includeScreenshot = true } = {}) {
-  const win = ensurePageWindow();
+async function captureCurrentPage({ includeScreenshot = true, window = ensurePageWindow() } = {}) {
+  const win = window;
   if (!/^https?:/i.test(win.webContents.getURL())) throw new Error("先に対象ページを開いてください。");
   progress("表示中ページを解析しています…");
   await executeInPage(win.webContents, `new Promise(async (resolve) => {
@@ -284,6 +296,31 @@ async function captureCurrentPage({ includeScreenshot = true } = {}) {
   await record("capture-complete", { url: redactUrl(metadata.url), ...lastCapture.statistics });
   progress("ページ取得が完了しました。", { done: true });
   return { metadata, statistics: lastCapture.statistics, capturedAt: lastCapture.capturedAt };
+}
+
+async function captureUrlInFreshWindow(url) {
+  const target = normalizeHttpUrl(url, url).href;
+  const win = createBackgroundPageWindow("Web Revision Desk - ページ取得中");
+  try {
+    await withNavigationTimeout(win.webContents, target);
+    const captured = await captureCurrentPage({ includeScreenshot: false, window: win });
+    return { ...lastCapture, ...captured };
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+async function screenshotUrlInFreshWindow(url) {
+  const target = normalizeHttpUrl(url, url).href;
+  const win = createBackgroundPageWindow("Web Revision Desk - プレビュー取得中");
+  try {
+    await withNavigationTimeout(win.webContents, target);
+    const metadata = await inspectContents(win.webContents);
+    const image = (await win.webContents.capturePage()).toJPEG(78);
+    return { metadata, image };
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
 }
 
 async function crawl(baseUrl, requestedMax) {
@@ -472,20 +509,15 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
     return jsonResponse({ ok: true });
   }
   if (method === "POST" && url === "/api/capture/direct") {
-    await openCapturePage(body.url, { show: false });
-    await captureCurrentPage({ includeScreenshot: false });
-    pageWindow?.hide();
-    return ipcResponse(lastCapture.html, { headers: {
+    const captured = await captureUrlInFreshWindow(body.url);
+    return ipcResponse(captured.html, { headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "X-Captured-Filename": encodedHeader(capturedFileName(lastCapture.metadata)),
-      "X-Captured-Url": encodedHeader(lastCapture.metadata.url),
+      "X-Captured-Filename": encodedHeader(capturedFileName(captured.metadata)),
+      "X-Captured-Url": encodedHeader(captured.metadata.url),
     } });
   }
   if (method === "POST" && url === "/api/preview/screenshot") {
-    await openCapturePage(body.url, { show: false });
-    const metadata = lastInspection;
-    const image = (await ensurePageWindow().webContents.capturePage()).toJPEG(78);
-    pageWindow?.hide();
+    const { metadata, image } = await screenshotUrlInFreshWindow(body.url);
     return ipcResponse(image, { headers: {
       "Content-Type": "image/jpeg",
       "X-Preview-Title": encodedHeader(metadata.title),
