@@ -18,6 +18,8 @@ const application = path.join(stage, "resources", "app");
 const zipPath = path.join(releaseRoot, `${directoryName}.zip`);
 const electronDistribution = path.join(root, "node_modules", "electron", "dist");
 
+// Electron 44 downloads its platform runtime on first launch instead of npm install.
+await run(process.execPath, [path.join(root, "node_modules", "electron", "cli.js"), "--version"], { cwd: root });
 await rm(releaseRoot, { recursive: true, force: true });
 await mkdir(path.join(application, "src"), { recursive: true });
 await cp(electronDistribution, stage, { recursive: true });
