@@ -35,7 +35,15 @@ try {
   }
   if (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { throw "The previous version could not be stopped." }
 
-  $ActualDigest = "sha256:$((Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant())"
+  $HashAlgorithm = [Security.Cryptography.SHA256]::Create()
+  $ZipStream = [IO.File]::OpenRead($ZipPath)
+  try {
+    $HashBytes = $HashAlgorithm.ComputeHash($ZipStream)
+  } finally {
+    $ZipStream.Dispose()
+    $HashAlgorithm.Dispose()
+  }
+  $ActualDigest = "sha256:$([BitConverter]::ToString($HashBytes).Replace('-', '').ToLowerInvariant())"
   if ($ActualDigest -ne $ExpectedDigest.ToLowerInvariant()) { throw "The update ZIP SHA-256 does not match." }
 
   New-Item -ItemType Directory -Force -Path $VersionsRoot | Out-Null

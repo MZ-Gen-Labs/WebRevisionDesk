@@ -25,6 +25,13 @@ test("launcher verifies ownership before controlling the port listener", async (
   assert.match(content, /Stop Web Revision Desk\? \(Y\/N\)/);
 });
 
+test("updater hashes archives without relying on an auto-loaded Get-FileHash command", async () => {
+  const content = await readFile(new URL("../../windows/updater.ps1", import.meta.url), "utf8");
+  assert.match(content, /\[Security\.Cryptography\.SHA256\]::Create\(\)/);
+  assert.match(content, /\.ComputeHash\(\$ZipStream\)/);
+  assert.doesNotMatch(content, /Get-FileHash/);
+});
+
 for (const file of ["windows/Start-WebRevisionDesk.cmd", "windows/Start-WebRevisionEditor.cmd"]) {
   test(`${file} lets launcher.ps1 resolve its own installation directory`, async () => {
     const content = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");

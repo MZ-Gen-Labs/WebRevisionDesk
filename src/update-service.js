@@ -6,10 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 const APP_DIRECTORY = "WebRevisionEditor";
 const SETTINGS_VERSION = 1;
 const MAX_UPDATE_SIZE = 1024 * 1024 * 1024;
+const UPDATER_START_TIMEOUT_MS = 15000;
 const OFFICIAL_REPOSITORY = "https://github.com/MZ-Gen-Labs/WebRevisionDesk";
 
 function defaultDataDirectory() {
@@ -66,6 +68,77 @@ export function updaterPowerShellArguments({ updater, installRoot, update, appPi
   ];
 }
 
+function powerShellLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function encodedPowerShellCommand(command) {
+  return Buffer.from(command, "utf16le").toString("base64");
+}
+
+export function updaterLauncherArguments({ updater, installRoot, update, appPid, dataDirectory }) {
+  const localAppData = path.dirname(dataDirectory);
+  const updaterCommand = [
+    `$env:LOCALAPPDATA = ${powerShellLiteral(localAppData)};`,
+    "Import-Module (Join-Path $PSHOME 'Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop;",
+    `& ${powerShellLiteral(updater)}`,
+    `-InstallRoot ${powerShellLiteral(path.resolve(installRoot))}`,
+    `-Version ${powerShellLiteral(update.version)}`,
+    `-ZipPath ${powerShellLiteral(update.path)}`,
+    `-ExpectedDigest ${powerShellLiteral(update.digest)}`,
+    `-AppPid ${Number(appPid)}`,
+  ].join(" ");
+  const updaterCommandEncoded = encodedPowerShellCommand(updaterCommand);
+  const launcherCommand = [
+    `$commandLine = ${powerShellLiteral(`powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${updaterCommandEncoded}`)};`,
+    "$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine };",
+    "if ([int]$result.ReturnValue -ne 0) { throw \"Windows updater process creation failed with code $($result.ReturnValue).\" }",
+  ].join(" ");
+  return ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodedPowerShellCommand(launcherCommand)];
+}
+
+async function readOptionalText(file) {
+  try {
+    return await readFile(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+function waitForSpawn(child) {
+  return new Promise((resolve, reject) => {
+    const onSpawn = () => {
+      child.off("error", onError);
+      resolve();
+    };
+    const onError = (error) => {
+      child.off("spawn", onSpawn);
+      reject(error);
+    };
+    child.once("spawn", onSpawn);
+    child.once("error", onError);
+  });
+}
+
+export async function waitForUpdaterStart({
+  child,
+  logFile,
+  previousLog,
+  expectedEntry,
+  timeoutMs = UPDATER_START_TIMEOUT_MS,
+}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const currentLog = await readOptionalText(logFile);
+    const appendedLog = currentLog.startsWith(previousLog) ? currentLog.slice(previousLog.length) : "";
+    if (appendedLog.includes(expectedEntry)) return;
+    await delay(50);
+  }
+  try { child.kill(); } catch {}
+  throw new Error("Windows更新処理の起動を確認できませんでした。PowerShellの実行がセキュリティ設定等で停止されていないか確認してください。");
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, {
     ...options,
@@ -100,7 +173,13 @@ async function fetchManifest(release) {
   }
 }
 
-export async function createUpdateService({ appVersion, legacyProfileDirectory, installRoot = process.env.WEB_REVISION_INSTALL_ROOT }) {
+export async function createUpdateService({
+  appVersion,
+  legacyProfileDirectory,
+  installRoot = process.env.WEB_REVISION_INSTALL_ROOT,
+  spawnProcess = spawn,
+  updaterStartTimeoutMs = UPDATER_START_TIMEOUT_MS,
+}) {
   const dataDirectory = defaultDataDirectory();
   const profileDirectory = path.join(dataDirectory, "capture-profile");
   const updatesDirectory = path.join(dataDirectory, "updates");
@@ -262,15 +341,24 @@ export async function createUpdateService({ appVersion, legacyProfileDirectory, 
     }
     await access(update.path);
     const updater = path.join(path.resolve(installRoot), "updater.ps1");
-    const child = spawn("powershell.exe", updaterPowerShellArguments({
+    const logFile = path.join(dataDirectory, "logs", "updater.log");
+    const previousLog = await readOptionalText(logFile);
+    const appPid = process.pid;
+    const expectedLogEntry = `Waiting for PID ${appPid} before applying v${update.version}.`;
+    const child = spawnProcess("powershell.exe", updaterLauncherArguments({
       updater,
       installRoot,
       update,
-      appPid: process.pid,
-    }), { detached: true, stdio: "ignore", windowsHide: true });
-    await new Promise((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
+      appPid,
+      dataDirectory,
+    }), { detached: false, stdio: "ignore", windowsHide: true });
+    await waitForSpawn(child);
+    await waitForUpdaterStart({
+      child,
+      logFile,
+      previousLog,
+      expectedEntry: expectedLogEntry,
+      timeoutMs: updaterStartTimeoutMs,
     });
     child.unref();
     return { applying: true, version: update.version };
