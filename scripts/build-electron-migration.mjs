@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -9,14 +10,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const electronPackage = JSON.parse(await readFile(path.join(root, "node_modules", "electron", "package.json"), "utf8"));
 
-if (process.platform !== "win32") throw new Error("Electron移行版ZIPはWindowsまたはGitHub Actions上で作成してください。");
+if (process.platform !== "win32") throw new Error("Electron版ZIPはWindowsまたはGitHub Actions上で作成してください。");
 
-const releaseRoot = path.join(root, "release-electron-migration");
-const directoryName = `WebRevisionDesk-${packageJson.version}-electron-migration-win-x64`;
+const formalRelease = process.env.WEB_REVISION_ELECTRON_RELEASE === "1";
+const releaseRoot = path.join(root, formalRelease ? "release-electron" : "release-electron-migration");
+const directoryName = formalRelease
+  ? `WebRevisionDesk-${packageJson.version}-electron-win-x64`
+  : `WebRevisionDesk-${packageJson.version}-electron-migration-win-x64`;
 const stage = path.join(releaseRoot, directoryName);
 const application = path.join(stage, "resources", "app");
 const zipPath = path.join(releaseRoot, `${directoryName}.zip`);
 const electronDistribution = path.join(root, "node_modules", "electron", "dist");
+const executableName = formalRelease ? "WebRevisionDesk.exe" : "WebRevisionDesk-Electron.exe";
+const launcherName = formalRelease ? "Start-WebRevisionDesk.cmd" : "Start-WebRevisionDesk-Electron.cmd";
 
 await run(process.execPath, [path.join(root, "node_modules", "electron", "cli.js"), "--version"], { cwd: root });
 await rm(releaseRoot, { recursive: true, force: true });
@@ -33,26 +39,26 @@ await Promise.all([
   writeFile(path.join(application, "package.json"), `${JSON.stringify({
     name: packageJson.name,
     version: packageJson.version,
-    description: `${packageJson.description} Electron migration build`,
+    description: `${packageJson.description} Electron build`,
     license: packageJson.license,
     type: "module",
     main: "electron/main.mjs",
   }, null, 2)}\n`, "utf8"),
-  writeFile(path.join(stage, "Start-WebRevisionDesk-Electron.cmd"), "@echo off\r\nstart \"\" \"%~dp0WebRevisionDesk-Electron.exe\"\r\n", "ascii"),
+  writeFile(path.join(stage, launcherName), `@echo off\r\nstart \"\" \"%~dp0${executableName}\"\r\n`, "ascii"),
   writeFile(path.join(stage, "README-FIRST.txt"), [
-    "Web Revision Desk - Electron Migration Build",
+    formalRelease ? "Web Revision Desk - Electron Edition" : "Web Revision Desk - Electron Migration Build",
     "",
     "1. Extract this ZIP to a local folder.",
-    "2. Double-click Start-WebRevisionDesk-Electron.cmd.",
+    `2. Double-click ${launcherName}.`,
     "3. Select a project folder, discover pages, preview, capture, edit, and save.",
     "",
     `App version: ${packageJson.version}`,
     `Electron version: ${electronPackage.version}`,
-    "This migration build does not replace the stable application yet.",
+    formalRelease ? "This is the stable Electron edition." : "This migration build does not replace the stable application yet.",
     "",
   ].join("\r\n"), "ascii"),
 ]);
-await rename(path.join(stage, "electron.exe"), path.join(stage, "WebRevisionDesk-Electron.exe"));
+await rename(path.join(stage, "electron.exe"), path.join(stage, executableName));
 
 const quotePowerShell = (value) => `'${String(value).replaceAll("'", "''")}'`;
 await run("powershell.exe", [
@@ -60,4 +66,7 @@ await run("powershell.exe", [
   `Compress-Archive -Path (Join-Path ${quotePowerShell(stage)} '*') -DestinationPath ${quotePowerShell(zipPath)} -CompressionLevel Optimal -Force`,
 ], { cwd: root });
 
-console.log(`Created ${zipPath}`);
+const digest = createHash("sha256").update(await readFile(zipPath)).digest("hex");
+await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${digest}  ${path.basename(zipPath)}\n`, "ascii");
+
+console.log(`Created ${zipPath}\nSHA-256 ${digest}`);

@@ -5,18 +5,18 @@
 [![CI](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-SingleFileを使わず、URLを取得用Chromiumで開いて現在の表示を単一HTMLとして取り込む機能も備えています。この取得機能はApache-2.0のPlaywrightと本プロジェクト独自コードで構成しています。
+SingleFileを使わず、URLをElectron内蔵Chromiumで開いて現在の表示を単一HTMLとして取り込めます。外部ブラウザ、Playwright、localhost APIを必要としません。
 
-## Electron機能検証
+## Electron版
 
-`codex/electron-feasibility`での会社PC検証に合格したため、`codex/electron-migration`で既存編集画面のElectron移行を進めています。移行版はPlaywright、外部ブラウザ、localhost APIを使わず、Electron内蔵Chromiumでページ検索・プレビュー・取り込みを行います。案件フォルダもOS標準のフォルダ選択画面から利用します。
+v0.5.0以降はElectron版が標準です。Electron内蔵Chromiumでページ検索・プレビュー・取り込みを行い、案件フォルダはOS標準のフォルダ選択画面から利用します。
 
 ```bash
 npm ci
 npm run electron:dev
 ```
 
-元の機能検証画面は`npm run electron:feasibility`で残しています。Windows移行版ZIPは、このブランチへのpush後にGitHub Actionsの`Electron Migration Windows`から取得できます。検証結果は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)、移行範囲は[`docs/06-electron-migration.md`](docs/06-electron-migration.md)を参照してください。
+元の機能検証画面は`npm run electron:feasibility`で残しています。検証結果は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)、移行内容は[`docs/06-electron-migration.md`](docs/06-electron-migration.md)を参照してください。
 
 ## できること
 
@@ -38,15 +38,16 @@ npm run electron:dev
 
 ## 起動方法
 
-Node.js 20以降を用意し、このフォルダーで次を実行します。
+利用者はGitHub ReleasesからWindows ZIPを取得し、展開後に`Start-WebRevisionDesk.cmd`を実行します。
+
+ソースから起動する場合はNode.js 20以降を用意し、次を実行します。
 
 ```bash
-npm install
-npx playwright install chromium
-npm run dev
+npm ci
+npm run electron:dev
 ```
 
-表示されたローカルURLをChromeまたはEdgeで開きます。最初の確認には `test-data/sample.html` を使用できます。
+従来のローカルWeb版は互換性確認用として`npm run dev`で起動できます。
 
 ## テスト
 
@@ -57,7 +58,7 @@ npx playwright install chromium
 npm test
 ```
 
-`npm test` は、URL階層・Windowsファイル名・更新判定・SHA-256拒否等の単体テスト、本番ビルド、HTML読込・編集・Undo/Redo・ZIP出力・詳細設定のブラウザテストを順に実行します。GitHub ActionsでもPull Requestと`main`へのpushごとに同じ主要テストを実行します。Windows Releaseでは生成した完全版ZIPを展開し、必須ファイルとサーバー起動を追加確認します。
+`npm test` は、URL階層・Windowsファイル名・更新判定・SHA-256拒否等の単体テスト、本番ビルド、HTML読込・編集・Undo/Redo・ZIP出力・詳細設定のブラウザテストを順に実行します。GitHub ActionsでもPull Requestと`main`へのpushごとに同じ主要テストを実行します。Windows Releaseでは生成したElectron ZIPを展開し、連続取得、取得エラー後の解放、起動を追加確認します。
 
 ## バージョンとリリース
 
@@ -134,8 +135,7 @@ SingleFile等で保存済みのHTMLを使用する場合は、「取り込み・
 
 - 左側のチェックボックスで複数ページを選択する
 - 「選択を一括取得」で未取得ページを順番に取得・保存する
-- 未取得ページの本体をクリックすると、案件へ保存せず中央に画面上部のスクリーンショットを表示する
-- 画像プレビューの「このページを取り込んで編集」を押した時点で、完全なHTMLを取得して案件フォルダへ保存し、編集可能にする
+- 未取得ページの本体をクリックすると、スクリーンショット取得後に完全なHTMLを取得し、案件フォルダへ保存して編集可能にする
 - 「画像を更新」で公開ページの最新スクリーンショットを取得する。直近の画像は5分間だけメモリへ一時キャッシュされ、案件フォルダには保存しない
 - ログインや画面操作が必要なページは、一覧下の「取得用ブラウザで開く」から確認後に取り込む
 - 保存済みページを選び「選択を更新確認」で公開中ページとの差を確認する
@@ -155,9 +155,9 @@ SingleFile等で保存済みのHTMLを使用する場合は、「取り込み・
 4. 編集画面中央上部の「表示中ページを取り込む」を押す
 5. CSS・画像等の埋め込み後、案件フォルダへ自動保存されたページの編集を開始する
 
-通常の一覧クリックでは公開ページのスクリーンショットだけを素早く確認できます。JavaScript操作やログイン後の状態を反映して取り込みたい場合に「取得用ブラウザで開く」を使います。
+通常の一覧クリックでは画像確認からHTML取得まで自動で進みます。JavaScript操作やログイン後の状態を反映して取り込みたい場合に「取得用ブラウザで開く」を使います。
 
-取得用ブラウザのログイン状態はアプリ本体とは別のユーザーデータ領域に保存され、外部サービスへは送信されません。Windowsでは通常 `%LOCALAPPDATA%\WebRevisionEditor\capture-profile` です。共有PCでは利用後のプロファイル管理に注意してください。
+取得用ブラウザのログイン状態はElectronの専用ユーザーデータ領域に保存され、外部サービスへは送信されません。Windowsでは通常`%APPDATA%\WebRevisionDesk`配下です。共有PCでは利用後のプロファイル管理に注意してください。
 
 ## アプリの設定と更新確認
 
@@ -171,52 +171,24 @@ SingleFile等で保存済みのHTMLを使用する場合は、「取り込み・
 
 ### 更新確認
 
-画面左上のバージョン表示を押すと、アプリ更新パネルが開きます。公開後のGitHubリポジトリURLを登録すると、GitHub Releasesの最新版を起動時または手動で確認できます。
+Electron v0.5.0では自動更新を無効にしています。新しい正式版が公開された場合はGitHub ReleasesからZIPを取得し、既存とは別のフォルダへ展開して切り替えます。案件データは利用者が選択した案件フォルダに保存されるため、新しいアプリフォルダから同じ案件フォルダを選択して継続できます。
 
-起動時の自動確認はGitHubの回数制限を避けるため、前回の確認試行から6時間以内は再実行しません。「今すぐ確認」は必要なときに手動で実行できます。
-
-- 設定とログイン用ブラウザ情報はアプリ本体の外へ保存されるため、新しいZIPへ入れ替えても引き継がれます
-- 最新ReleaseにWindows用ZIPが添付されている場合、更新パネルからダウンロードできます
-- GitHubが返すSHA-256ダイジェストを必須とし、欠落・不一致の場合は更新ZIPを拒否します。自動更新にはWindows x64の更新専用ZIPを使用し、完全版や他OS用ZIPは選択しません
-- Releaseへ `update.json` を添付すると、セキュリティ更新・重要度・必須更新を画面に表示できます
-- ダウンロード済みZIPはユーザーデータ領域の `updates/<バージョン>/` に保存されます
-
-`update.json` の例：
-
-```json
-{
-  "version": "1.0.2",
-  "updateType": "security",
-  "severity": "high",
-  "mandatory": false,
-  "minimumSupportedVersion": "1.0.0",
-  "notes": "依存モジュールの脆弱性を修正しました。"
-}
-```
-
-Windowsポータブル版では、ダウンロード後に「再起動して更新を適用」を押すと更新用ランチャーが新しいバージョンを別フォルダへ展開して切り替えます。新バージョンが起動確認に失敗した場合は、`current.json` を旧版へ戻して自動的にロールバックします。開発版からは誤適用を防ぐため自動切り替えできません。
-
-更新適用に失敗した場合の詳細は `%LOCALAPPDATA%\WebRevisionEditor\logs\updater.log` に記録されます。ログ自体が作成されない場合は、PowerShellの起動がセキュリティ設定等で拒否された可能性があります。
-
-## Windowsポータブル版の作成
+## Windows Electron版の作成
 
 Windows 11またはWindowsのCI環境で次を実行します。
 
 ```powershell
 npm ci
-npm run build:portable
+$env:WEB_REVISION_ELECTRON_RELEASE = "1"
+npm run build:electron:win
 ```
 
-`release/` に次が生成されます。
+`release-electron/` に次が生成されます。
 
-- `WebRevisionDesk-<version>-win-x64-complete.zip`：初回配布用
-- `WebRevisionDesk-<version>-win-x64.zip`：アプリ内更新用
-- `update.json`：GitHub Releaseへ添付する更新種別情報
+- `WebRevisionDesk-<version>-electron-win-x64.zip`：Windows x64配布用
 - `SHA256SUMS.txt`：配布物のSHA-256
 
-初回配布用ZIPを展開し、`Start-WebRevisionDesk.cmd` を実行すると起動します。GitHub Releaseにはアプリ内更新用ZIP、`update.json`、`SHA256SUMS.txt`を添付します。完全版ZIPは初回利用者向けです。
-
-ランチャーは起動済みのWeb Revision Deskを検出し、二重起動せず既存画面を開きます。起動後のコンソールでは `O` で画面を開く、`R` で再起動、`S` で終了、Enterでコンソールだけを閉じられます。再起動と終了は確認後に実行され、当該インストール配下のNode.jsプロセスであることを確認できた場合だけ停止します。
+ZIPを展開し、`Start-WebRevisionDesk.cmd`を実行すると起動します。GitHub ReleaseにはZIPと`SHA256SUMS.txt`を添付します。
 
 ## 安全性と制約
 

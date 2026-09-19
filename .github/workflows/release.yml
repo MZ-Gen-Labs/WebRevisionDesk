@@ -61,31 +61,35 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run test:unit
-      - name: Build Windows portable archives
+      - name: Build Windows Electron archive
         shell: pwsh
         env:
-          WEB_REVISION_UPDATE_TYPE: ${{ inputs.update_type || 'normal' }}
-          WEB_REVISION_UPDATE_SEVERITY: ${{ inputs.severity == 'none' && '' || inputs.severity }}
-          WEB_REVISION_UPDATE_MANDATORY: ${{ inputs.mandatory || 'false' }}
-          WEB_REVISION_UPDATE_NOTES: ${{ inputs.notes }}
+          WEB_REVISION_ELECTRON_RELEASE: "1"
         run: |
-          npm run build:portable
-      - name: Smoke test Windows portable archive
+          npm run build:electron:win
+      - name: Smoke test Windows Electron archive
         shell: pwsh
-        run: ./scripts/test-windows-portable.ps1
+        run: |
+          $archive = Get-ChildItem release-electron -Filter *.zip | Select-Object -First 1
+          if (-not $archive) { throw "Electron release ZIP was not created." }
+          $target = Join-Path $env:RUNNER_TEMP "electron-release-smoke"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
+          $executable = Get-ChildItem $target -Filter WebRevisionDesk.exe -Recurse | Select-Object -First 1
+          if (-not $executable) { throw "Packaged Electron executable was not found." }
+          $process = Start-Process -FilePath $executable.FullName -ArgumentList "--editor-smoke-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Electron release smoke test failed with exit code $($process.ExitCode)." }
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
           name: WebRevisionDesk-${{ env.RELEASE_TAG }}-windows
           path: |
-            release/*.zip
-            release/update.json
-            release/SHA256SUMS.txt
+            release-electron/*.zip
+            release-electron/SHA256SUMS.txt
           if-no-files-found: error
       - name: Publish GitHub Release
         shell: pwsh
         run: |
-          $files = Get-ChildItem release -File | ForEach-Object { $_.FullName }
+          $files = Get-ChildItem release-electron -File | ForEach-Object { $_.FullName }
           gh release view $env:RELEASE_TAG *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $env:RELEASE_TAG $files --clobber
