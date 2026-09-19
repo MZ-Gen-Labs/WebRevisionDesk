@@ -1,5 +1,15 @@
 # Third-party software notices
 
+## Electron
+
+- Project: Electron
+- Website: https://www.electronjs.org/
+- Source: https://github.com/electron/electron
+- License: MIT
+- Use in this project: Feasibility testing for a self-contained desktop shell, page rendering, Chromium networking, and page capture without Playwright at runtime.
+
+Electron distributions include Chromium, Node.js, and other third-party components. Distributed Electron builds must retain the license files included in the official Electron distribution.
+
 ## Playwright
 
 - Project: Microsoft Playwright

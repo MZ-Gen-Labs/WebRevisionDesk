@@ -1,6 +1,7 @@
 {
   "name": "web-revision-desk",
   "version": "0.4.1",
+  "main": "electron/main.mjs",
   "private": true,
   "description": "Capture, edit, compare, and create clear revision instructions for existing web pages.",
   "license": "Apache-2.0",
@@ -18,6 +19,8 @@
   },
   "scripts": {
     "dev": "node server.js",
+    "electron:dev": "electron electron/main.mjs",
+    "electron:package:win": "node scripts/build-electron-feasibility.mjs",
     "build": "vite build",
     "build:portable": "node scripts/build-windows-portable.mjs",
     "version:check": "node scripts/check-version.mjs",
@@ -31,6 +34,7 @@
     "playwright": "^1.55.0"
   },
   "devDependencies": {
+    "electron": "44.4.3",
     "vite": "^8.3.0"
   }
 }

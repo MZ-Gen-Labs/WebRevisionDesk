@@ -1,0 +1,41 @@
+name: Electron Feasibility Windows
+
+on:
+  push:
+    branches:
+      - codex/electron-feasibility
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test:unit
+      - run: npm run electron:package:win
+      - name: Smoke test packaged Electron application
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem release-electron -Filter *.zip | Select-Object -First 1
+          if (-not $archive) { throw "Electron feasibility ZIP was not created." }
+          $target = Join-Path $env:RUNNER_TEMP "electron-feasibility-smoke"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
+          $executable = Join-Path $target "WebRevisionDesk-Electron-Feasibility.exe"
+          if (-not (Test-Path -LiteralPath $executable)) { throw "Packaged Electron executable was not found." }
+          $process = Start-Process -FilePath $executable -ArgumentList "--feasibility-smoke-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Electron feasibility smoke test failed with exit code $($process.ExitCode)." }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: WebRevisionDesk-electron-feasibility-windows-${{ github.run_number }}
+          path: release-electron/*.zip
+          if-no-files-found: error
+          retention-days: 14

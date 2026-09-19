@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Electron機能検証</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header>
+    <p class="eyebrow">WEB REVISION DESK</p>
+    <h1>Electron機能検証</h1>
+    <p>Playwrightや外部ブラウザを使わず、Electron内でページ取得に必要な機能を確認します。</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1. 対象ページを開く</h2>
+      <label for="target-url">確認するURL</label>
+      <div class="row">
+        <input id="target-url" type="url" value="https://www.dipro.co.jp/product/solidedge" spellcheck="false">
+        <button id="open-page" class="primary">Electronで開く</button>
+        <button id="show-page">表示画面を前面へ</button>
+      </div>
+      <p class="help">別のElectron画面でログイン、スクロール、タブ展開などを行えます。Cookieは検証専用領域に保持されます。</p>
+    </section>
+
+    <section class="card">
+      <h2>2. 取得機能を確認する</h2>
+      <div class="actions">
+        <button id="inspect-page">現在ページを解析</button>
+        <button id="crawl-pages">URL配下を確認</button>
+        <label class="limit">上限 <input id="crawl-limit" type="number" min="1" max="100" value="30"> ページ</label>
+        <button id="save-artifacts" class="primary">HTML・画像・診断情報を保存</button>
+      </div>
+      <p class="help">保存時にCSS・画像等を取得して単一HTMLへ埋め込み、スクリーンショットと診断情報も同じフォルダへ保存します。</p>
+    </section>
+
+    <section class="status-card" aria-live="polite">
+      <div class="status-heading">
+        <h2>実行状況</h2>
+        <span id="busy" hidden>処理中</span>
+      </div>
+      <p id="status">準備完了</p>
+      <dl id="summary">
+        <div><dt>Electron</dt><dd id="electron-version">確認中</dd></div>
+        <div><dt>ページ</dt><dd id="page-result">未確認</dd></div>
+        <div><dt>配下ページ</dt><dd id="crawl-result">未確認</dd></div>
+        <div><dt>保存先</dt><dd id="save-result">未保存</dd></div>
+      </dl>
+    </section>
+
+    <section class="card diagnostics">
+      <h2>結果詳細</h2>
+      <pre id="details">操作結果がここに表示されます。</pre>
+    </section>
+  </main>
+  <script src="./renderer.js"></script>
+</body>
+</html>

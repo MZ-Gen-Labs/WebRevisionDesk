@@ -1,0 +1,32 @@
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #242532; background: #f3f4f8; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { padding: 28px 36px 24px; color: #fff; background: linear-gradient(135deg, #3835a6, #5d63df); }
+.eyebrow { margin: 0 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .15em; opacity: .8; }
+h1 { margin: 0; font-size: 28px; }
+header > p:last-child { margin: 10px 0 0; opacity: .9; }
+main { display: grid; gap: 16px; padding: 20px 28px 32px; }
+.card, .status-card { padding: 18px 20px; border: 1px solid #dfe1ea; border-radius: 14px; background: #fff; box-shadow: 0 6px 18px rgba(38, 40, 65, .06); }
+h2 { margin: 0 0 14px; font-size: 17px; }
+label { display: block; margin-bottom: 7px; font-size: 13px; font-weight: 700; color: #56586b; }
+.row, .actions { display: flex; align-items: center; gap: 9px; }
+input { min-width: 0; padding: 10px 12px; border: 1px solid #cfd2df; border-radius: 9px; font: inherit; }
+#target-url { flex: 1; }
+button { padding: 10px 14px; border: 1px solid #cfd2df; border-radius: 9px; color: #343648; background: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+button:hover { background: #f5f5fb; }
+button:disabled { cursor: wait; opacity: .55; }
+button.primary { border-color: #5455d5; color: #fff; background: #5455d5; }
+.help { margin: 10px 0 0; color: #6b6e7f; font-size: 13px; line-height: 1.6; }
+.limit { display: inline-flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; }
+.limit input { width: 70px; }
+.status-card { border-color: #cfd2ff; background: #f8f8ff; }
+.status-heading { display: flex; align-items: center; justify-content: space-between; }
+#busy { padding: 4px 9px; border-radius: 999px; color: #433d99; background: #e3e2ff; font-size: 12px; font-weight: 800; }
+#status { margin: 0 0 14px; font-weight: 700; }
+#status.error { color: #b22035; }
+dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+dl div { padding: 10px 12px; border-radius: 9px; background: #fff; }
+dt { color: #727587; font-size: 12px; }
+dd { overflow-wrap: anywhere; margin: 4px 0 0; font-size: 13px; font-weight: 700; }
+pre { overflow: auto; max-height: 260px; margin: 0; padding: 14px; border-radius: 10px; color: #dfe5ff; background: #252735; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+@media (max-width: 850px) { .row, .actions { align-items: stretch; flex-direction: column; } .row > *, .actions > * { width: 100%; } dl { grid-template-columns: 1fr; } }

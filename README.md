@@ -7,6 +7,17 @@
 
 SingleFileを使わず、URLを取得用Chromiumで開いて現在の表示を単一HTMLとして取り込む機能も備えています。この取得機能はApache-2.0のPlaywrightと本プロジェクト独自コードで構成しています。
 
+## Electron機能検証
+
+`codex/electron-feasibility`では、Playwright、外部ブラウザ、localhost APIを使わずにページ取得機能を実現できるか検証しています。現行版を置き換えるものではなく、Electron内蔵Chromiumによるページ表示、ログイン状態保持、リンク抽出、配下ページ確認、HTML・スクリーンショット・診断情報の保存に対象を限定しています。
+
+```bash
+npm ci
+npm run electron:dev
+```
+
+Windows検証ZIPは、このブランチへのpush後にGitHub Actionsの`Electron Feasibility Windows`から取得できます。詳細と合格条件は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)を参照してください。
+
 ## できること
 
 - ローカルHTMLの読込とsandbox内プレビュー
