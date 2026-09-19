@@ -32,6 +32,8 @@ let lastCapture;
 let lastCrawl;
 let activeCaptureSessionId = "";
 let projectDirectory = "";
+let shuttingDown = false;
+const backgroundWindows = new Set();
 const diagnosticEvents = [];
 
 protocol.registerSchemesAsPrivileged([{
@@ -162,6 +164,20 @@ function ensurePageWindow() {
   return pageWindow;
 }
 
+function closePageWindow() {
+  if (pageWindow && !pageWindow.isDestroyed()) pageWindow.destroy();
+  pageWindow = undefined;
+  activeCaptureSessionId = "";
+}
+
+function closeAuxiliaryWindows() {
+  closePageWindow();
+  for (const window of backgroundWindows) {
+    if (!window.isDestroyed()) window.destroy();
+  }
+  backgroundWindows.clear();
+}
+
 function createBackgroundPageWindow(title) {
   const window = new BrowserWindow({
     width: 1440,
@@ -170,6 +186,8 @@ function createBackgroundPageWindow(title) {
     title,
     webPreferences: secureWebPreferences(),
   });
+  backgroundWindows.add(window);
+  window.on("closed", () => backgroundWindows.delete(window));
   attachRemoteGuards(window.webContents);
   return window;
 }
@@ -495,7 +513,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
     if (!activeCaptureSessionId || body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが見つかりません。");
     await captureCurrentPage({ includeScreenshot: false });
     activeCaptureSessionId = "";
-    pageWindow?.hide();
+    closePageWindow();
     return ipcResponse(lastCapture.html, { headers: {
       "Content-Type": "text/html; charset=utf-8",
       "X-Captured-Filename": encodedHeader(capturedFileName(lastCapture.metadata)),
@@ -504,8 +522,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   }
   if (method === "POST" && (url === "/api/capture/cancel" || url === "/api/login/finish")) {
     if (body.sessionId && activeCaptureSessionId && body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが一致しません。");
-    activeCaptureSessionId = "";
-    pageWindow?.hide();
+    closePageWindow();
     return jsonResponse({ ok: true });
   }
   if (method === "POST" && url === "/api/capture/direct") {
@@ -652,11 +669,22 @@ async function createMainWindow({ show = true } = {}) {
   });
   await mainWindow.loadURL("wrd://app/index.html");
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.on("closed", () => { mainWindow = undefined; });
+  mainWindow.on("closed", () => {
+    mainWindow = undefined;
+    closeAuxiliaryWindows();
+    if (!shuttingDown) {
+      shuttingDown = true;
+      app.quit();
+    }
+  });
 }
 
 async function verifySequentialEditorCaptures() {
   const server = createServer((request, response) => {
+    if (request.url === "/fail") {
+      request.socket.destroy();
+      return;
+    }
     const label = request.url === "/two" ? "Page Two" : "Page One";
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     response.end(`<!doctype html><html><head><title>${label}</title></head><body><h1>${label}</h1></body></html>`);
@@ -678,6 +706,14 @@ async function verifySequentialEditorCaptures() {
     if (replies.some((reply) => reply.status !== 200) || !pages[0].includes("Page One") || !pages[1].includes("Page Two")) {
       throw new Error("Sequential Electron page capture failed.");
     }
+    const failureRequest = {
+      url: "/api/capture/direct",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      bodyBase64: Buffer.from(JSON.stringify({ url: `http://127.0.0.1:${port}/fail` })).toString("base64"),
+    };
+    const failure = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request(${toScriptValue(failureRequest)})`);
+    if (failure.status === 200) throw new Error("Failed capture unexpectedly succeeded.");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -730,6 +766,7 @@ app.whenReady().then(async () => {
     const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));
     if (appInfo.status !== 200 || appInfoBody.version !== packageJson.version) throw new Error("Electron editor API did not return application information.");
     await verifySequentialEditorCaptures();
+    if (backgroundWindows.size !== 0) throw new Error("Background capture windows were not released.");
     console.log(`Electron editor smoke test passed: ${process.versions.electron} / ${title}`);
     app.quit();
     return;
@@ -737,4 +774,8 @@ app.whenReady().then(async () => {
   await createMainWindow();
 });
 
+app.on("before-quit", () => {
+  shuttingDown = true;
+  closeAuxiliaryWindows();
+});
 app.on("window-all-closed", () => app.quit());
