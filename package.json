@@ -1,6 +1,6 @@
 {
   "name": "web-revision-desk",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "main": "electron/main.mjs",
   "private": true,
   "description": "Capture, edit, compare, and create clear revision instructions for existing web pages.",

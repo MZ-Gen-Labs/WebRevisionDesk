@@ -294,7 +294,16 @@ test("selected elements can be copied and pasted before or after targets across 
   await frame.locator("h1 + article.card h2").dispatchEvent("click");
   await page.locator("#text-value").fill("貼り付け後の変更");
   await page.locator("#text-value").dispatchEvent("change");
-  await page.locator("#history-count").filter({ hasText: "2" }).waitFor();
+  await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
+  assert.match(await page.locator("#history-list").textContent(), /ブロック追加/);
+  assert.doesNotMatch(await page.locator("#history-list").textContent(), /テキスト変更/);
+  await page.locator("#show-redline").click();
+  const redlineFrame = page.frameLocator("#page-frame");
+  await redlineFrame.locator(".wr-redline-add").filter({ hasText: "貼り付け後の変更" }).waitFor();
+  assert.equal(await redlineFrame.locator(".wr-redline-text").count(), 0);
+  await page.locator("#show-modified").click();
+  frame = page.frameLocator("#page-frame");
+  await frame.locator("h1 + article.card h2").dispatchEvent("click");
   await page.locator("#select-parent-element").click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator("#delete-element").click();
@@ -421,7 +430,7 @@ test("a focused broken page is automatically removed through the single delete a
   assert.equal(await page.locator("#delete-project-pages").isEnabled(), true);
   page.once("dialog", (dialog) => dialog.accept());
   await page.locator("#delete-project-pages").click();
-  await page.locator(".project-empty").waitFor();
+  await page.locator("#project-pages .project-empty").waitFor();
   assert.match(await page.locator("#status").textContent(), /一覧から削除しました/);
   await page.close();
 });
@@ -454,18 +463,148 @@ test("checked saved pages can be packaged together with selected output files", 
   await page.close();
 });
 
-test("advanced image fields only appear for images", async () => {
+test("package file choices are kept after reopening and reloading the app", async () => {
   const page = await browser.newPage();
+  await page.goto(baseUrl);
+  await page.locator("#package-dialog").evaluate((dialog) => dialog.showModal());
+  await page.locator('input[name="package-file"][value="diff"]').uncheck();
+  await page.locator('input[name="package-file"][value="readme"]').uncheck();
+  await page.locator("#package-dialog").evaluate((dialog) => dialog.close());
+
+  await page.reload();
+  await page.locator("#package-dialog").evaluate((dialog) => dialog.showModal());
+  assert.equal(await page.locator('input[name="package-file"][value="original"]').isChecked(), true);
+  assert.equal(await page.locator('input[name="package-file"][value="diff"]').isChecked(), false);
+  assert.equal(await page.locator('input[name="package-file"][value="readme"]').isChecked(), false);
+  await page.close();
+});
+
+test("long-running page discovery shows an animated processing state", async () => {
+  const page = await browser.newPage();
+  await page.route("**/api/crawl", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ pages: [], errors: [], truncated: false }),
+    });
+  });
+  await prepareMemoryProject(page);
+
+  await page.locator("#crawl-project-pages").click();
+  const button = page.locator("#crawl-project-pages");
+  assert.equal(await button.getAttribute("aria-busy"), "true");
+  assert.equal(await button.textContent(), "関連ページを探す");
+  assert.equal(await button.getAttribute("aria-label"), "関連ページを探す（処理中）");
+  assert.equal(await button.evaluate((element) => element.classList.contains("is-processing")), true);
+
+  await page.locator("#status").filter({ hasText: "配下ページを0件確認しました" }).waitFor();
+  assert.equal(await button.getAttribute("aria-busy"), null);
+  assert.equal(await button.textContent(), "関連ページを探す");
+  await page.close();
+});
+
+test("image controls expose alt text and support adding, changing, removing, and undoing links", async () => {
+  const page = await browser.newPage({ acceptDownloads: true });
   await prepareMemoryProject(page);
   await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
   await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
   const image = page.frameLocator("#page-frame").locator("img").first();
   await image.click();
   assert.equal(await page.locator('[data-editor-field="image"]').isVisible(), true);
-  assert.equal(await page.locator('[data-editor-field="alt"]').isVisible(), false);
-  await page.locator("#advanced-mode").check();
   assert.equal(await page.locator('[data-editor-field="alt"]').isVisible(), true);
+  assert.equal(await page.locator('[data-editor-field="link"]').isVisible(), true);
+  assert.equal(await page.locator("#link-value").inputValue(), "");
+  assert.equal(await page.locator("#remove-image-link").isVisible(), false);
+  await page.locator("#alt-value").fill("変更後の画像説明");
+  await page.locator("#alt-value").dispatchEvent("change");
+  assert.equal(await image.getAttribute("alt"), "変更後の画像説明");
+
+  await page.locator("#link-value").fill("https://example.com/image-first");
+  await page.locator("#link-value").dispatchEvent("change");
+  assert.equal(await image.locator("xpath=parent::a").getAttribute("href"), "https://example.com/image-first");
+  assert.equal(await page.locator("#remove-image-link").isVisible(), true);
+  await page.locator("#link-value").fill("https://example.com/image-updated");
+  await page.locator("#link-value").dispatchEvent("change");
+  assert.equal(await image.locator("xpath=parent::a").getAttribute("href"), "https://example.com/image-updated");
+  await page.locator("#remove-image-link").click();
+  assert.equal(await image.locator("xpath=parent::a").count(), 0);
+  await page.locator("#undo").click();
+  assert.equal(await image.locator("xpath=parent::a").getAttribute("href"), "https://example.com/image-updated");
+
+  const replacementFileName = "高品質-製品画像.png";
+  await page.locator("#image-file").setInputFiles({
+    name: replacementFileName,
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n0sAAAAASUVORK5CYII=", "base64"),
+  });
+  await page.waitForFunction((name) => document.querySelector("#page-frame")?.contentDocument
+    ?.querySelector("img")?.getAttribute("data-web-revision-asset-name") === name, replacementFileName);
+  const changedImage = await image.getAttribute("src");
+  assert.equal(await image.getAttribute("src"), changedImage);
+  assert.equal(await image.getAttribute("data-web-revision-asset-name"), replacementFileName);
+  await page.locator("#undo").click();
+  assert.equal(await image.getAttribute("data-web-revision-asset-name"), null);
+  await page.locator("#redo").click();
+  assert.equal(await image.getAttribute("data-web-revision-asset-name"), replacementFileName);
+  await page.locator("#show-redline").click();
+  const redline = page.frameLocator("#page-frame");
+  await redline.locator(".wr-image-comparison").waitFor();
+  const imageSummary = await redline.locator(".wr-image-change-summary").textContent();
+  assert.match(imageSummary, /alt変更.*青緑色のサンプル画像 → 変更後の画像説明/s);
+  assert.match(imageSummary, /画像リンク変更.*https:\/\/example.com\/image-updated/s);
+  assert.equal(await redline.locator(".wr-image-comparison").count(), 1);
+  const imageDownload = redline.locator(".wr-image-download");
+  assert.equal(await imageDownload.getAttribute("download"), replacementFileName);
+  assert.equal(await imageDownload.getAttribute("href"), changedImage);
+  const imageDownloadPromise = page.waitForEvent("download");
+  await imageDownload.click();
+  assert.equal((await imageDownloadPromise).suggestedFilename(), replacementFileName);
+  assert.equal(await redline.locator(".wr-image-marker").filter({ hasText: "画像変更 1" }).count(), 1);
+  assert.equal(await redline.locator("img.wr-redline-image").isVisible(), true);
+  await page.locator("#show-modified").click();
+  await page.frameLocator("#page-frame").locator("img").first().click();
+
+  assert.equal(await page.locator('[data-editor-field="class"]').isVisible(), false);
+  await page.locator("#advanced-mode").check();
   assert.equal(await page.locator('[data-editor-field="class"]').isVisible(), true);
+  await page.close();
+});
+
+test("page metadata can be edited and H1-H3 can be browsed from the sidebar outline", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+  await page.waitForFunction(() => document.querySelector("#page-title-value")?.value === "サンプル会社");
+
+  assert.equal(await page.locator("#page-title-value").inputValue(), "サンプル会社");
+  assert.equal(await page.locator("#page-description-value").inputValue(), "");
+  assert.equal(await page.locator("#page-h1-value").inputValue(), "より良い未来を、技術とともに。");
+  await page.locator("#page-title-value").fill("構造化されたページタイトル");
+  await page.locator("#page-title-value").dispatchEvent("change");
+  await page.locator("#page-description-value").fill("ページの概要を構造的に設定します。");
+  await page.locator("#page-description-value").dispatchEvent("change");
+  await page.locator("#page-h1-value").fill("変更後の主要見出し");
+  await page.locator("#page-h1-value").dispatchEvent("change");
+
+  await page.keyboard.press("Alt+ArrowRight");
+  assert.equal(await page.locator("#heading-count").textContent(), "4");
+  assert.match(await page.locator("#heading-outline").textContent(), /H1変更後の主要見出し/);
+  assert.equal(await page.locator("#show-heading-outline").getAttribute("aria-selected"), "true");
+  await page.keyboard.press("Alt+ArrowDown");
+  assert.match(await page.locator("#element-label").textContent(), /^h1/);
+  await page.keyboard.press("Alt+ArrowDown");
+  assert.match(await page.locator("#element-label").textContent(), /^h2/);
+  await page.keyboard.press("Alt+ArrowLeft");
+  assert.equal(await page.locator("#show-project-list").getAttribute("aria-selected"), "true");
+
+  await page.locator("#show-redline").click();
+  const redline = page.frameLocator("#page-frame");
+  const metadata = redline.locator(".wr-page-info-changes");
+  await metadata.waitFor();
+  assert.match(await metadata.textContent(), /Title変更.*サンプル会社.*構造化されたページタイトル/s);
+  assert.match(await metadata.textContent(), /Description変更.*ページの概要を構造的に設定します/s);
+  assert.equal(await redline.locator("h1 ins").textContent(), "変更後の主要見出し");
   await page.close();
 });
 

@@ -1,5 +1,5 @@
 import { PageEditor } from "./editor.js";
-import { cleanHtmlString, downloadHtml, EDITOR_CLASS } from "./html.js";
+import { cleanHtmlString, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { downloadProjectPackage } from "./project-package.js";
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
@@ -18,7 +18,7 @@ const ui = {
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
   fields: $("#inspector-fields"), label: $("#element-label"), text: $("#text-value"),
-  link: $("#link-value"), alt: $("#alt-value"), image: $("#image-file"),
+  link: $("#link-value"), removeImageLink: $("#remove-image-link"), alt: $("#alt-value"), image: $("#image-file"), imageUrl: $("#image-url-value"),
   inlineLinkTools: $("#inline-link-tools"), inlineLinkSelection: $("#inline-link-selection"),
   inlineLinkUrl: $("#inline-link-url"), applyInlineLink: $("#apply-inline-link"), removeInlineLink: $("#remove-inline-link"),
   classes: $("#class-value"), classOptions: $("#class-options"), before: $("#move-before"),
@@ -33,6 +33,9 @@ const ui = {
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
   projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
+  showProjectList: $("#show-project-list"), showHeadingOutline: $("#show-heading-outline"),
+  projectListPanel: $("#project-list-panel"), headingOutlinePanel: $("#heading-outline-panel"),
+  headingOutline: $("#heading-outline"), headingCount: $("#heading-count"),
   selectAllProjectPages: $("#select-all-project-pages"), clearProjectSelection: $("#clear-project-selection"),
   batchCapturePages: $("#batch-capture-pages"),
   checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"),
@@ -44,6 +47,8 @@ const ui = {
   openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
   applyAppUpdate: $("#apply-app-update"),
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
+  pageStructurePanel: $("#page-structure-panel"), pageTitle: $("#page-title-value"),
+  pageDescription: $("#page-description-value"), pageH1: $("#page-h1-value"),
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
@@ -84,6 +89,7 @@ let latestAppUpdate = null;
 let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
+const PACKAGE_FILE_SELECTION_KEY = "web-revision-package-file-selection";
 const AUTO_SAVE_DELAY_MS = 1200;
 let editRevision = 0;
 let autoSaveTimer = 0;
@@ -220,7 +226,7 @@ async function saveUpdateSettings() {
 }
 
 async function checkAppUpdate({ quiet = false } = {}) {
-  ui.checkAppUpdate.disabled = true;
+  setButtonProcessing(ui.checkAppUpdate, true);
   if (!quiet) {
     ui.updateResult.dataset.kind = "";
     ui.updateResult.textContent = "GitHub Releasesを確認しています…";
@@ -256,6 +262,7 @@ async function checkAppUpdate({ quiet = false } = {}) {
     ui.applyAppUpdate.hidden = true;
     if (!quiet) setStatus(`アプリの更新確認に失敗しました: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.checkAppUpdate, false);
     ui.checkAppUpdate.disabled = false;
   }
 }
@@ -304,6 +311,48 @@ function recordChange(change) {
   return "merged";
 }
 
+function changesFromOriginal() {
+  if (!state.changes.length || !state.modifiedHtml) return structuredClone(state.changes);
+  const doc = new DOMParser().parseFromString(state.modifiedHtml, "text/html");
+  const elementsById = new Map(
+    [...doc.querySelectorAll(`[${EDITOR_ID_ATTR}]`)]
+      .map((element) => [element.getAttribute(EDITOR_ID_ATTR), element]),
+  );
+  const absorbedIndexes = new Set();
+  const normalized = [];
+
+  state.changes.forEach((change, index) => {
+    if (absorbedIndexes.has(index)) return;
+    if (change.type !== "element-add" || !change.elementId) {
+      normalized.push(structuredClone(change));
+      return;
+    }
+
+    const addedElement = elementsById.get(change.elementId);
+    if (!addedElement) {
+      normalized.push(structuredClone(change));
+      return;
+    }
+    const addedIds = new Set(
+      [addedElement, ...addedElement.querySelectorAll(`[${EDITOR_ID_ATTR}]`)]
+        .map((element) => element.getAttribute(EDITOR_ID_ATTR))
+        .filter(Boolean),
+    );
+    state.changes.forEach((candidate, candidateIndex) => {
+      if (candidateIndex === index || candidateIndex < index) return;
+      if (addedIds.has(candidate.elementId) || addedIds.has(candidate.parentId)) absorbedIndexes.add(candidateIndex);
+    });
+    const parent = addedElement.parentElement;
+    normalized.push({
+      ...structuredClone(change),
+      after: addedElement.outerHTML,
+      parentId: parent?.getAttribute(EDITOR_ID_ATTR) || change.parentId,
+      index: parent ? [...parent.children].indexOf(addedElement) : change.index,
+    });
+  });
+  return normalized;
+}
+
 const editor = new PageEditor(ui.frame, {
   onSelect: showSelection,
   onTextSelection: showInlineLinkSelection,
@@ -314,6 +363,8 @@ const editor = new PageEditor(ui.frame, {
       state.redoChanges = [];
       markDirtyAndScheduleAutoSave();
       renderHistory();
+      syncPageStructureFields();
+      renderHeadingOutline();
       if (result === "cancelled-move") {
         updateGuidance();
         setStatus("要素を元の位置へ戻したため、移動履歴を取り消しました。", "success");
@@ -362,13 +413,36 @@ function setStatus(message, kind = "info") {
   ui.status.dataset.kind = kind;
 }
 
+function setButtonProcessing(button, processing) {
+  if (!button) return;
+  if (processing) {
+    if (!button.dataset.idleText) button.dataset.idleText = button.textContent;
+    button.dataset.idleAriaLabel = button.getAttribute("aria-label") ?? "";
+    button.setAttribute("aria-label", `${button.dataset.idleText}（処理中）`);
+    button.classList.add("is-processing");
+    button.setAttribute("aria-busy", "true");
+    button.disabled = true;
+    return;
+  }
+  if (button.dataset.idleAriaLabel) button.setAttribute("aria-label", button.dataset.idleAriaLabel);
+  else button.removeAttribute("aria-label");
+  delete button.dataset.idleText;
+  delete button.dataset.idleAriaLabel;
+  button.classList.remove("is-processing");
+  button.removeAttribute("aria-busy");
+}
+
 function setControls(enabled) {
+  const changeCount = changesFromOriginal().length;
   [ui.original, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
   ui.modified.disabled = !enabled || state.previewOnly;
-  ui.redline.disabled = !enabled || state.previewOnly || state.changes.length === 0;
+  ui.redline.disabled = !enabled || state.previewOnly || changeCount === 0;
   ui.downloadPackage.disabled = !enabled;
-  ui.downloadDiff.disabled = !enabled || state.changes.length === 0;
-  ui.downloadRedline.disabled = !enabled || state.changes.length === 0;
+  ui.downloadDiff.disabled = !enabled || changeCount === 0;
+  ui.downloadRedline.disabled = !enabled || changeCount === 0;
+  ui.pageStructurePanel.hidden = !enabled || state.previewOnly;
+  ui.pageTitle.disabled = ui.pageDescription.disabled = ui.pageH1.disabled = !enabled || state.previewOnly || state.mode !== "modified";
+  ui.showHeadingOutline.disabled = !enabled || state.previewOnly;
   updateUndoControls();
   syncProjectControls();
 }
@@ -405,18 +479,19 @@ function updateUndoControls() {
 }
 
 function renderHistory() {
-  ui.historyCount.textContent = String(state.changes.length);
+  const changes = changesFromOriginal();
+  ui.historyCount.textContent = String(changes.length);
   ui.clearHistory.disabled = state.changes.length === 0;
-  ui.downloadDiff.disabled = !state.originalHtml || state.changes.length === 0;
-  ui.downloadRedline.disabled = !state.originalHtml || state.changes.length === 0;
-  ui.redline.disabled = !state.originalHtml || state.previewOnly || state.changes.length === 0;
+  ui.downloadDiff.disabled = !state.originalHtml || changes.length === 0;
+  ui.downloadRedline.disabled = !state.originalHtml || changes.length === 0;
+  ui.redline.disabled = !state.originalHtml || state.previewOnly || changes.length === 0;
   updateUndoControls();
   updateGuidance();
-  if (!state.changes.length) {
+  if (!changes.length) {
     ui.historyList.innerHTML = '<li class="history-empty">まだ変更はありません。</li>';
     return;
   }
-  ui.historyList.replaceChildren(...state.changes.map((change, index) => {
+  ui.historyList.replaceChildren(...changes.map((change, index) => {
     const item = document.createElement("li");
     const type = document.createElement("strong");
     const target = document.createElement("span");
@@ -456,10 +531,14 @@ async function render(mode, { captureCurrent = true } = {}) {
   const html = mode === "original"
     ? state.originalHtml
     : mode === "redline"
-      ? createRedlineReport(state.modifiedHtml, state.changes, state.fileName)
+      ? createRedlineReport(state.modifiedHtml, changesFromOriginal(), state.fileName)
       : state.modifiedHtml;
   await editor.load(html, mode === "modified");
+  editor.getDocument()?.addEventListener("keydown", handleKeyboardShortcut);
   if (mode === "modified") refreshClassOptions();
+  syncPageStructureFields();
+  if (mode === "modified") renderHeadingOutline();
+  setControls(Boolean(state.originalHtml));
 }
 
 function refreshClassOptions() {
@@ -468,6 +547,57 @@ function refreshClassOptions() {
     option.value = name;
     return option;
   }));
+}
+
+function syncPageStructureFields() {
+  const structure = editor.getPageStructure();
+  ui.pageTitle.value = structure.title;
+  ui.pageDescription.value = structure.description;
+  ui.pageH1.value = structure.primaryHeading;
+}
+
+function renderHeadingOutline() {
+  const headings = editor.getPageStructure().headings;
+  ui.headingCount.textContent = String(headings.length);
+  if (!headings.length) {
+    ui.headingOutline.innerHTML = '<p class="project-empty">H1〜H3の見出しはありません。</p>';
+    return;
+  }
+  ui.headingOutline.replaceChildren(...headings.map((heading) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.level = String(heading.level);
+    button.dataset.elementId = heading.id;
+    const level = document.createElement("span");
+    const text = document.createElement("strong");
+    level.textContent = `H${heading.level}`;
+    text.textContent = heading.text;
+    button.append(level, text);
+    button.addEventListener("click", async () => {
+      if (state.mode !== "modified") await render("modified");
+      editor.selectById(heading.id);
+    });
+    return button;
+  }));
+  syncHeadingOutlineSelection();
+}
+
+function syncHeadingOutlineSelection() {
+  const selectedHeading = editor.selected?.closest?.("h1, h2, h3");
+  const selectedId = selectedHeading?.getAttribute(EDITOR_ID_ATTR) || "";
+  ui.headingOutline.querySelectorAll("button[data-element-id]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.elementId === selectedId);
+  });
+}
+
+function setSidebarPanel(panel) {
+  const outline = panel === "outline";
+  ui.projectListPanel.hidden = outline;
+  ui.headingOutlinePanel.hidden = !outline;
+  ui.showProjectList.classList.toggle("active", !outline);
+  ui.showHeadingOutline.classList.toggle("active", outline);
+  ui.showProjectList.setAttribute("aria-selected", String(!outline));
+  ui.showHeadingOutline.setAttribute("aria-selected", String(outline));
 }
 
 function selectedImage(element) {
@@ -491,12 +621,13 @@ function showInlineLinkSelection(selection) {
 }
 
 function showSelection(element, selectedElements = element ? [element] : []) {
+  syncHeadingOutlineSelection();
   const editable = Boolean(element) && state.mode === "modified";
   ui.fields.disabled = !editable;
   const selectionCount = selectedElements.length;
   ui.label.textContent = selectionCount > 1 ? `${selectionCount}個の要素を選択` : element ? describeElement(element) : "未選択";
   const fieldVisibility = {
-    text: false, link: false, image: false, alt: false, class: Boolean(element), "inline-link": editor.hasInlineLinkSelection(),
+    text: false, link: false, image: false, "image-url": false, alt: false, class: Boolean(element), "inline-link": editor.hasInlineLinkSelection(),
   };
   if (!element) {
     ui.copyElement.disabled = true;
@@ -504,7 +635,7 @@ function showSelection(element, selectedElements = element ? [element] : []) {
     ui.pasteAfter.disabled = true;
     ui.selectParent.disabled = true;
     ui.returnChild.disabled = true;
-    ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
+    ui.text.value = ui.link.value = ui.alt.value = ui.imageUrl.value = ui.classes.value = "";
     ui.selectionHelp.textContent = state.previewOnly
       ? "一時プレビューです。編集するには「このページを取り込んで編集」を押してください。"
       : state.mode === "redline"
@@ -516,7 +647,7 @@ function showSelection(element, selectedElements = element ? [element] : []) {
     return;
   }
   if (selectionCount > 1) {
-    ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
+    ui.text.value = ui.link.value = ui.alt.value = ui.imageUrl.value = ui.classes.value = "";
     document.querySelectorAll("[data-editor-field]").forEach((field) => { field.hidden = true; });
     ui.copyElement.disabled = !editor.canCopySelection();
     ui.pasteBefore.disabled = true;
@@ -542,14 +673,15 @@ function showSelection(element, selectedElements = element ? [element] : []) {
   const image = selectedImage(element);
   const textEditable = !["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
   fieldVisibility.text = textEditable;
-  fieldVisibility.link = Boolean(link);
+  fieldVisibility.link = Boolean(link || image);
   fieldVisibility.image = Boolean(image);
+  fieldVisibility["image-url"] = Boolean(image);
   fieldVisibility.alt = Boolean(image);
   document.querySelectorAll("[data-editor-field]").forEach((field) => {
     field.hidden = !fieldVisibility[field.dataset.editorField];
   });
   ui.selectionHelp.textContent = image
-    ? "画像を選択中です。下の「画像を差し替える」から変更できます。"
+    ? "画像を選択中です。画像、代替テキスト、リンク先を変更できます。"
     : link
       ? "リンク付きの要素を選択中です。文章とリンク先を変更できます。"
       : textEditable
@@ -558,10 +690,13 @@ function showSelection(element, selectedElements = element ? [element] : []) {
   ui.text.value = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName) ? "" : element.textContent ?? "";
   ui.text.disabled = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
   ui.link.value = link?.getAttribute("href") ?? "";
-  ui.link.disabled = !link;
+  ui.link.disabled = !link && !image;
+  ui.removeImageLink.hidden = !image || !link;
   ui.alt.value = image?.alt ?? "";
   ui.alt.disabled = !image;
   ui.image.disabled = !image;
+  ui.imageUrl.value = image?.getAttribute("src") ?? "";
+  ui.imageUrl.disabled = !image;
   ui.classes.value = classNames.join(" ");
 }
 
@@ -851,6 +986,7 @@ async function resetSelectedProjectPages() {
   const message = `${targets.length}ページを未取得状態へ戻します。\n\n原本・編集中・修正後・差分・変更履歴・旧版バックアップが案件フォルダから削除されます。URLは一覧に残ります。続けますか？`;
   if (!window.confirm(message)) return;
   state.batchRunning = true;
+  setButtonProcessing(ui.resetProjectPages, true);
   updateBatchControls();
   try {
     const activeReset = targets.some((page) => page.id === state.activeProjectPageId);
@@ -863,6 +999,7 @@ async function resetSelectedProjectPages() {
     setStatus(`ページをリセットできませんでした: ${error.message}`, "error");
   } finally {
     state.batchRunning = false;
+    setButtonProcessing(ui.resetProjectPages, false);
     renderProjectPages();
     updateBatchControls();
   }
@@ -881,6 +1018,7 @@ async function deleteSelectedProjectPages() {
     : "";
   if (!window.confirm(`${targets.length}ページを一覧から削除します。${folderText}${errorText}\n\nこの操作は元に戻せません。続けますか？`)) return;
   state.batchRunning = true;
+  setButtonProcessing(ui.deleteProjectPages, true);
   updateBatchControls();
   try {
     const activeDeleted = targets.some((page) => page.id && page.id === state.activeProjectPageId);
@@ -908,6 +1046,7 @@ async function deleteSelectedProjectPages() {
     setStatus(`ページを一覧から削除できませんでした: ${error.message}`, "error");
   } finally {
     state.batchRunning = false;
+    setButtonProcessing(ui.deleteProjectPages, false);
     renderProjectPages();
     updateBatchControls();
   }
@@ -920,6 +1059,8 @@ async function processSelectedPages(mode) {
   const targets = mode === "check" ? selected.filter((page) => page.saved) : selected;
   if (!targets.length) return;
   state.batchRunning = true;
+  const actionButton = mode === "check" ? ui.checkProjectPages : ui.batchCapturePages;
+  setButtonProcessing(actionButton, true);
   updateBatchControls();
   let completed = 0;
   let failed = 0;
@@ -957,6 +1098,7 @@ async function processSelectedPages(mode) {
   }
   await interactiveCaptureQueue;
   state.batchRunning = false;
+  setButtonProcessing(actionButton, false);
   ui.batchProgress.textContent = `完了 ${completed}件${failed ? `・失敗 ${failed}件` : ""}`;
   updateBatchControls();
   setStatus(`${mode === "check" ? "公開ページの更新確認" : "一括取得"}が完了しました。成功 ${completed}件、失敗 ${failed}件です。`, failed ? "error" : "success");
@@ -1007,7 +1149,7 @@ ui.deleteProjectPages.addEventListener("click", deleteSelectedProjectPages);
 
 ui.importPreviewPage.addEventListener("click", async () => {
   if (!state.previewOnly || !state.sourceUrl) return;
-  ui.importPreviewPage.disabled = true;
+  setButtonProcessing(ui.importPreviewPage, true);
   ui.refreshPreview.disabled = true;
   try {
     setStatus("編集用HTMLを取得しています…", "info");
@@ -1018,6 +1160,7 @@ ui.importPreviewPage.addEventListener("click", async () => {
   } catch (error) {
     setStatus(`ページを取り込めませんでした: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.importPreviewPage, false);
     ui.importPreviewPage.disabled = false;
     ui.refreshPreview.disabled = false;
   }
@@ -1025,7 +1168,7 @@ ui.importPreviewPage.addEventListener("click", async () => {
 
 ui.refreshPreview.addEventListener("click", async () => {
   if (!state.previewOnly || !state.sourceUrl) return;
-  ui.refreshPreview.disabled = true;
+  setButtonProcessing(ui.refreshPreview, true);
   ui.importPreviewPage.disabled = true;
   try {
     setStatus("最新のスクリーンショットを取得しています…", "info");
@@ -1035,6 +1178,7 @@ ui.refreshPreview.addEventListener("click", async () => {
   } catch (error) {
     setStatus(`スクリーンショットを更新できませんでした: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.refreshPreview, false);
     ui.refreshPreview.disabled = false;
     ui.importPreviewPage.disabled = false;
   }
@@ -1055,7 +1199,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
     sourceUrl,
     originalHtml: state.originalHtml,
     workingHtml: state.modifiedHtml,
-    changes: structuredClone(state.changes),
+    changes: changesFromOriginal(),
   };
   const page = await projectStore.savePage({
     ...saveData,
@@ -1097,23 +1241,26 @@ async function openProjectPage(pageId) {
 
 async function preserveCurrentPage() {
   if (!state.dirty || !state.originalHtml) return true;
-  if (projectStore.project && state.activeProjectPageId) {
-    try {
-      await flushAutoSave();
-      return true;
-    } catch (error) {
-      return window.confirm(`自動保存に失敗しました。\n${error.message}\n\n保存せずにページを移動しますか？`);
-    }
+  if (!projectStore.project || state.previewOnly) {
+    setStatus("現在のページを自動保存できないため、案件を切り替えられません。", "error");
+    return false;
   }
-  return window.confirm("現在のページは案件フォルダへ保存されていません。別のページへ進むと現在の編集状態は失われます。続けますか？");
+  try {
+    if (canAutoSaveCurrentPage()) await flushAutoSave({ force: true });
+    else await saveCurrentToProject({ quiet: true });
+    return !state.dirty;
+  } catch (error) {
+    setStatus(`自動保存に失敗したため、案件を切り替えませんでした: ${error.message}`, "error");
+    return false;
+  }
 }
 
 function activateProject(project) {
+  clearLoadedPage();
   state.activeProjectPageId = "";
   state.focusedProjectUrl = "";
   state.projectSelectionAnchorUrl = "";
   state.unavailableProjectUrls = new Set();
-  if (state.originalHtml) state.dirty = true;
   updateGuidance();
   ui.projectName.value = project.projectName;
   ui.projectBaseUrl.value = project.baseUrl;
@@ -1184,7 +1331,7 @@ ui.saveProjectPage.addEventListener("click", async () => {
 
 ui.crawlProjectPages.addEventListener("click", async () => {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
-  ui.crawlProjectPages.disabled = true;
+  setButtonProcessing(ui.crawlProjectPages, true);
   try {
     projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
     await projectStore.saveProject();
@@ -1202,6 +1349,7 @@ ui.crawlProjectPages.addEventListener("click", async () => {
     ui.projectState.textContent = "配下ページの検索に失敗しました";
     setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.crawlProjectPages, false);
     syncProjectControls();
   }
 });
@@ -1288,7 +1436,7 @@ async function startCaptureForUrl(url) {
 
 ui.finishCapture.addEventListener("click", async () => {
   if (!captureSessionId) return;
-  ui.finishCapture.disabled = true;
+  setButtonProcessing(ui.finishCapture, true);
   ui.captureState.textContent = "CSS・画像を埋め込んでいます…";
   setStatus("表示中ページを取り込んでいます。ページによっては少し時間がかかります。", "info");
   try {
@@ -1303,9 +1451,11 @@ ui.finishCapture.addEventListener("click", async () => {
     ui.captureSessionActions.hidden = true;
     setStatus("表示中ページを案件へ取り込みました。編集を開始できます。", "success");
   } catch (error) {
-    ui.finishCapture.disabled = false;
     ui.captureState.textContent = "取り込みに失敗しました";
     setStatus(`ページ取得に失敗しました: ${error.message}`, "error");
+  } finally {
+    setButtonProcessing(ui.finishCapture, false);
+    ui.finishCapture.disabled = !captureSessionId;
   }
 });
 
@@ -1343,15 +1493,38 @@ ui.download.addEventListener("click", () => {
 });
 ui.downloadRedline.addEventListener("click", () => {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  downloadRedlineReport(state.fileName, state.modifiedHtml, state.changes);
+  downloadRedlineReport(state.fileName, state.modifiedHtml, changesFromOriginal());
   setStatus("ページ上で変更箇所を示す赤入れHTMLをダウンロードしました。", "success");
 });
 ui.downloadDiff.addEventListener("click", () => {
-  downloadDiffReport(state.fileName, state.changes);
+  if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+  downloadDiffReport(state.fileName, changesFromOriginal());
   setStatus("差分・修正指示HTMLをダウンロードしました。", "success");
 });
 function selectedSavedPackagePages() {
   return actionTargetPages().filter((page) => page.saved);
+}
+
+function packageFileInputs() {
+  return [...ui.packageDialog.querySelectorAll('input[name="package-file"]')];
+}
+
+function savePackageFileSelection() {
+  const selected = packageFileInputs().filter((input) => input.checked).map((input) => input.value);
+  localStorage.setItem(PACKAGE_FILE_SELECTION_KEY, JSON.stringify(selected));
+}
+
+function initializePackageFileSelection() {
+  const stored = localStorage.getItem(PACKAGE_FILE_SELECTION_KEY);
+  if (stored !== null) {
+    try {
+      const selected = new Set(JSON.parse(stored));
+      packageFileInputs().forEach((input) => { input.checked = selected.has(input.value); });
+    } catch {
+      localStorage.removeItem(PACKAGE_FILE_SELECTION_KEY);
+    }
+  }
+  packageFileInputs().forEach((input) => input.addEventListener("change", savePackageFileSelection));
 }
 
 function showPackageDialog() {
@@ -1371,7 +1544,7 @@ async function packagePagesForDownload() {
       fileName: state.fileName,
       originalHtml: state.originalHtml,
       modifiedHtml: state.modifiedHtml,
-      changes: state.changes,
+      changes: changesFromOriginal(),
       sourceUrl: state.sourceUrl,
     }];
   }
@@ -1382,7 +1555,7 @@ async function packagePagesForDownload() {
         fileName: state.fileName,
         originalHtml: state.originalHtml,
         modifiedHtml: state.modifiedHtml,
-        changes: state.changes,
+        changes: changesFromOriginal(),
         sourceUrl: state.sourceUrl,
       };
     }
@@ -1402,7 +1575,8 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
   const files = [...ui.packageDialog.querySelectorAll('input[name="package-file"]:checked')]
     .map((input) => input.value);
   if (!files.length) return setStatus("保存するファイルを1つ以上選択してください。", "error");
-  ui.confirmPackageDownload.disabled = true;
+  savePackageFileSelection();
+  setButtonProcessing(ui.confirmPackageDownload, true);
   try {
     await flushAutoSave();
     const pages = await packagePagesForDownload();
@@ -1416,6 +1590,7 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
   } catch (error) {
     setStatus(`共有用ZIPを保存できませんでした: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.confirmPackageDownload, false);
     ui.confirmPackageDownload.disabled = false;
   }
 });
@@ -1435,20 +1610,73 @@ function applyUndoRedo(direction) {
   state.modifiedHtml = editor.getHtml();
   markDirtyAndScheduleAutoSave();
   renderHistory();
+  syncPageStructureFields();
+  renderHeadingOutline();
   refreshClassOptions();
   setStatus(direction === "undo" ? "直前の編集を元に戻しました。" : "編集をやり直しました。", "success");
 }
 
-document.addEventListener("keydown", (event) => {
+function isTypingTarget(target) {
+  return Boolean(target?.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName));
+}
+
+function moveSidebarSelection(direction) {
+  const outlineVisible = !ui.headingOutlinePanel.hidden;
+  const buttons = [...(outlineVisible
+    ? ui.headingOutline.querySelectorAll("button[data-element-id]")
+    : ui.projectPages.querySelectorAll("button.project-page"))];
+  if (!buttons.length) return false;
+  let currentIndex = outlineVisible
+    ? buttons.findIndex((button) => button.classList.contains("active"))
+    : buttons.findIndex((button) => button.dataset.pageUrl === state.focusedProjectUrl);
+  if (currentIndex < 0) currentIndex = direction > 0 ? -1 : buttons.length;
+  const nextIndex = Math.min(buttons.length - 1, Math.max(0, currentIndex + direction));
+  if (nextIndex === currentIndex) return true;
+  buttons[nextIndex].click();
+  buttons[nextIndex].scrollIntoView({ block: "nearest" });
+  return true;
+}
+
+function handleKeyboardShortcut(event) {
+  if (event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (event.code === "Digit1" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      setSidebarPanel("pages");
+      return;
+    }
+    if ((event.code === "Digit2" || event.key === "ArrowRight") && !ui.showHeadingOutline.disabled) {
+      event.preventDefault();
+      setSidebarPanel("outline");
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      if (moveSidebarSelection(event.key === "ArrowDown" ? 1 : -1)) event.preventDefault();
+      return;
+    }
+  }
+  if (isTypingTarget(event.target)) return;
   const shortcut = event.metaKey || event.ctrlKey;
-  const typing = ["INPUT", "TEXTAREA"].includes(event.target?.tagName);
-  if (!shortcut || event.key.toLowerCase() !== "z" || typing) return;
+  if (!shortcut || event.key.toLowerCase() !== "z") return;
   event.preventDefault();
   applyUndoRedo(event.shiftKey ? "redo" : "undo");
-});
+}
+
+document.addEventListener("keydown", handleKeyboardShortcut);
 
 ui.text.addEventListener("change", () => editor.updateText(ui.text.value));
 ui.link.addEventListener("change", () => editor.updateLink(ui.link.value));
+ui.imageUrl.addEventListener("change", () => {
+  if (!ui.imageUrl.value.trim()) {
+    showSelection(editor.selected, [...editor.selectedElements]);
+    return setStatus("画像URLを入力してください。画像を削除する場合は「要素削除」を使用してください。", "error");
+  }
+  editor.updateImageSource(ui.imageUrl.value);
+});
+ui.removeImageLink.addEventListener("click", () => {
+  if (!editor.updateImageLink("")) return;
+  ui.link.value = "";
+  setStatus("画像のリンクを削除しました。", "success");
+});
 ui.applyInlineLink.addEventListener("click", () => {
   if (!ui.inlineLinkUrl.value.trim()) return setStatus("リンク先URLを入力してください。", "error");
   if (editor.applyInlineLink(ui.inlineLinkUrl.value)) setStatus("選択した文字へリンクを設定しました。", "success");
@@ -1457,6 +1685,11 @@ ui.removeInlineLink.addEventListener("click", () => {
   if (editor.removeInlineLink()) setStatus("選択した文字のリンクを解除しました。", "success");
 });
 ui.alt.addEventListener("change", () => editor.updateAlt(ui.alt.value));
+ui.pageTitle.addEventListener("change", () => editor.updateDocumentTitle(ui.pageTitle.value));
+ui.pageDescription.addEventListener("change", () => editor.updateDocumentDescription(ui.pageDescription.value));
+ui.pageH1.addEventListener("change", () => editor.updatePrimaryHeading(ui.pageH1.value));
+ui.showProjectList.addEventListener("click", () => setSidebarPanel("pages"));
+ui.showHeadingOutline.addEventListener("click", () => setSidebarPanel("outline"));
 ui.classes.addEventListener("change", () => {
   editor.updateClasses(ui.classes.value);
   refreshClassOptions();
@@ -1495,7 +1728,7 @@ ui.image.addEventListener("change", () => {
   if (file.size > 10 * 1024 * 1024 && !window.confirm("画像が10MBを超えています。埋め込みを続けますか？")) return;
   const reader = new FileReader();
   reader.addEventListener("load", () => {
-    editor.updateImage(String(reader.result));
+    editor.updateImage(String(reader.result), file.name);
     ui.image.value = "";
   });
   reader.readAsDataURL(file);
@@ -1527,8 +1760,7 @@ ui.checkAppUpdate.addEventListener("click", async () => {
 });
 ui.downloadAppUpdate.addEventListener("click", async () => {
   if (!latestAppUpdate?.updateAvailable) return;
-  ui.downloadAppUpdate.disabled = true;
-  ui.downloadAppUpdate.textContent = "ダウンロード中…";
+  setButtonProcessing(ui.downloadAppUpdate, true);
   try {
     const response = await postJson("/api/update/download", {});
     const data = await response.json();
@@ -1541,13 +1773,13 @@ ui.downloadAppUpdate.addEventListener("click", async () => {
     ui.updateResult.textContent = `更新ZIPをダウンロードできませんでした: ${error.message}`;
     setStatus(`更新版のダウンロードに失敗しました: ${error.message}`, "error");
   } finally {
+    setButtonProcessing(ui.downloadAppUpdate, false);
     ui.downloadAppUpdate.disabled = false;
-    ui.downloadAppUpdate.textContent = "更新ZIPをダウンロード";
   }
 });
 ui.applyAppUpdate.addEventListener("click", async () => {
   if (!window.confirm("編集中の内容を保存しましたか？ アプリを終了して新しいバージョンへ切り替えます。")) return;
-  ui.applyAppUpdate.disabled = true;
+  setButtonProcessing(ui.applyAppUpdate, true);
   try {
     const response = await postJson("/api/update/apply", {});
     const data = await response.json();
@@ -1555,6 +1787,7 @@ ui.applyAppUpdate.addEventListener("click", async () => {
     ui.updateResult.textContent = `v${data.version} を適用しています。\nこの画面はまもなく閉じ、新しいバージョンで開き直します。`;
     setStatus("アプリを再起動して更新を適用しています…", "info");
   } catch (error) {
+    setButtonProcessing(ui.applyAppUpdate, false);
     ui.applyAppUpdate.disabled = false;
     ui.updateResult.dataset.kind = "";
     ui.updateResult.textContent = `更新を適用できませんでした: ${error.message}`;
@@ -1614,6 +1847,7 @@ ui.loginCancel.addEventListener("click", () => finishLogin(false));
 ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
 initializeProjectSidebarResize();
+initializePackageFileSelection();
 void refreshRecentProjects();
 syncLoginControls();
 updateGuidance();

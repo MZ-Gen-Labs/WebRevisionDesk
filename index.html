@@ -103,22 +103,41 @@
     </details>
     <main id="workspace" class="workspace">
       <aside class="project-sidebar" aria-label="案件ページ一覧">
-        <div class="project-heading">
-          <p class="eyebrow">Project Pages</p>
-          <h2>ページ一覧 <span id="project-page-count">0</span></h2>
+        <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
+          <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
+            <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
+          </button>
+          <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
+            <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
+          </button>
         </div>
-        <div class="project-batch-actions">
-          <button id="select-all-project-pages" class="small-button" type="button" disabled>全選択</button>
-          <button id="clear-project-selection" class="small-button" type="button" disabled>解除</button>
-          <button id="batch-capture-pages" class="small-button" type="button" disabled>一括取得</button>
-          <button id="check-project-pages" class="small-button" type="button" disabled>更新確認</button>
-          <button id="reset-project-pages" class="small-button danger-button" type="button" disabled>解放</button>
-          <button id="delete-project-pages" class="small-button danger-button" type="button" disabled>削除</button>
-          <span id="batch-progress"></span>
+        <div id="project-list-panel">
+          <div class="project-heading">
+            <p class="eyebrow">Project Pages</p>
+            <h2>ページ一覧 <span id="project-page-count">0</span></h2>
+          </div>
+          <div class="project-batch-actions">
+            <button id="select-all-project-pages" class="small-button" type="button" disabled>全選択</button>
+            <button id="clear-project-selection" class="small-button" type="button" disabled>解除</button>
+            <button id="batch-capture-pages" class="small-button" type="button" disabled>一括取得</button>
+            <button id="check-project-pages" class="small-button" type="button" disabled>更新確認</button>
+            <button id="reset-project-pages" class="small-button danger-button" type="button" disabled>解放</button>
+            <button id="delete-project-pages" class="small-button danger-button" type="button" disabled>削除</button>
+            <span id="batch-progress"></span>
+          </div>
+          <nav id="project-pages" class="project-pages" aria-label="保存済みページ">
+            <p class="project-empty">案件フォルダを選択し、基準URL配下のページを検索できます。</p>
+          </nav>
         </div>
-        <nav id="project-pages" class="project-pages" aria-label="保存済みページ">
-          <p class="project-empty">案件フォルダを選択し、基準URL配下のページを検索できます。</p>
-        </nav>
+        <div id="heading-outline-panel" hidden>
+          <div class="project-heading">
+            <p class="eyebrow">Heading Outline</p>
+            <h2>見出し構成 <span id="heading-count">0</span></h2>
+          </div>
+          <nav id="heading-outline" class="heading-outline" aria-label="H1からH3の見出し構成">
+            <p class="project-empty">ページを開くとH1〜H3を階層表示します。</p>
+          </nav>
+        </div>
       </aside>
       <div
         id="project-sidebar-resizer"
@@ -155,7 +174,7 @@
         <iframe
           id="page-frame"
           title="編集対象ページ"
-          sandbox="allow-same-origin"
+          sandbox="allow-same-origin allow-downloads"
           hidden
         ></iframe>
       </section>
@@ -169,15 +188,28 @@
           <label class="advanced-toggle"><input id="advanced-mode" type="checkbox" /> 詳細設定を表示</label>
         </div>
 
+        <details id="page-structure-panel" class="page-structure-panel" open hidden>
+          <summary>ページ基本情報</summary>
+          <div>
+            <label for="page-title-value">Title</label>
+            <input id="page-title-value" type="text" placeholder="ブラウザや検索結果に表示するタイトル" />
+            <label for="page-description-value">Description</label>
+            <textarea id="page-description-value" rows="3" placeholder="検索結果などに使われるページの説明"></textarea>
+            <label for="page-h1-value">主要見出し（最初のH1）</label>
+            <input id="page-h1-value" type="text" placeholder="ページを代表する見出し" />
+          </div>
+        </details>
+
         <fieldset id="inspector-fields" disabled>
           <label data-editor-field="text">
             文章
             <textarea id="text-value" rows="5" placeholder="要素のテキスト"></textarea>
           </label>
-          <label data-editor-field="link">
-            リンク先URL
+          <div class="link-field" data-editor-field="link">
+            <label for="link-value">リンク先URL</label>
             <input id="link-value" type="text" placeholder="https://example.com/" />
-          </label>
+            <button id="remove-image-link" class="small-button" type="button" hidden>画像のリンクを削除</button>
+          </div>
           <div id="inline-link-tools" class="inline-link-tools" data-editor-field="inline-link" hidden>
             <strong>文章中の選択文字へリンクを設定</strong>
             <span id="inline-link-selection">文章をダブルクリックして編集状態にし、リンクにする文字を選択してください。</span>
@@ -187,13 +219,17 @@
               <button id="remove-inline-link" type="button">リンク解除</button>
             </div>
           </div>
-          <label class="advanced-field" data-editor-field="alt">
-            画像のalt
+          <label data-editor-field="alt">
+            画像の代替テキスト（alt）
             <input id="alt-value" type="text" placeholder="画像の説明" />
           </label>
           <label data-editor-field="image">
             画像を差し替える
             <input id="image-file" type="file" accept="image/*" />
+          </label>
+          <label data-editor-field="image-url">
+            画像URL（src）
+            <input id="image-url-value" type="text" placeholder="https://example.com/image.jpg" />
           </label>
           <label class="advanced-field" data-editor-field="class">
             デザイン・配置（CSS class）

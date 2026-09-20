@@ -2,6 +2,7 @@ import {
   EDITOR_CLASS,
   EDITOR_ID_ATTR,
   EDITOR_STYLE_ID,
+  IMAGE_ASSET_NAME_ATTR,
   collectClassNames,
   normalizeClasses,
   serializeDocument,
@@ -11,6 +12,24 @@ const TEXT_BLOCKLIST = new Set([
   "HTML", "HEAD", "BODY", "SCRIPT", "STYLE", "LINK", "META", "IMG", "VIDEO", "AUDIO", "IFRAME", "CANVAS", "SVG",
 ]);
 const STRUCTURE_ELEMENTS = new Set(["HTML", "HEAD", "BODY"]);
+const IMAGE_EXTENSIONS = new Map([
+  ["image/jpeg", "jpg"], ["image/png", "png"], ["image/gif", "gif"],
+  ["image/webp", "webp"], ["image/svg+xml", "svg"], ["image/avif", "avif"], ["image/bmp", "bmp"],
+]);
+
+function safeImageAssetName(value, source = "") {
+  let name = String(value || "").split(/[\\/]/).pop() || "";
+  if (!name && source && !source.startsWith("data:")) {
+    try { name = decodeURIComponent(new URL(source, "https://web-revision.invalid/").pathname.split("/").pop() || ""); }
+    catch {}
+  }
+  if (!name && source.startsWith("data:")) {
+    const mime = source.slice(5).split(/[;,]/, 1)[0].toLowerCase();
+    name = `replacement-image.${IMAGE_EXTENSIONS.get(mime) || "img"}`;
+  }
+  name = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/^\.+/, "").trim().slice(0, 180);
+  return name || "replacement-image.img";
+}
 
 export class PageEditor {
   constructor(frame, callbacks = {}) {
@@ -78,6 +97,7 @@ export class PageEditor {
       const element = FrameElement && event.target instanceof FrameElement ? event.target : null;
       if (!element) return;
       const link = element.closest("a");
+      if (link?.matches(".wr-image-download[download]")) return;
       if (link) event.preventDefault();
       if (!this.editable) return;
       if (element.closest('[contenteditable="true"]')) return;
@@ -224,6 +244,94 @@ export class PageEditor {
 
   hasLoadedDocument() {
     return this.loaded;
+  }
+
+  getPageStructure() {
+    const doc = this.getDocument();
+    if (!this.loaded || !doc) return { title: "", description: "", primaryHeading: "", headings: [] };
+    const headings = [...doc.querySelectorAll("h1, h2, h3")].map((element) => ({
+      id: this.#ensureElementId(element),
+      level: Number(element.tagName.slice(1)),
+      text: (element.textContent || "").replace(/\s+/g, " ").trim() || "（空の見出し）",
+    }));
+    return {
+      title: doc.title || "",
+      description: doc.querySelector('meta[name="description" i]')?.getAttribute("content") || "",
+      primaryHeading: doc.querySelector("h1")?.textContent || "",
+      headings,
+    };
+  }
+
+  selectById(elementId) {
+    const element = this.#findByEditorId(elementId);
+    if (!element) return false;
+    this.select(element);
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+    return true;
+  }
+
+  updateDocumentTitle(value) {
+    const doc = this.getDocument();
+    if (!doc) return false;
+    const before = doc.title || "";
+    const after = value.trim();
+    if (before === after) return false;
+    doc.title = after;
+    this.callbacks.onChange?.({
+      type: "meta-title-change", target: "head > title", elementId: "", before, after,
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  updateDocumentDescription(value) {
+    const doc = this.getDocument();
+    if (!doc) return false;
+    let meta = doc.querySelector('meta[name="description" i]');
+    const before = meta?.getAttribute("content") || "";
+    const after = value.trim();
+    if (before === after) return false;
+    if (after) {
+      if (!meta) {
+        meta = doc.createElement("meta");
+        meta.setAttribute("name", "description");
+        doc.head.append(meta);
+      }
+      meta.setAttribute("content", after);
+    } else {
+      meta?.remove();
+    }
+    this.callbacks.onChange?.({
+      type: "meta-description-change", target: 'head > meta[name="description"]', elementId: "", before, after,
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+
+  updatePrimaryHeading(value) {
+    const doc = this.getDocument();
+    if (!doc) return false;
+    let heading = doc.querySelector("h1");
+    const after = value.trim();
+    if (!heading) {
+      if (!after) return false;
+      heading = doc.createElement("h1");
+      heading.textContent = after;
+      const parent = doc.querySelector("main") || doc.body;
+      parent.prepend(heading);
+      this.#emitChange("element-add", heading, "", this.#cleanOuterHtml(heading), {
+        action: "page-heading",
+        parentId: this.#ensureElementId(parent),
+        index: 0,
+      });
+      return true;
+    }
+    const before = heading.textContent || "";
+    if (before === after) return false;
+    const beforeHtml = heading.innerHTML;
+    heading.textContent = after;
+    this.#emitChange("text-change", heading, before, after, { beforeHtml, afterHtml: heading.innerHTML });
+    return true;
   }
 
   getSelectionCount() {
@@ -415,6 +523,9 @@ export class PageEditor {
   }
 
   updateLink(value) {
+    if (this.selected instanceof this.frame.contentWindow.HTMLImageElement) {
+      return this.updateImageLink(value);
+    }
     const link = this.selected?.closest("a");
     if (!link) return false;
     const before = link.getAttribute("href") ?? "";
@@ -422,6 +533,31 @@ export class PageEditor {
     if (before === after) return false;
     after ? link.setAttribute("href", after) : link.removeAttribute("href");
     this.#emitChange("link-change", link, before, after);
+    return true;
+  }
+
+  updateImageLink(value) {
+    const ImageType = this.frame.contentWindow?.HTMLImageElement;
+    if (!ImageType || !(this.selected instanceof ImageType)) return false;
+    const image = this.selected;
+    let link = image.closest("a");
+    const before = link?.getAttribute("href") ?? "";
+    const after = value.trim();
+    if (before === after && Boolean(link) === Boolean(after)) return false;
+
+    if (after && link) {
+      link.setAttribute("href", after);
+    } else if (after) {
+      link = image.ownerDocument.createElement("a");
+      link.setAttribute("href", after);
+      image.replaceWith(link);
+      link.append(image);
+      this.#ensureElementId(link);
+    } else if (link) {
+      link.replaceWith(image);
+    }
+    this.#emitChange("image-link-change", image, before, after);
+    this.select(image);
     return true;
   }
 
@@ -483,18 +619,29 @@ export class PageEditor {
     return true;
   }
 
-  updateImage(dataUrl) {
+  updateImage(dataUrl, fileName = "") {
+    return this.updateImageSource(dataUrl, { assetName: fileName });
+  }
+
+  updateImageSource(value, { assetName = "" } = {}) {
     if (!(this.selected instanceof this.frame.contentWindow.HTMLImageElement)) return false;
     const before = this.selected.getAttribute("src") ?? "";
-    if (before === dataUrl) return false;
+    const after = value.trim();
+    if (!after) return false;
     const beforeSrcset = this.selected.getAttribute("srcset") ?? "";
-    this.selected.src = dataUrl;
+    const beforeAssetName = this.selected.getAttribute(IMAGE_ASSET_NAME_ATTR) ?? "";
+    const afterAssetName = safeImageAssetName(assetName, after);
+    if (before === after && beforeAssetName === afterAssetName) return false;
+    this.selected.setAttribute("src", after);
     this.selected.removeAttribute("srcset");
-    this.#emitChange("image-change", this.selected, before, dataUrl, {
+    this.selected.setAttribute(IMAGE_ASSET_NAME_ATTR, afterAssetName);
+    this.#emitChange("image-change", this.selected, before, after, {
       beforeAlt: this.selected.alt,
       afterAlt: this.selected.alt,
       beforeSrcset,
       afterSrcset: "",
+      beforeAssetName,
+      afterAssetName,
     });
     return true;
   }
@@ -604,6 +751,29 @@ export class PageEditor {
     const value = undo ? change.before : change.after;
     let element = this.#findByEditorId(change.elementId);
 
+    if (change.type === "meta-title-change") {
+      const doc = this.getDocument();
+      if (!doc) return false;
+      doc.title = value;
+      return true;
+    }
+    if (change.type === "meta-description-change") {
+      const doc = this.getDocument();
+      if (!doc) return false;
+      let meta = doc.querySelector('meta[name="description" i]');
+      if (value) {
+        if (!meta) {
+          meta = doc.createElement("meta");
+          meta.setAttribute("name", "description");
+          doc.head.append(meta);
+        }
+        meta.setAttribute("content", value);
+      } else {
+        meta?.remove();
+      }
+      return true;
+    }
+
     if (change.type === "element-add") {
       if (undo) {
         if (!element) return false;
@@ -647,12 +817,27 @@ export class PageEditor {
       else element.textContent = value;
     } else if (change.type === "link-change") {
       value ? element.setAttribute("href", value) : element.removeAttribute("href");
+    } else if (change.type === "image-link-change") {
+      let link = element.closest("a");
+      if (value && link) {
+        link.setAttribute("href", value);
+      } else if (value) {
+        link = element.ownerDocument.createElement("a");
+        link.setAttribute("href", value);
+        element.replaceWith(link);
+        link.append(element);
+        this.#ensureElementId(link);
+      } else if (link) {
+        link.replaceWith(element);
+      }
     } else if (change.type === "alt-change") {
       element.setAttribute("alt", value);
     } else if (change.type === "image-change") {
       element.setAttribute("src", value);
       const srcset = undo ? change.beforeSrcset : change.afterSrcset;
       srcset ? element.setAttribute("srcset", srcset) : element.removeAttribute("srcset");
+      const assetName = undo ? change.beforeAssetName : change.afterAssetName;
+      assetName ? element.setAttribute(IMAGE_ASSET_NAME_ATTR, assetName) : element.removeAttribute(IMAGE_ASSET_NAME_ATTR);
     } else if (change.type === "class-change") {
       element.className = value;
     } else {

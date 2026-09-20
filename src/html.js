@@ -1,6 +1,7 @@
 const EDITOR_CLASS = "web-revision-selected";
 const EDITOR_STYLE_ID = "web-revision-editor-style";
 const EDITOR_ID_ATTR = "data-web-revision-id";
+const IMAGE_ASSET_NAME_ATTR = "data-web-revision-asset-name";
 
 export function serializeDocument(doc, { keepEditorIds = false } = {}) {
   const clone = doc.documentElement.cloneNode(true);
@@ -54,4 +55,4 @@ export function cleanHtmlString(html) {
   return serializeDocument(doc);
 }
 
-export { EDITOR_CLASS, EDITOR_STYLE_ID, EDITOR_ID_ATTR };
+export { EDITOR_CLASS, EDITOR_STYLE_ID, EDITOR_ID_ATTR, IMAGE_ASSET_NAME_ATTR };
