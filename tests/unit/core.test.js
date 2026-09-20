@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
+import { removeProjectEntry } from "../../electron/project-file-system.mjs";
 import { normalizeClasses } from "../../src/html.js";
 import { pagePathForUrl, ProjectStore } from "../../src/project-storage.js";
 import { compareVersions, normalizedVersion, parseRepository, releaseAsset } from "../../src/update-service.js";
@@ -93,6 +97,76 @@ test("resetting a parent page removes its artifacts but preserves nested pages",
   assert.equal(parent.entries.has("child"), true);
   assert.equal(child.entries.has("original.html"), true);
   assert.equal(root.entries.has("project.json"), true);
+});
+
+test("deleting a listed page removes its metadata and artifacts without deleting nested pages", async () => {
+  const root = new MemoryDirectoryHandle("project");
+  const pages = await root.getDirectoryHandle("pages", { create: true });
+  const parent = await pages.getDirectoryHandle("parent", { create: true });
+  await parent.getFileHandle("original.html", { create: true });
+  const child = await parent.getDirectoryHandle("child", { create: true });
+  await child.getFileHandle("original.html", { create: true });
+
+  const store = new ProjectStore();
+  store.directory = root;
+  store.project = {
+    format: "web-revision-folder-project", version: 1, projectName: "test", baseUrl: "https://example.com/",
+    pages: [
+      { id: "parent", url: "https://example.com/parent", title: "Parent", path: "pages/parent" },
+      { id: "child", url: "https://example.com/parent/child", title: "Child", path: "pages/parent/child" },
+    ],
+    discoveredPages: [
+      { url: "https://example.com/parent", title: "Parent" },
+      { url: "https://example.com/parent/child", title: "Child" },
+    ],
+  };
+
+  const deleted = await store.deletePages(["https://example.com/parent"]);
+  assert.deepEqual(deleted.deletedSavedPages.map((page) => page.id), ["parent"]);
+  assert.deepEqual(store.project.pages.map((page) => page.id), ["child"]);
+  assert.deepEqual(store.project.discoveredPages.map((page) => page.title), ["Child"]);
+  assert.equal(parent.entries.has("original.html"), false);
+  assert.equal(parent.entries.has("child"), true);
+  assert.equal(child.entries.has("original.html"), true);
+});
+
+test("force deletion removes project metadata when physical cleanup fails", async () => {
+  const root = new MemoryDirectoryHandle("project");
+  const pages = await root.getDirectoryHandle("pages", { create: true });
+  const broken = await pages.getDirectoryHandle("broken", { create: true });
+  await broken.getFileHandle("original.html", { create: true });
+  broken.removeEntry = async () => { throw new DOMException("Access denied", "NotAllowedError"); };
+
+  const store = new ProjectStore();
+  store.directory = root;
+  store.project = {
+    format: "web-revision-folder-project", version: 1, projectName: "test", baseUrl: "https://example.com/",
+    pages: [{ id: "broken", url: "https://example.com/broken", title: "Broken", path: "pages/broken" }],
+    discoveredPages: [{ url: "https://example.com/broken", title: "Broken" }],
+  };
+
+  await assert.rejects(() => store.deletePages(["https://example.com/broken"]), { name: "NotAllowedError" });
+  const result = await store.deletePages(["https://example.com/broken"], { force: true });
+  assert.equal(result.cleanupErrors.length, 1);
+  assert.deepEqual(store.project.pages, []);
+  assert.deepEqual(store.project.discoveredPages, []);
+});
+
+test("Electron removes empty project folders and preserves non-empty folders", async (context) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "web-revision-remove-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  const empty = path.join(root, "empty");
+  const nonEmpty = path.join(root, "non-empty");
+  await mkdir(empty);
+  await mkdir(nonEmpty);
+  await writeFile(path.join(nonEmpty, "child.txt"), "keep");
+
+  await removeProjectEntry(empty);
+  await assert.rejects(() => readFile(path.join(empty, "missing.txt")), { code: "ENOENT" });
+  await assert.rejects(() => removeProjectEntry(nonEmpty), { code: "ENOTEMPTY" });
+  assert.equal(await readFile(path.join(nonEmpty, "child.txt"), "utf8"), "keep");
+  await removeProjectEntry(nonEmpty, true);
+  await assert.rejects(() => readFile(path.join(nonEmpty, "child.txt")), { code: "ENOENT" });
 });
 
 test("GitHub repository URLs are strictly validated", () => {

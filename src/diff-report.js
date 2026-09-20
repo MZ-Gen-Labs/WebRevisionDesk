@@ -1,6 +1,7 @@
 const TYPE_LABELS = {
   "text-change": "テキスト変更",
   "link-change": "リンク変更",
+  "inline-link-change": "文章内リンク変更",
   "alt-change": "画像alt変更",
   "image-change": "画像差し替え",
   "class-change": "CSS class変更",
@@ -236,6 +237,12 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       element = template.content.firstElementChild;
       if (!element) return;
       element.removeAttribute(EDITOR_ID_ATTR);
+      if (element.tagName === "IMG") {
+        const wrapper = doc.createElement("span");
+        wrapper.className = "wr-deleted-image";
+        wrapper.append(element);
+        element = wrapper;
+      }
       addLabel(element, "削除", "delete");
       const reference = parent.children[Math.max(0, change.index)] ?? null;
       parent.insertBefore(element, reference);
@@ -250,6 +257,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       "element-add": ["追加", "add"],
       "element-move": ["移動", "move"],
       "link-change": [`リンク変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
+      "inline-link-change": [`文章内リンク: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "alt-change": [`alt変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "class-change": [`class変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
     };
@@ -266,6 +274,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}
     .wr-redline-add{outline-color:#15975a!important}.wr-redline-add>.wr-redline-label{background:#08733f!important}
     .wr-redline-delete{opacity:.72!important;outline-color:#cc3434!important;text-decoration:line-through!important}.wr-redline-delete>.wr-redline-label{background:#a52020!important}
+    .wr-deleted-image{display:inline-grid!important;gap:5px!important;max-width:100%!important;margin:24px 4px 8px!important;vertical-align:top!important}.wr-deleted-image>img{display:block!important;max-width:100%!important;height:auto!important}.wr-deleted-image>.wr-redline-label{grid-row:1!important;justify-self:start!important}
     .wr-redline-move{outline-color:#3578d4!important}.wr-redline-move>.wr-redline-label{background:#245da9!important}
     .wr-redline-text{outline-color:#a65a20!important}.wr-redline-text>.wr-redline-label{background:#8d4918!important}
     .wr-image-comparison{display:grid!important;grid-template-columns:1fr 1fr!important;gap:12px!important;padding:12px!important;margin:28px 0 12px!important;background:#fff!important}

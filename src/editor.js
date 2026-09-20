@@ -17,15 +17,25 @@ export class PageEditor {
     this.frame = frame;
     this.callbacks = callbacks;
     this.selected = null;
+    this.selectedElements = new Set();
+    this.selectionAnchor = null;
     this.editable = false;
     this.loaded = false;
     this.editingSnapshot = null;
     this.nextElementId = 1;
+    this.elementClipboard = [];
+    this.selectionNavigation = [];
+    this.inlineLinkSelection = null;
   }
 
   load(html, editable) {
     this.editable = editable;
     this.selected = null;
+    this.selectedElements = new Set();
+    this.selectionAnchor = null;
+    this.selectionNavigation = [];
+    this.inlineLinkSelection = null;
+    this.callbacks.onTextSelection?.(null);
     this.loaded = false;
     return new Promise((resolve) => {
       const onLoad = () => {
@@ -70,10 +80,18 @@ export class PageEditor {
       const link = element.closest("a");
       if (link) event.preventDefault();
       if (!this.editable) return;
+      if (element.closest('[contenteditable="true"]')) return;
       event.preventDefault();
       event.stopPropagation();
-      this.select(element);
+      this.select(element, {
+        additive: event.ctrlKey || event.metaKey,
+        range: event.shiftKey,
+      });
     }, true);
+
+    const captureTextSelection = () => queueMicrotask(() => this.#captureInlineLinkSelection());
+    doc.addEventListener("mouseup", captureTextSelection);
+    doc.addEventListener("keyup", captureTextSelection);
 
     doc.addEventListener("dblclick", (event) => {
       if (!this.editable) return;
@@ -95,23 +113,99 @@ export class PageEditor {
         const beforeHtml = this.editingSnapshot?.beforeHtml;
         this.editingSnapshot = null;
         if (before !== after || beforeHtml !== element.innerHTML) this.#emitChange("text-change", element, before, after, { beforeHtml, afterHtml: element.innerHTML });
-        this.callbacks.onSelect?.(element);
+        this.#notifySelection();
       }
     }, true);
   }
 
-  select(element) {
-    this.selected?.classList.remove(EDITOR_CLASS);
-    this.selected = element;
-    this.selected.classList.add(EDITOR_CLASS);
-    this.callbacks.onSelect?.(element);
+  #notifySelection() {
+    this.callbacks.onSelect?.(this.selected, [...this.selectedElements]);
+  }
+
+  #clearInlineLinkSelection() {
+    this.inlineLinkSelection = null;
+    this.callbacks.onTextSelection?.(null);
+  }
+
+  #captureInlineLinkSelection() {
+    const doc = this.getDocument();
+    const selection = doc?.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !selection.toString().trim()) {
+      this.#clearInlineLinkSelection();
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    const startElement = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    const endElement = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement;
+    if (!startElement || !endElement || !doc.body.contains(startElement) || !doc.body.contains(endElement)) {
+      this.#clearInlineLinkSelection();
+      return;
+    }
+    const commonNode = range.commonAncestorContainer;
+    const commonElement = commonNode.nodeType === 1 ? commonNode : commonNode.parentElement;
+    let container = this.selected?.contains(startElement) && this.selected.contains(endElement)
+      ? this.selected
+      : commonElement;
+    if (container?.tagName === "A") container = container.parentElement;
+    if (!container || STRUCTURE_ELEMENTS.has(container.tagName)) {
+      this.#clearInlineLinkSelection();
+      return;
+    }
+    const startLink = startElement.closest("a");
+    const endLink = endElement.closest("a");
+    const link = startLink && startLink === endLink ? startLink : null;
+    this.inlineLinkSelection = { range: range.cloneRange(), container, link };
+    this.callbacks.onTextSelection?.({
+      text: selection.toString(),
+      href: link?.getAttribute("href") || "",
+      linked: Boolean(link),
+    });
+  }
+
+  #replaceSelection(elements, primary = elements.at(-1) ?? null) {
+    this.selectedElements.forEach((selected) => selected.classList.remove(EDITOR_CLASS));
+    this.selectedElements = new Set(elements.filter((element) => element?.isConnected));
+    this.selectedElements.forEach((selected) => selected.classList.add(EDITOR_CLASS));
+    this.selected = this.selectedElements.has(primary) ? primary : [...this.selectedElements].at(-1) ?? null;
+    this.#notifySelection();
+  }
+
+  select(element, { additive = false, range = false, preserveNavigation = false } = {}) {
+    if (!preserveNavigation) this.selectionNavigation = [];
+    this.#clearInlineLinkSelection();
+    if (!element) return this.clearSelection();
+    if (range && this.selectionAnchor?.isConnected && this.selectionAnchor.parentElement === element.parentElement) {
+      const siblings = [...element.parentElement.children];
+      const start = siblings.indexOf(this.selectionAnchor);
+      const end = siblings.indexOf(element);
+      const ranged = siblings.slice(Math.min(start, end), Math.max(start, end) + 1);
+      const elements = additive ? [...new Set([...this.selectedElements, ...ranged])] : ranged;
+      this.#replaceSelection(elements, element);
+      return;
+    }
+    if (additive) {
+      const elements = new Set(this.selectedElements);
+      if (elements.has(element)) elements.delete(element);
+      else elements.add(element);
+      this.selectionAnchor = element;
+      this.#replaceSelection([...elements], elements.has(element) ? element : [...elements].at(-1));
+      return;
+    }
+    this.selectionAnchor = element;
+    this.#replaceSelection([element], element);
   }
 
   clearSelection() {
-    this.selected?.classList.remove(EDITOR_CLASS);
-    this.selected?.removeAttribute("contenteditable");
+    this.selectedElements.forEach((element) => {
+      element.classList.remove(EDITOR_CLASS);
+      element.removeAttribute("contenteditable");
+    });
+    this.selectedElements.clear();
     this.selected = null;
-    this.callbacks.onSelect?.(null);
+    this.selectionAnchor = null;
+    this.selectionNavigation = [];
+    this.#clearInlineLinkSelection();
+    this.#notifySelection();
   }
 
   getDocument() {
@@ -130,6 +224,100 @@ export class PageEditor {
 
   hasLoadedDocument() {
     return this.loaded;
+  }
+
+  getSelectionCount() {
+    return this.selectedElements.size;
+  }
+
+  hasClipboard() {
+    return this.elementClipboard.length > 0;
+  }
+
+  canCopySelection() {
+    return [...this.selectedElements].some((element) => !STRUCTURE_ELEMENTS.has(element.tagName));
+  }
+
+  copySelected() {
+    const copied = [...this.selectedElements]
+      .filter((element) => !STRUCTURE_ELEMENTS.has(element.tagName))
+      .filter((element, _index, elements) => !elements.some((other) => other !== element && other.contains(element)))
+      .map((element) => this.#cleanOuterHtml(element));
+    if (!copied.length) return 0;
+    this.elementClipboard = copied;
+    return copied.length;
+  }
+
+  canPaste() {
+    return this.hasClipboard()
+      && this.selectedElements.size === 1
+      && Boolean(this.selected?.parentElement)
+      && !STRUCTURE_ELEMENTS.has(this.selected.tagName);
+  }
+
+  pasteBefore() {
+    return this.#paste("before");
+  }
+
+  pasteAfter() {
+    return this.#paste("after");
+  }
+
+  canSelectParent() {
+    return this.selectedElements.size === 1
+      && Boolean(this.selected?.parentElement)
+      && this.selected.parentElement.tagName !== "HTML";
+  }
+
+  selectParent() {
+    if (!this.canSelectParent()) return false;
+    this.selectionNavigation.push(this.selected);
+    this.select(this.selected.parentElement, { preserveNavigation: true });
+    return true;
+  }
+
+  canReturnToChild() {
+    return this.selectedElements.size === 1
+      && this.selectionNavigation.some((element) => element?.isConnected);
+  }
+
+  returnToChild() {
+    while (this.selectionNavigation.length) {
+      const child = this.selectionNavigation.pop();
+      if (!child?.isConnected) continue;
+      this.select(child, { preserveNavigation: true });
+      return true;
+    }
+    return false;
+  }
+
+  #paste(position) {
+    if (!this.canPaste()) return 0;
+    const target = this.selected;
+    const parent = target.parentElement;
+    const reference = position === "before" ? target : target.nextElementSibling;
+    const pasted = this.elementClipboard
+      .map((html) => this.#elementFromHtml(html))
+      .filter(Boolean);
+    if (!pasted.length) return 0;
+    pasted.forEach((element) => {
+      this.#assignNewIds(element);
+      parent.insertBefore(element, reference);
+    });
+    const changes = pasted.map((element) => ({
+      type: "element-add",
+      target: this.#describe(element),
+      elementId: this.#ensureElementId(element),
+      parentId: this.#ensureElementId(parent),
+      index: [...parent.children].indexOf(element),
+      before: "",
+      after: this.#cleanOuterHtml(element),
+      action: "paste",
+      timestamp: new Date().toISOString(),
+    }));
+    this.#replaceSelection(pasted, pasted.at(-1));
+    changes.forEach((change) => this.callbacks.onChange?.(change));
+    return pasted.length;
   }
 
   getClassNames() {
@@ -237,6 +425,55 @@ export class PageEditor {
     return true;
   }
 
+  hasInlineLinkSelection() {
+    return Boolean(this.inlineLinkSelection?.range && this.inlineLinkSelection.container?.isConnected);
+  }
+
+  applyInlineLink(value) {
+    const context = this.inlineLinkSelection;
+    const href = value.trim();
+    if (!href || !this.hasInlineLinkSelection()) return false;
+    const { range, container, link } = context;
+    const selectedText = range.toString();
+    const beforeHtml = container.innerHTML;
+    const before = link?.getAttribute("href") || "";
+    if (link) {
+      link.setAttribute("href", href);
+    } else {
+      const doc = this.getDocument();
+      const wrapper = doc.createElement("a");
+      wrapper.setAttribute("href", href);
+      const fragment = range.extractContents();
+      fragment.querySelectorAll?.("a").forEach((nestedLink) => nestedLink.replaceWith(...nestedLink.childNodes));
+      wrapper.append(fragment);
+      range.insertNode(wrapper);
+      this.#ensureElementId(wrapper);
+    }
+    this.#emitChange("inline-link-change", container, before, href, {
+      beforeHtml,
+      afterHtml: container.innerHTML,
+      selectedText,
+    });
+    this.select(container);
+    return true;
+  }
+
+  removeInlineLink() {
+    const context = this.inlineLinkSelection;
+    if (!context?.link || !this.hasInlineLinkSelection()) return false;
+    const { container, link } = context;
+    const beforeHtml = container.innerHTML;
+    const before = link.getAttribute("href") || "";
+    link.replaceWith(...link.childNodes);
+    this.#emitChange("inline-link-change", container, before, "", {
+      beforeHtml,
+      afterHtml: container.innerHTML,
+      selectedText: context.range.toString(),
+    });
+    this.select(container);
+    return true;
+  }
+
   updateAlt(value) {
     if (!(this.selected instanceof this.frame.contentWindow.HTMLImageElement)) return false;
     const before = this.selected.alt;
@@ -278,6 +515,7 @@ export class PageEditor {
     const previous = this.selected?.previousElementSibling;
     if (!this.selected || !previous || STRUCTURE_ELEMENTS.has(this.selected.tagName)) return false;
     const parent = this.selected.parentElement;
+    const parentOrderBefore = [...parent.children].map((element) => this.#ensureElementId(element));
     const fromIndex = [...parent.children].indexOf(this.selected);
     const before = `直前: ${this.#describe(previous)}`;
     this.selected.parentElement.insertBefore(this.selected, previous);
@@ -285,6 +523,8 @@ export class PageEditor {
     const after = this.selected.nextElementSibling ? `直後: ${this.#describe(this.selected.nextElementSibling)}` : "先頭へ移動";
     this.#emitChange("element-move", this.selected, before, after, {
       parentId: this.#ensureElementId(parent), fromIndex, toIndex,
+      parentOrderBefore,
+      parentOrderAfter: [...parent.children].map((element) => this.#ensureElementId(element)),
     });
     return true;
   }
@@ -293,6 +533,7 @@ export class PageEditor {
     const next = this.selected?.nextElementSibling;
     if (!this.selected || !next || STRUCTURE_ELEMENTS.has(this.selected.tagName)) return false;
     const parent = this.selected.parentElement;
+    const parentOrderBefore = [...parent.children].map((element) => this.#ensureElementId(element));
     const fromIndex = [...parent.children].indexOf(this.selected);
     const before = `直後: ${this.#describe(next)}`;
     next.after(this.selected);
@@ -300,6 +541,8 @@ export class PageEditor {
     const after = this.selected.previousElementSibling ? `直前: ${this.#describe(this.selected.previousElementSibling)}` : "末尾へ移動";
     this.#emitChange("element-move", this.selected, before, after, {
       parentId: this.#ensureElementId(parent), fromIndex, toIndex,
+      parentOrderBefore,
+      parentOrderAfter: [...parent.children].map((element) => this.#ensureElementId(element)),
     });
     return true;
   }
@@ -326,26 +569,32 @@ export class PageEditor {
   }
 
   deleteSelected() {
-    if (!this.selected || STRUCTURE_ELEMENTS.has(this.selected.tagName)) return false;
-    const removed = this.selected;
-    const target = this.#describe(removed);
-    const before = this.#cleanOuterHtml(removed);
-    const elementId = this.#ensureElementId(removed);
-    const parentId = removed.parentElement ? this.#ensureElementId(removed.parentElement) : "";
-    const index = removed.parentElement ? [...removed.parentElement.children].indexOf(removed) : -1;
-    this.selected = null;
-    removed.remove();
-    this.callbacks.onSelect?.(null);
-    this.callbacks.onChange?.({
+    const removedElements = [...this.selectedElements]
+      .filter((element) => !STRUCTURE_ELEMENTS.has(element.tagName))
+      .filter((element, _index, elements) => !elements.some((other) => other !== element && other.contains(element)))
+      .sort((left, right) => {
+        const position = left.compareDocumentPosition(right);
+        return position & left.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1;
+      });
+    if (!removedElements.length) return false;
+    const changes = removedElements.map((removed) => ({
       type: "element-delete",
-      target,
-      elementId,
-      parentId,
-      index,
-      before,
+      target: this.#describe(removed),
+      elementId: this.#ensureElementId(removed),
+      removedElementIds: [removed, ...removed.querySelectorAll("*")].map((element) => this.#ensureElementId(element)),
+      parentId: removed.parentElement ? this.#ensureElementId(removed.parentElement) : "",
+      index: removed.parentElement ? [...removed.parentElement.children].indexOf(removed) : -1,
+      before: this.#cleanOuterHtml(removed),
       after: "",
       timestamp: new Date().toISOString(),
-    });
+    }));
+    this.selectedElements.forEach((element) => element.classList.remove(EDITOR_CLASS));
+    this.selectedElements.clear();
+    this.selected = null;
+    this.selectionAnchor = null;
+    removedElements.forEach((element) => element.remove());
+    this.#notifySelection();
+    changes.forEach((change) => this.callbacks.onChange?.(change));
     return true;
   }
 
@@ -392,7 +641,7 @@ export class PageEditor {
       const index = undo ? change.fromIndex : change.toIndex;
       element.remove();
       parent.insertBefore(element, parent.children[index] ?? null);
-    } else if (change.type === "text-change") {
+    } else if (change.type === "text-change" || change.type === "inline-link-change") {
       const html = undo ? change.beforeHtml : change.afterHtml;
       if (typeof html === "string") element.innerHTML = html;
       else element.textContent = value;

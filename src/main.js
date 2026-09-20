@@ -19,18 +19,24 @@ const ui = {
   downloadPackage: $("#download-package"),
   fields: $("#inspector-fields"), label: $("#element-label"), text: $("#text-value"),
   link: $("#link-value"), alt: $("#alt-value"), image: $("#image-file"),
+  inlineLinkTools: $("#inline-link-tools"), inlineLinkSelection: $("#inline-link-selection"),
+  inlineLinkUrl: $("#inline-link-url"), applyInlineLink: $("#apply-inline-link"), removeInlineLink: $("#remove-inline-link"),
   classes: $("#class-value"), classOptions: $("#class-options"), before: $("#move-before"),
-  after: $("#move-after"), duplicate: $("#duplicate-element"), delete: $("#delete-element"),
+  after: $("#move-after"), selectParent: $("#select-parent-element"), returnChild: $("#return-child-element"), delete: $("#delete-element"),
+  copyElement: $("#copy-element"), pasteBefore: $("#paste-before-element"), pasteAfter: $("#paste-after-element"),
   historyCount: $("#history-count"), historyList: $("#history-list"), clearHistory: $("#clear-history"),
   manualPageUrl: $("#manual-page-url"), addProjectUrl: $("#add-project-url"),
   captureSessionActions: $("#capture-session-actions"), finishCapture: $("#capture-current-page"),
   cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
   selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
+  recentProjects: $("#recent-projects"), recentProjectList: $("#recent-project-list"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
   projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
-  selectAllProjectPages: $("#select-all-project-pages"), batchCapturePages: $("#batch-capture-pages"),
-  checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"), batchProgress: $("#batch-progress"),
+  selectAllProjectPages: $("#select-all-project-pages"), clearProjectSelection: $("#clear-project-selection"),
+  batchCapturePages: $("#batch-capture-pages"),
+  checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"),
+  deleteProjectPages: $("#delete-project-pages"), batchProgress: $("#batch-progress"),
   appUpdateButton: $("#app-update-button"), updatePanel: $("#update-panel"),
   closeUpdatePanel: $("#close-update-panel"), updateRepository: $("#update-repository"),
   checkUpdatesOnStartup: $("#check-updates-on-startup"), saveUpdateSettings: $("#save-update-settings"),
@@ -41,12 +47,18 @@ const ui = {
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
+  workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
+  packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
+  confirmPackageDownload: $("#confirm-package-download"),
 };
 
 const state = {
   fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
   sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
+  focusedProjectUrl: "",
+  projectSelectionAnchorUrl: "",
   selectedProjectUrls: new Set(), batchRunning: false, queuedCaptureUrls: new Set(), activeCaptureUrl: "",
+  unavailableProjectUrls: new Set(),
 };
 let captureSessionId = "";
 let loginSessionId = "";
@@ -71,6 +83,107 @@ function syncLoginControls() {
 let latestAppUpdate = null;
 let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
+const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
+const AUTO_SAVE_DELAY_MS = 1200;
+let editRevision = 0;
+let autoSaveTimer = 0;
+let autoSavePromise = Promise.resolve();
+let autoSaveInProgress = false;
+let autoSaveError = null;
+
+function canAutoSaveCurrentPage() {
+  return Boolean(projectStore.project && state.originalHtml && state.activeProjectPageId && !state.previewOnly);
+}
+
+function queueProjectSave({ quiet = true, force = false } = {}) {
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = 0;
+  }
+  autoSavePromise = autoSavePromise.catch(() => {}).then(async () => {
+    if ((!state.dirty && !force) || !canAutoSaveCurrentPage()) return null;
+    autoSaveInProgress = true;
+    autoSaveError = null;
+    updateGuidance();
+    try {
+      return await saveCurrentToProject({ quiet });
+    } catch (error) {
+      autoSaveError = error;
+      updateGuidance();
+      if (quiet) setStatus(`自動保存に失敗しました: ${error.message}`, "error");
+      throw error;
+    } finally {
+      autoSaveInProgress = false;
+      updateGuidance();
+    }
+  });
+  return autoSavePromise;
+}
+
+function scheduleAutoSave() {
+  if (!canAutoSaveCurrentPage()) return;
+  if (autoSaveTimer) clearTimeout(autoSaveTimer);
+  autoSaveTimer = window.setTimeout(() => {
+    autoSaveTimer = 0;
+    void queueProjectSave().catch(() => {});
+  }, AUTO_SAVE_DELAY_MS);
+}
+
+function markDirtyAndScheduleAutoSave() {
+  editRevision += 1;
+  state.dirty = true;
+  autoSaveError = null;
+  updateGuidance();
+  scheduleAutoSave();
+}
+
+async function flushAutoSave({ force = false, quiet = true } = {}) {
+  return queueProjectSave({ force, quiet });
+}
+
+function setProjectSidebarWidth(width, { persist = true } = {}) {
+  const normalized = Math.round(Math.min(480, Math.max(160, width)));
+  ui.workspace.style.setProperty("--project-sidebar-width", `${normalized}px`);
+  ui.projectSidebarResizer.setAttribute("aria-valuenow", String(normalized));
+  if (persist) localStorage.setItem(SIDEBAR_WIDTH_KEY, String(normalized));
+}
+
+function initializeProjectSidebarResize() {
+  const savedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  if (Number.isFinite(savedWidth) && savedWidth > 0) setProjectSidebarWidth(savedWidth, { persist: false });
+  else ui.projectSidebarResizer.setAttribute("aria-valuenow", String(Math.round(ui.projectSidebar.getBoundingClientRect().width)));
+
+  ui.projectSidebarResizer.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startWidth = ui.projectSidebar.getBoundingClientRect().width;
+    ui.workspace.classList.add("resizing-sidebar");
+    ui.projectSidebarResizer.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => setProjectSidebarWidth(startWidth + moveEvent.clientX - startX, { persist: false });
+    const finish = () => {
+      ui.workspace.classList.remove("resizing-sidebar");
+      ui.projectSidebarResizer.removeEventListener("pointermove", move);
+      ui.projectSidebarResizer.removeEventListener("pointerup", finish);
+      ui.projectSidebarResizer.removeEventListener("pointercancel", finish);
+      setProjectSidebarWidth(ui.projectSidebar.getBoundingClientRect().width);
+    };
+    ui.projectSidebarResizer.addEventListener("pointermove", move);
+    ui.projectSidebarResizer.addEventListener("pointerup", finish);
+    ui.projectSidebarResizer.addEventListener("pointercancel", finish);
+  });
+  ui.projectSidebarResizer.addEventListener("keydown", (event) => {
+    const current = ui.projectSidebar.getBoundingClientRect().width;
+    const next = event.key === "ArrowLeft" ? current - 20
+      : event.key === "ArrowRight" ? current + 20
+        : event.key === "Home" ? 160
+          : event.key === "End" ? 480
+            : null;
+    if (next === null) return;
+    event.preventDefault();
+    setProjectSidebarWidth(next);
+  });
+  ui.projectSidebarResizer.addEventListener("dblclick", () => setProjectSidebarWidth(210));
+}
 
 function formatBytes(value) {
   if (!Number.isFinite(value)) return "";
@@ -146,15 +259,71 @@ async function checkAppUpdate({ quiet = false } = {}) {
     ui.checkAppUpdate.disabled = false;
   }
 }
+function recordChange(change) {
+  if (change.type === "element-delete") {
+    const removedElementIds = new Set(change.removedElementIds || [change.elementId]);
+    const cancelsAddition = state.changes.some((item) => item.type === "element-add" && removedElementIds.has(item.elementId));
+    if (cancelsAddition) {
+      state.changes = state.changes.filter((item) => !removedElementIds.has(item.elementId));
+      return "cancelled-add-delete";
+    }
+  }
+  if (change.type !== "element-move") {
+    state.changes.push(change);
+    return "added";
+  }
+  const parentMoveIndexes = state.changes
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.type === "element-move" && item.parentId === change.parentId)
+    .map(({ index }) => index);
+  const firstParentMove = parentMoveIndexes.length ? state.changes[parentMoveIndexes[0]] : null;
+  const originalOrder = firstParentMove?.parentOrderBefore;
+  const finalOrder = change.parentOrderAfter;
+  if (Array.isArray(originalOrder) && Array.isArray(finalOrder)
+    && originalOrder.length === finalOrder.length
+    && originalOrder.every((elementId, index) => elementId === finalOrder[index])) {
+    for (const index of parentMoveIndexes.toReversed()) state.changes.splice(index, 1);
+    return "cancelled-move";
+  }
+  const previousIndex = state.changes.findLastIndex((item) => item.type === "element-move"
+    && item.elementId === change.elementId
+    && item.parentId === change.parentId);
+  if (previousIndex < 0) {
+    state.changes.push(change);
+    return "added";
+  }
+  const previous = state.changes.splice(previousIndex, 1)[0];
+  const merged = {
+    ...previous,
+    after: change.after,
+    toIndex: change.toIndex,
+    timestamp: change.timestamp,
+  };
+  if (merged.fromIndex === merged.toIndex) return "cancelled-move";
+  state.changes.push(merged);
+  return "merged";
+}
+
 const editor = new PageEditor(ui.frame, {
   onSelect: showSelection,
+  onTextSelection: showInlineLinkSelection,
   onChange: (change) => {
     state.modifiedHtml = editor.getHtml();
     if (change) {
-      state.changes.push(change);
+      const result = recordChange(change);
       state.redoChanges = [];
-      state.dirty = true;
+      markDirtyAndScheduleAutoSave();
       renderHistory();
+      if (result === "cancelled-move") {
+        updateGuidance();
+        setStatus("要素を元の位置へ戻したため、移動履歴を取り消しました。", "success");
+        return;
+      }
+      if (result === "cancelled-add-delete") {
+        updateGuidance();
+        setStatus("追加した要素を削除したため、追加・削除履歴を取り消しました。", "success");
+        return;
+      }
     }
     updateGuidance();
     setStatus("修正を反映しました。続けて編集するか、確認して保存できます。", "success");
@@ -173,8 +342,19 @@ function updateGuidance() {
     ui.saveState.className = "save-state";
     return;
   }
-  ui.saveState.textContent = state.dirty ? "● 案件フォルダへ未保存" : "保存済み";
-  ui.saveState.className = `save-state ${state.dirty ? "dirty" : "saved"}`;
+  if (autoSaveInProgress) {
+    ui.saveState.textContent = "自動保存中…";
+    ui.saveState.className = "save-state dirty";
+  } else if (autoSaveError && state.dirty) {
+    ui.saveState.textContent = "自動保存失敗";
+    ui.saveState.className = "save-state dirty";
+  } else if (state.dirty) {
+    ui.saveState.textContent = "自動保存待ち";
+    ui.saveState.className = "save-state dirty";
+  } else {
+    ui.saveState.textContent = "自動保存済み";
+    ui.saveState.className = "save-state saved";
+  }
 }
 
 function setStatus(message, kind = "info") {
@@ -208,12 +388,14 @@ function syncProjectControls() {
 
 function updateBatchControls() {
   const listed = listedProjectPages();
-  const selected = listed.filter((page) => state.selectedProjectUrls.has(page.url));
+  const selected = actionTargetPages(listed);
   ui.selectAllProjectPages.disabled = state.batchRunning || listed.length === 0;
-  ui.selectAllProjectPages.textContent = selected.length === listed.length && listed.length ? "すべて解除" : "すべて選択";
+  ui.clearProjectSelection.disabled = state.batchRunning || (state.selectedProjectUrls.size === 0 && !state.focusedProjectUrl);
   ui.batchCapturePages.disabled = loginBlocked() || state.batchRunning || selected.length === 0;
   ui.checkProjectPages.disabled = loginBlocked() || state.batchRunning || !selected.some((page) => page.saved);
   ui.resetProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
+  ui.deleteProjectPages.disabled = state.batchRunning || selected.length === 0;
+  ui.downloadPackage.disabled = state.batchRunning || (!state.originalHtml && !selected.some((page) => page.saved));
 }
 
 function updateUndoControls() {
@@ -293,14 +475,35 @@ function selectedImage(element) {
   return ImageType && element instanceof ImageType ? element : null;
 }
 
-function showSelection(element) {
+function showInlineLinkSelection(selection) {
+  ui.inlineLinkTools.hidden = !selection;
+  if (!selection) {
+    ui.inlineLinkSelection.textContent = "文章をダブルクリックして編集状態にし、リンクにする文字を選択してください。";
+    ui.inlineLinkUrl.value = "";
+    ui.applyInlineLink.disabled = true;
+    ui.removeInlineLink.disabled = true;
+    return;
+  }
+  ui.inlineLinkSelection.textContent = `選択中: ${selection.text}`;
+  ui.inlineLinkUrl.value = selection.href;
+  ui.applyInlineLink.disabled = false;
+  ui.removeInlineLink.disabled = !selection.linked;
+}
+
+function showSelection(element, selectedElements = element ? [element] : []) {
   const editable = Boolean(element) && state.mode === "modified";
   ui.fields.disabled = !editable;
-  ui.label.textContent = element ? describeElement(element) : "未選択";
+  const selectionCount = selectedElements.length;
+  ui.label.textContent = selectionCount > 1 ? `${selectionCount}個の要素を選択` : element ? describeElement(element) : "未選択";
   const fieldVisibility = {
-    text: false, link: false, image: false, alt: false, class: Boolean(element),
+    text: false, link: false, image: false, alt: false, class: Boolean(element), "inline-link": editor.hasInlineLinkSelection(),
   };
   if (!element) {
+    ui.copyElement.disabled = true;
+    ui.pasteBefore.disabled = true;
+    ui.pasteAfter.disabled = true;
+    ui.selectParent.disabled = true;
+    ui.returnChild.disabled = true;
     ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
     ui.selectionHelp.textContent = state.previewOnly
       ? "一時プレビューです。編集するには「このページを取り込んで編集」を押してください。"
@@ -308,10 +511,32 @@ function showSelection(element) {
         ? "変更された文章、画像、リンク、追加・削除・移動箇所をページ上で確認できます。"
       : state.mode === "original"
       ? "修正前は参照専用です。「修正後」を押すと編集できます。"
-      : "ページ内の直したい文章や画像をクリックしてください。";
+      : "直したい要素をクリックしてください。Ctrl/Cmd+クリックで追加選択、同じ階層ではShift+クリックで範囲選択できます。";
     document.querySelectorAll("[data-editor-field]").forEach((field) => { field.hidden = true; });
     return;
   }
+  if (selectionCount > 1) {
+    ui.text.value = ui.link.value = ui.alt.value = ui.classes.value = "";
+    document.querySelectorAll("[data-editor-field]").forEach((field) => { field.hidden = true; });
+    ui.copyElement.disabled = !editor.canCopySelection();
+    ui.pasteBefore.disabled = true;
+    ui.pasteAfter.disabled = true;
+    ui.selectParent.disabled = true;
+    ui.returnChild.disabled = true;
+    ui.before.disabled = true;
+    ui.after.disabled = true;
+    ui.delete.disabled = false;
+    ui.selectionHelp.textContent = "複数選択中です。選択した要素をまとめて削除できます。Ctrl/Cmd+クリックで追加・解除、同じ階層ではShift+クリックで範囲選択できます。";
+    return;
+  }
+  ui.copyElement.disabled = !editor.canCopySelection();
+  ui.pasteBefore.disabled = !editor.canPaste();
+  ui.pasteAfter.disabled = !editor.canPaste();
+  ui.selectParent.disabled = !editor.canSelectParent();
+  ui.returnChild.disabled = !editor.canReturnToChild();
+  ui.before.disabled = false;
+  ui.after.disabled = false;
+  ui.delete.disabled = false;
   const classNames = [...element.classList].filter((name) => name !== EDITOR_CLASS);
   const link = element.closest("a");
   const image = selectedImage(element);
@@ -329,7 +554,7 @@ function showSelection(element) {
       ? "リンク付きの要素を選択中です。文章とリンク先を変更できます。"
       : textEditable
         ? "文章を変更できます。ページ上でダブルクリックして直接編集することもできます。"
-        : "このブロックは複製、移動、削除ができます。";
+        : "このブロックはコピー、移動、削除ができます。";
   ui.text.value = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName) ? "" : element.textContent ?? "";
   ui.text.disabled = ["IMG", "SCRIPT", "STYLE", "HTML", "HEAD", "BODY"].includes(element.tagName);
   ui.link.value = link?.getAttribute("href") ?? "";
@@ -348,12 +573,19 @@ function describeElement(element) {
 
 async function loadHtml(html, fileName, options = {}) {
   if (!/<(?:!doctype|html|head|body)[\s>]/i.test(html)) throw new Error("HTML文書として認識できませんでした。");
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = 0;
+  }
+  editRevision += 1;
+  autoSaveError = null;
   state.fileName = fileName || "captured-page.html";
   state.originalHtml = html;
   state.modifiedHtml = options.workingHtml || html;
   state.changes = options.changes || [];
   state.redoChanges = [];
   state.sourceUrl = options.sourceUrl ?? sourceUrlFromHtml(html);
+  if (state.sourceUrl) state.focusedProjectUrl = state.sourceUrl;
   state.activeProjectPageId = options.activeProjectPageId || "";
   state.dirty = options.dirty ?? true;
   state.previewOnly = options.previewOnly ?? false;
@@ -386,6 +618,42 @@ function listedProjectPages() {
   return listed;
 }
 
+function actionTargetPages(listed = listedProjectPages()) {
+  return listed.filter((page) => state.selectedProjectUrls.has(page.url) || page.url === state.focusedProjectUrl);
+}
+
+function handleProjectPageClick(event, page, listed) {
+  const additive = event.ctrlKey || event.metaKey;
+  if (event.shiftKey) {
+    const anchorUrl = state.projectSelectionAnchorUrl || state.focusedProjectUrl || page.url;
+    const anchorIndex = Math.max(0, listed.findIndex((item) => item.url === anchorUrl));
+    const targetIndex = listed.findIndex((item) => item.url === page.url);
+    if (!additive) state.selectedProjectUrls.clear();
+    listed.slice(Math.min(anchorIndex, targetIndex), Math.max(anchorIndex, targetIndex) + 1)
+      .forEach((item) => state.selectedProjectUrls.add(item.url));
+    state.focusedProjectUrl = page.url;
+    renderProjectPages();
+    return;
+  }
+  if (additive) {
+    const activeUrl = ui.projectPages.querySelector(".project-page.active")?.dataset.pageUrl || "";
+    const previousUrls = new Set([state.focusedProjectUrl, state.projectSelectionAnchorUrl, activeUrl]);
+    previousUrls.delete("");
+    previousUrls.delete(page.url);
+    previousUrls.forEach((url) => state.selectedProjectUrls.add(url));
+    if (state.selectedProjectUrls.has(page.url)) state.selectedProjectUrls.delete(page.url);
+    else state.selectedProjectUrls.add(page.url);
+    state.focusedProjectUrl = page.url;
+    state.projectSelectionAnchorUrl = page.url;
+    renderProjectPages();
+    return;
+  }
+  state.focusedProjectUrl = page.url;
+  state.projectSelectionAnchorUrl = page.url;
+  renderProjectPages();
+  return page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page);
+}
+
 function renderProjectPages() {
   const listed = listedProjectPages();
   const availableUrls = new Set(listed.map((page) => page.url));
@@ -405,14 +673,18 @@ function renderProjectPages() {
     checkbox.setAttribute("aria-label", `${page.title}を選択`);
     checkbox.addEventListener("change", () => {
       checkbox.checked ? state.selectedProjectUrls.add(page.url) : state.selectedProjectUrls.delete(page.url);
-      updateBatchControls();
+      state.focusedProjectUrl = page.url;
+      state.projectSelectionAnchorUrl = page.url;
+      renderProjectPages();
     });
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.pageUrl = page.url;
     button.className = "project-page";
     button.classList.toggle("saved", page.saved);
     button.classList.toggle("changed", page.checkStatus === "changed");
-    button.classList.toggle("active", page.id === state.activeProjectPageId);
+    button.classList.toggle("unavailable", state.unavailableProjectUrls.has(page.url));
+    button.classList.toggle("active", page.url === state.focusedProjectUrl);
     const title = document.createElement("strong");
     const path = document.createElement("small");
     const status = document.createElement("span");
@@ -425,14 +697,14 @@ function renderProjectPages() {
       error: "公開版の確認失敗",
     }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
     status.textContent = page.saved
-      ? savedStatus
+      ? state.unavailableProjectUrls.has(page.url) ? "保存データを開けません・削除可能" : savedStatus
       : state.activeCaptureUrl === page.url
         ? "画像・ページを取得中"
         : state.queuedCaptureUrls.has(page.url)
           ? "優先取得待ち"
           : "未取得・クリックして画像とページを取得";
     button.append(title, path, status);
-    button.addEventListener("click", () => page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page));
+    button.addEventListener("click", (event) => handleProjectPageClick(event, page, listed));
     row.append(checkbox, button);
     if (page.saved && page.checkStatus === "changed") {
       const actions = document.createElement("div");
@@ -574,7 +846,7 @@ function clearLoadedPage() {
 }
 
 async function resetSelectedProjectPages() {
-  const targets = listedProjectPages().filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  const targets = actionTargetPages().filter((page) => page.saved);
   if (!targets.length) return;
   const message = `${targets.length}ページを未取得状態へ戻します。\n\n原本・編集中・修正後・差分・変更履歴・旧版バックアップが案件フォルダから削除されます。URLは一覧に残ります。続けますか？`;
   if (!window.confirm(message)) return;
@@ -596,10 +868,55 @@ async function resetSelectedProjectPages() {
   }
 }
 
+async function deleteSelectedProjectPages() {
+  const targets = actionTargetPages();
+  if (!targets.length) return;
+  const savedCount = targets.filter((page) => page.saved).length;
+  const knownErrorCount = targets.filter((page) => state.unavailableProjectUrls.has(page.url)).length;
+  const folderText = savedCount
+    ? `\n\n保存済み${savedCount}ページは、原本・編集中・修正後・差分・変更履歴を実体フォルダから削除します。`
+    : "";
+  const errorText = knownErrorCount
+    ? `\n\n保存データを開けない${knownErrorCount}ページは、実体の状態にかかわらず一覧と案件管理情報から除去します。`
+    : "";
+  if (!window.confirm(`${targets.length}ページを一覧から削除します。${folderText}${errorText}\n\nこの操作は元に戻せません。続けますか？`)) return;
+  state.batchRunning = true;
+  updateBatchControls();
+  try {
+    const activeDeleted = targets.some((page) => page.id && page.id === state.activeProjectPageId);
+    const urls = targets.map((page) => page.url);
+    let result;
+    try {
+      result = await projectStore.deletePages(urls, { force: knownErrorCount > 0 });
+    } catch {
+      result = await projectStore.deletePages(urls, { force: true });
+    }
+    result.deletedUrls.forEach((url) => {
+      state.selectedProjectUrls.delete(url);
+      state.queuedCaptureUrls.delete(url);
+      state.unavailableProjectUrls.delete(url);
+    });
+    targets.forEach((page) => state.unavailableProjectUrls.delete(page.url));
+    if (targets.some((page) => page.url === state.focusedProjectUrl)) state.focusedProjectUrl = "";
+    if (activeDeleted) clearLoadedPage();
+    ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
+    const cleanupNote = result.cleanupErrors.length
+      ? ` 実体を削除できなかった${result.cleanupErrors.length}ページは管理情報のみ除去しました。`
+      : "";
+    setStatus(`${targets.length}ページを一覧から削除しました。${cleanupNote}`, "success");
+  } catch (error) {
+    setStatus(`ページを一覧から削除できませんでした: ${error.message}`, "error");
+  } finally {
+    state.batchRunning = false;
+    renderProjectPages();
+    updateBatchControls();
+  }
+}
+
 async function processSelectedPages(mode) {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてから一括処理してください。", "error");
-  const selected = listedProjectPages().filter((page) => state.selectedProjectUrls.has(page.url));
+  const selected = actionTargetPages();
   const targets = mode === "check" ? selected.filter((page) => page.saved) : selected;
   if (!targets.length) return;
   state.batchRunning = true;
@@ -673,13 +990,20 @@ async function replaceProjectPage(pageId) {
 
 ui.selectAllProjectPages.addEventListener("click", () => {
   const pages = listedProjectPages();
-  const allSelected = pages.length > 0 && pages.every((page) => state.selectedProjectUrls.has(page.url));
-  state.selectedProjectUrls = allSelected ? new Set() : new Set(pages.map((page) => page.url));
+  state.selectedProjectUrls = new Set(pages.map((page) => page.url));
+  state.projectSelectionAnchorUrl = pages[0]?.url || "";
+  renderProjectPages();
+});
+ui.clearProjectSelection.addEventListener("click", () => {
+  state.selectedProjectUrls.clear();
+  state.focusedProjectUrl = "";
+  state.projectSelectionAnchorUrl = "";
   renderProjectPages();
 });
 ui.batchCapturePages.addEventListener("click", () => processSelectedPages("capture"));
 ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check"));
 ui.resetProjectPages.addEventListener("click", resetSelectedProjectPages);
+ui.deleteProjectPages.addEventListener("click", deleteSelectedProjectPages);
 
 ui.importPreviewPage.addEventListener("click", async () => {
   if (!state.previewOnly || !state.sourceUrl) return;
@@ -718,6 +1042,7 @@ ui.refreshPreview.addEventListener("click", async () => {
 
 async function saveCurrentToProject({ quiet = false } = {}) {
   if (!state.originalHtml) throw new Error("保存するページがありません。");
+  const revisionAtStart = editRevision;
   projectStore.setMetadata({
     projectName: ui.projectName.value,
     baseUrl: ui.projectBaseUrl.value,
@@ -725,16 +1050,21 @@ async function saveCurrentToProject({ quiet = false } = {}) {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
   const sourceUrl = state.sourceUrl || ui.manualPageUrl.value.trim();
   if (!sourceUrl) throw new Error("ページURLが不明です。「その他の取り込み」でページURLを指定してください。");
-  const page = await projectStore.savePage({
+  const saveData = {
     fileName: state.fileName,
     sourceUrl,
     originalHtml: state.originalHtml,
     workingHtml: state.modifiedHtml,
-    changes: state.changes,
+    changes: structuredClone(state.changes),
+  };
+  const page = await projectStore.savePage({
+    ...saveData,
   });
   state.sourceUrl = page.url;
   state.activeProjectPageId = page.id;
-  state.dirty = false;
+  state.unavailableProjectUrls.delete(page.url);
+  state.dirty = editRevision !== revisionAtStart;
+  if (state.dirty) scheduleAutoSave();
   updateGuidance();
   renderProjectPages();
   ui.projectState.textContent = `${projectStore.project.projectName}：${projectStore.project.pages.length}ページ`;
@@ -744,6 +1074,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
 
 async function openProjectPage(pageId) {
   if (pageId === state.activeProjectPageId) return;
+  const pageInfo = projectStore.project?.pages.find((page) => page.id === pageId);
   try {
     if (!(await preserveCurrentPage())) return;
     const saved = await projectStore.loadPage(pageId);
@@ -755,8 +1086,11 @@ async function openProjectPage(pageId) {
       dirty: false,
     });
     ui.manualPageUrl.value = saved.page.url;
+    state.unavailableProjectUrls.delete(saved.page.url);
     setStatus(`案件ページ「${saved.page.title}」を開きました。`, "success");
   } catch (error) {
+    if (pageInfo?.url) state.unavailableProjectUrls.add(pageInfo.url);
+    renderProjectPages();
     setStatus(`案件ページを開けませんでした: ${error.message}`, "error");
   }
 }
@@ -764,28 +1098,74 @@ async function openProjectPage(pageId) {
 async function preserveCurrentPage() {
   if (!state.dirty || !state.originalHtml) return true;
   if (projectStore.project && state.activeProjectPageId) {
-    await saveCurrentToProject({ quiet: true });
-    return true;
+    try {
+      await flushAutoSave();
+      return true;
+    } catch (error) {
+      return window.confirm(`自動保存に失敗しました。\n${error.message}\n\n保存せずにページを移動しますか？`);
+    }
   }
   return window.confirm("現在のページは案件フォルダへ保存されていません。別のページへ進むと現在の編集状態は失われます。続けますか？");
+}
+
+function activateProject(project) {
+  state.activeProjectPageId = "";
+  state.focusedProjectUrl = "";
+  state.projectSelectionAnchorUrl = "";
+  state.unavailableProjectUrls = new Set();
+  if (state.originalHtml) state.dirty = true;
+  updateGuidance();
+  ui.projectName.value = project.projectName;
+  ui.projectBaseUrl.value = project.baseUrl;
+  ui.loginRequired.checked = project.loginRequired === true;
+  loginReady = false;
+  syncLoginControls();
+  ui.projectState.textContent = `${project.projectName}：保存済み${project.pages.length}ページ`;
+  syncProjectControls();
+  renderProjectPages();
+  setStatus(project.pages.length ? "案件フォルダを開きました。左の一覧からページを選べます。" : "新しい案件フォルダを選択しました。案件名と基準URLを入力してください。", "success");
+}
+
+async function refreshRecentProjects() {
+  const projects = await projectStore.listRecentDirectories().catch(() => []);
+  ui.recentProjects.hidden = projects.length === 0;
+  ui.recentProjectList.replaceChildren(...projects.map((project) => {
+    const item = document.createElement("span");
+    item.className = "recent-project-item";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "recent-project-open";
+    open.textContent = project.name;
+    open.title = project.path;
+    open.addEventListener("click", async () => {
+      try {
+        if (!(await preserveCurrentPage())) return;
+        activateProject(await projectStore.openRecentDirectory(project.path));
+        await refreshRecentProjects();
+      } catch (error) {
+        setStatus(`最近の案件を開けませんでした: ${error.message}`, "error");
+      }
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "recent-project-remove";
+    remove.textContent = "履歴削除";
+    remove.title = "履歴だけを削除します。案件フォルダは削除しません。";
+    remove.addEventListener("click", async () => {
+      await projectStore.removeRecentDirectory(project.path);
+      await refreshRecentProjects();
+    });
+    item.append(open, remove);
+    return item;
+  }));
 }
 
 ui.selectProjectFolder.addEventListener("click", async () => {
   try {
     if (!(await preserveCurrentPage())) return;
     const project = await projectStore.selectDirectory();
-    state.activeProjectPageId = "";
-    if (state.originalHtml) state.dirty = true;
-    updateGuidance();
-    ui.projectName.value = project.projectName;
-    ui.projectBaseUrl.value = project.baseUrl;
-    ui.loginRequired.checked = project.loginRequired === true;
-    loginReady = false;
-    syncLoginControls();
-    ui.projectState.textContent = `${project.projectName}：保存済み${project.pages.length}ページ`;
-    syncProjectControls();
-    renderProjectPages();
-    setStatus(project.pages.length ? "案件フォルダを開きました。左の一覧からページを選べます。" : "新しい案件フォルダを選択しました。案件名と基準URLを入力してください。", "success");
+    activateProject(project);
+    await refreshRecentProjects();
   } catch (error) {
     if (error.name !== "AbortError") setStatus(`案件フォルダを開けませんでした: ${error.message}`, "error");
   }
@@ -794,7 +1174,7 @@ ui.selectProjectFolder.addEventListener("click", async () => {
 ui.saveProjectPage.addEventListener("click", async () => {
   ui.saveProjectPage.disabled = true;
   try {
-    await saveCurrentToProject();
+    await flushAutoSave({ force: true, quiet: false });
   } catch (error) {
     setStatus(`案件フォルダへ保存できませんでした: ${error.message}`, "error");
   } finally {
@@ -949,7 +1329,7 @@ ui.reset.addEventListener("click", async () => {
   state.modifiedHtml = state.originalHtml;
   state.changes = [];
   state.redoChanges = [];
-  state.dirty = true;
+  markDirtyAndScheduleAutoSave();
   renderHistory();
   // リセット直前の編集DOMでoriginalHtmlを再上書きしない。
   await render("modified", { captureCurrent: false });
@@ -970,15 +1350,74 @@ ui.downloadDiff.addEventListener("click", () => {
   downloadDiffReport(state.fileName, state.changes);
   setStatus("差分・修正指示HTMLをダウンロードしました。", "success");
 });
-ui.downloadPackage.addEventListener("click", () => {
+function selectedSavedPackagePages() {
+  return actionTargetPages().filter((page) => page.saved);
+}
+
+function showPackageDialog() {
+  const selected = selectedSavedPackagePages();
+  ui.packageTargetSummary.textContent = selected.length
+    ? `チェック済みの保存済みページ ${selected.length}件を、1つのZIPへまとめます。`
+    : "現在表示しているページをZIPへ保存します。";
+  ui.packageDialog.showModal();
+}
+
+async function packagePagesForDownload() {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  downloadProjectPackage({
-    fileName: state.fileName,
-    originalHtml: state.originalHtml,
-    modifiedHtml: state.modifiedHtml,
-    changes: state.changes,
-  });
-  setStatus("修正前・修正後・差分・赤入れを案件一式ZIPでダウンロードしました。", "success");
+  const selected = selectedSavedPackagePages();
+  if (!selected.length) {
+    if (!state.originalHtml) throw new Error("保存するページがありません。");
+    return [{
+      fileName: state.fileName,
+      originalHtml: state.originalHtml,
+      modifiedHtml: state.modifiedHtml,
+      changes: state.changes,
+      sourceUrl: state.sourceUrl,
+    }];
+  }
+  return Promise.all(selected.map(async (page) => {
+    if (page.id === state.activeProjectPageId && state.originalHtml) {
+      return {
+        ...page,
+        fileName: state.fileName,
+        originalHtml: state.originalHtml,
+        modifiedHtml: state.modifiedHtml,
+        changes: state.changes,
+        sourceUrl: state.sourceUrl,
+      };
+    }
+    const saved = await projectStore.loadPage(page.id);
+    return {
+      ...saved.page,
+      originalHtml: saved.originalHtml,
+      modifiedHtml: saved.workingHtml,
+      changes: saved.changes,
+      sourceUrl: saved.page.url,
+    };
+  }));
+}
+
+ui.downloadPackage.addEventListener("click", showPackageDialog);
+ui.confirmPackageDownload.addEventListener("click", async () => {
+  const files = [...ui.packageDialog.querySelectorAll('input[name="package-file"]:checked')]
+    .map((input) => input.value);
+  if (!files.length) return setStatus("保存するファイルを1つ以上選択してください。", "error");
+  ui.confirmPackageDownload.disabled = true;
+  try {
+    await flushAutoSave();
+    const pages = await packagePagesForDownload();
+    downloadProjectPackage({
+      pages,
+      files,
+      packageName: pages.length > 1 ? projectStore.project?.projectName || "selected-pages" : undefined,
+    });
+    ui.packageDialog.close();
+    setStatus(`${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。`, "success");
+  } catch (error) {
+    setStatus(`共有用ZIPを保存できませんでした: ${error.message}`, "error");
+  } finally {
+    ui.confirmPackageDownload.disabled = false;
+  }
 });
 
 function applyUndoRedo(direction) {
@@ -994,7 +1433,7 @@ function applyUndoRedo(direction) {
   }
   destination.push(change);
   state.modifiedHtml = editor.getHtml();
-  state.dirty = true;
+  markDirtyAndScheduleAutoSave();
   renderHistory();
   refreshClassOptions();
   setStatus(direction === "undo" ? "直前の編集を元に戻しました。" : "編集をやり直しました。", "success");
@@ -1010,6 +1449,13 @@ document.addEventListener("keydown", (event) => {
 
 ui.text.addEventListener("change", () => editor.updateText(ui.text.value));
 ui.link.addEventListener("change", () => editor.updateLink(ui.link.value));
+ui.applyInlineLink.addEventListener("click", () => {
+  if (!ui.inlineLinkUrl.value.trim()) return setStatus("リンク先URLを入力してください。", "error");
+  if (editor.applyInlineLink(ui.inlineLinkUrl.value)) setStatus("選択した文字へリンクを設定しました。", "success");
+});
+ui.removeInlineLink.addEventListener("click", () => {
+  if (editor.removeInlineLink()) setStatus("選択した文字のリンクを解除しました。", "success");
+});
 ui.alt.addEventListener("change", () => editor.updateAlt(ui.alt.value));
 ui.classes.addEventListener("change", () => {
   editor.updateClasses(ui.classes.value);
@@ -1017,17 +1463,25 @@ ui.classes.addEventListener("change", () => {
 });
 ui.before.addEventListener("click", () => editor.moveBefore());
 ui.after.addEventListener("click", () => editor.moveAfter());
-ui.duplicate.addEventListener("click", () => {
-  if (editor.duplicateSelected()) refreshClassOptions();
+ui.copyElement.addEventListener("click", () => {
+  const count = editor.copySelected();
+  if (!count) return;
+  showSelection(editor.selected, [...editor.selectedElements]);
+  setStatus(`${count}個の要素をコピーしました。貼り付け先を選択してください。`, "success");
 });
+ui.pasteBefore.addEventListener("click", () => editor.pasteBefore());
+ui.pasteAfter.addEventListener("click", () => editor.pasteAfter());
+ui.selectParent.addEventListener("click", () => editor.selectParent());
+ui.returnChild.addEventListener("click", () => editor.returnToChild());
 ui.delete.addEventListener("click", () => {
-  if (window.confirm("選択した要素を削除しますか？")) editor.deleteSelected();
+  const count = editor.getSelectionCount();
+  if (window.confirm(count > 1 ? `選択した${count}個の要素を削除しますか？` : "選択した要素を削除しますか？")) editor.deleteSelected();
 });
 ui.clearHistory.addEventListener("click", async () => {
   if (!window.confirm("変更履歴だけを消去しますか？ 編集内容はそのまま残ります。")) return;
   state.changes = [];
   state.redoChanges = [];
-  state.dirty = true;
+  markDirtyAndScheduleAutoSave();
   renderHistory();
   if (state.mode === "redline") await render("modified", { captureCurrent: false });
   setStatus("変更履歴を消去しました。編集内容は維持されています。", "success");
@@ -1107,7 +1561,18 @@ ui.applyAppUpdate.addEventListener("click", async () => {
   }
 });
 
+window.webRevisionFlushAutosave = async () => {
+  try {
+    await flushAutoSave();
+    if (state.dirty && state.originalHtml) throw autoSaveError || new Error("未保存の編集内容があります。");
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: error.message || "自動保存に失敗しました。" };
+  }
+};
+
 window.addEventListener("beforeunload", (event) => {
+  if (globalThis.webRevisionDesktop) return;
   if (!state.dirty || !state.originalHtml) return;
   event.preventDefault();
   event.returnValue = "";
@@ -1148,6 +1613,8 @@ ui.loginDone.addEventListener("click", () => finishLogin(true));
 ui.loginCancel.addEventListener("click", () => finishLogin(false));
 ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
+initializeProjectSidebarResize();
+void refreshRecentProjects();
 syncLoginControls();
 updateGuidance();
 showSelection(null);

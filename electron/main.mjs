@@ -4,6 +4,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserTaskQueue } from "../src/browser-task-queue.js";
+import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
   normalizeHttpUrl,
@@ -33,6 +34,8 @@ let lastCrawl;
 let activeCaptureSessionId = "";
 let projectDirectory = "";
 let shuttingDown = false;
+let allowMainWindowClose = false;
+let mainWindowClosePending = false;
 const backgroundWindows = new Set();
 const diagnosticEvents = [];
 
@@ -460,13 +463,29 @@ async function readEditorSettings() {
 }
 
 async function writeEditorSettings(settings) {
+  const current = await readEditorSettings();
   const next = {
-    githubRepository: String(settings.githubRepository || "MZ-Gen-Labs/WebRevisionDesk").trim(),
-    checkUpdatesOnStartup: settings.checkUpdatesOnStartup !== false,
+    ...current,
+    ...settings,
+    githubRepository: String(settings.githubRepository || current.githubRepository || "MZ-Gen-Labs/WebRevisionDesk").trim(),
+    checkUpdatesOnStartup: settings.checkUpdatesOnStartup ?? current.checkUpdatesOnStartup ?? true,
+    lastProjectDirectory: String(settings.lastProjectDirectory ?? current.lastProjectDirectory ?? ""),
+    recentProjects: Array.isArray(settings.recentProjects) ? settings.recentProjects.slice(0, 12) : current.recentProjects || [],
   };
   await mkdir(app.getPath("userData"), { recursive: true });
   await writeFile(path.join(app.getPath("userData"), "settings.json"), `${JSON.stringify(next, null, 2)}\n`, "utf8");
   return next;
+}
+
+async function rememberRecentProject(directory) {
+  const settings = await readEditorSettings();
+  const normalized = path.resolve(directory);
+  const recentProjects = [
+    { path: normalized, name: path.basename(normalized), lastOpenedAt: new Date().toISOString() },
+    ...(settings.recentProjects || []).filter((item) => typeof item?.path === "string" && path.resolve(item.path) !== normalized),
+  ].slice(0, 12);
+  await writeEditorSettings({ ...settings, lastProjectDirectory: normalized, recentProjects });
+  return recentProjects;
 }
 
 async function openCapturePage(url, { show = true } = {}) {
@@ -566,10 +585,45 @@ function fileResultError(error) {
 async function handleFileSystem({ operation, parts = [], create = false, content = "", recursive = false }) {
   try {
     if (operation === "select") {
-      const selected = await dialog.showOpenDialog(mainWindow, { title: "案件フォルダを選択", properties: ["openDirectory", "createDirectory"] });
+      const settings = await readEditorSettings();
+      const selected = await dialog.showOpenDialog(mainWindow, {
+        title: "案件フォルダを選択",
+        defaultPath: settings.lastProjectDirectory || undefined,
+        properties: ["openDirectory", "createDirectory"],
+      });
       if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: null };
       projectDirectory = path.resolve(selected.filePaths[0]);
+      await rememberRecentProject(projectDirectory);
       return { ok: true, value: { name: path.basename(projectDirectory) } };
+    }
+    if (operation === "recent-list") {
+      const settings = await readEditorSettings();
+      const recentProjects = (settings.recentProjects || []).filter((item) => typeof item?.path === "string" && typeof item?.name === "string");
+      if (!recentProjects.length && settings.lastProjectDirectory) {
+        const previous = path.resolve(settings.lastProjectDirectory);
+        recentProjects.push({ path: previous, name: path.basename(previous), lastOpenedAt: null });
+      }
+      return { ok: true, value: recentProjects };
+    }
+    if (operation === "open-recent") {
+      const settings = await readEditorSettings();
+      const requested = path.resolve(String(parts[0] || ""));
+      const known = (settings.recentProjects || []).some((item) => typeof item?.path === "string" && path.resolve(item.path) === requested);
+      if (!known) throw new Error("履歴にない案件フォルダです。");
+      if (!(await stat(requested)).isDirectory()) throw Object.assign(new Error("案件フォルダが見つかりません。"), { code: "ENOENT" });
+      projectDirectory = requested;
+      await rememberRecentProject(projectDirectory);
+      return { ok: true, value: { name: path.basename(projectDirectory) } };
+    }
+    if (operation === "remove-recent") {
+      const settings = await readEditorSettings();
+      const requested = path.resolve(String(parts[0] || ""));
+      const recentProjects = (settings.recentProjects || []).filter((item) => typeof item?.path === "string" && path.resolve(item.path) !== requested);
+      const lastProjectDirectory = settings.lastProjectDirectory && path.resolve(settings.lastProjectDirectory) === requested
+        ? ""
+        : settings.lastProjectDirectory;
+      await writeEditorSettings({ ...settings, lastProjectDirectory, recentProjects });
+      return { ok: true, value: recentProjects };
     }
     const target = validatedProjectPath(parts);
     if (operation === "ensure-directory") {
@@ -584,7 +638,7 @@ async function handleFileSystem({ operation, parts = [], create = false, content
     else if (operation === "write-text") {
       await mkdir(path.dirname(target), { recursive: true });
       await writeFile(target, String(content), "utf8");
-    } else if (operation === "remove") await rm(target, { recursive, force: false });
+    } else if (operation === "remove") await removeProjectEntry(target, recursive);
     else throw new Error("対応していないファイル操作です。");
     return { ok: true, value: true };
   } catch (error) {
@@ -669,6 +723,38 @@ async function createMainWindow({ show = true } = {}) {
   });
   await mainWindow.loadURL("wrd://app/index.html");
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.on("close", (event) => {
+    if (feasibilityMode || allowMainWindowClose) return;
+    event.preventDefault();
+    if (mainWindowClosePending) return;
+    mainWindowClosePending = true;
+    void (async () => {
+      let result;
+      try {
+        result = await mainWindow.webContents.executeJavaScript("window.webRevisionFlushAutosave?.() ?? Promise.resolve({ ok: true })");
+      } catch (error) {
+        result = { ok: false, message: error.message };
+      }
+      if (!result?.ok) {
+        const confirmation = await dialog.showMessageBox(mainWindow, {
+          type: "warning",
+          title: "編集内容を保存できませんでした",
+          message: "未保存の編集内容があります。",
+          detail: `${result?.message || "自動保存に失敗しました。"}\n\n保存せずに終了すると、直前の編集内容は失われます。`,
+          buttons: ["終了をキャンセル", "保存せず終了"],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        if (confirmation.response !== 1) {
+          mainWindowClosePending = false;
+          return;
+        }
+      }
+      allowMainWindowClose = true;
+      mainWindow.close();
+    })();
+  });
   mainWindow.on("closed", () => {
     mainWindow = undefined;
     closeAuxiliaryWindows();

@@ -1,6 +1,12 @@
 import { cleanHtmlString } from "./html.js";
 import { createDiffReport, createRedlineReport } from "./diff-report.js";
-import { desktopFileSystemAvailable, selectDesktopProjectDirectory } from "./desktop-file-system.js";
+import {
+  desktopFileSystemAvailable,
+  listRecentDesktopProjectDirectories,
+  openRecentDesktopProjectDirectory,
+  removeRecentDesktopProjectDirectory,
+  selectDesktopProjectDirectory,
+} from "./desktop-file-system.js";
 
 const PROJECT_FILE = "project.json";
 const RESERVED_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -108,11 +114,17 @@ export class ProjectStore {
 
   async selectDirectory() {
     if (!ProjectStore.isSupported()) throw new Error("このブラウザはフォルダ保存に対応していません。ChromeまたはEdgeを使用してください。");
+    const pickerOptions = { mode: "readwrite", id: "web-revision-project" };
+    if (this.directory) pickerOptions.startIn = this.directory;
     const directory = desktopFileSystemAvailable()
       ? await selectDesktopProjectDirectory()
-      : await window.showDirectoryPicker({ mode: "readwrite" });
+      : await window.showDirectoryPicker(pickerOptions);
     const permission = await directory.requestPermission({ mode: "readwrite" });
     if (permission !== "granted") throw new Error("フォルダへの読み書きが許可されませんでした。");
+    return this.useDirectory(directory);
+  }
+
+  async useDirectory(directory) {
     this.directory = directory;
     try {
       const saved = JSON.parse(await readTextFile(directory, PROJECT_FILE));
@@ -135,6 +147,19 @@ export class ProjectStore {
       };
     }
     return this.project;
+  }
+
+  async listRecentDirectories() {
+    return listRecentDesktopProjectDirectories();
+  }
+
+  async openRecentDirectory(projectPath) {
+    if (!desktopFileSystemAvailable()) throw new Error("最近の案件はデスクトップ版で利用できます。");
+    return this.useDirectory(await openRecentDesktopProjectDirectory(projectPath));
+  }
+
+  async removeRecentDirectory(projectPath) {
+    return removeRecentDesktopProjectDirectory(projectPath);
   }
 
   setMetadata({ projectName, baseUrl }) {
@@ -261,6 +286,34 @@ export class ProjectStore {
     this.project.pages = this.project.pages.filter((page) => !resetIds.has(page.id));
     await this.saveProject();
     return resetPages;
+  }
+
+  async deletePages(pageUrls, { force = false } = {}) {
+    if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
+    const identity = (url) => {
+      try { return normalizePageUrl(url); } catch { return String(url); }
+    };
+    const urls = new Set(pageUrls.map(identity));
+    const matches = (page) => urls.has(identity(page.url));
+    const savedTargets = this.project.pages
+      .filter(matches)
+      .sort((left, right) => right.path.split("/").length - left.path.split("/").length);
+    const cleanupErrors = [];
+
+    for (const page of savedTargets) {
+      try {
+        await clearPageDirectory(this.directory, page.path.split("/").filter(Boolean));
+      } catch (error) {
+        if (error.name === "NotFoundError") continue;
+        if (!force) throw error;
+        cleanupErrors.push({ url: page.url, message: error.message || String(error) });
+      }
+    }
+
+    this.project.pages = this.project.pages.filter((page) => !matches(page));
+    this.project.discoveredPages = (this.project.discoveredPages || []).filter((page) => !matches(page));
+    await this.saveProject();
+    return { deletedUrls: [...urls], deletedSavedPages: savedTargets, cleanupErrors };
   }
 
   async checkSource(pageId, currentHtml, comparison) {

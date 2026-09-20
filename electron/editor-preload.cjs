@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("webRevisionDesktop", Object.freeze({
   request: (request) => ipcRenderer.invoke("editor:api-request", request),
   fileSystem: Object.freeze({
     selectProjectDirectory: () => invokeFile("select"),
+    listRecentProjectDirectories: () => invokeFile("recent-list"),
+    openRecentProjectDirectory: (projectPath) => invokeFile("open-recent", { parts: [projectPath] }),
+    removeRecentProjectDirectory: (projectPath) => invokeFile("remove-recent", { parts: [projectPath] }),
     ensureDirectory: (parts, create) => invokeFile("ensure-directory", { parts, create }),
     ensureFile: (parts, create) => invokeFile("ensure-file", { parts, create }),
     readText: (parts) => invokeFile("read-text", { parts }),
@@ -13,4 +16,3 @@ contextBridge.exposeInMainWorld("webRevisionDesktop", Object.freeze({
     remove: (parts, recursive) => invokeFile("remove", { parts, recursive }),
   }),
 }));
-

@@ -72,3 +72,15 @@ export async function selectDesktopProjectDirectory() {
   return new DesktopDirectoryHandle([], selected.name);
 }
 
+export async function listRecentDesktopProjectDirectories() {
+  return desktopFileSystemAvailable() ? unwrap(desktop().listRecentProjectDirectories()) : [];
+}
+
+export async function openRecentDesktopProjectDirectory(projectPath) {
+  const selected = await unwrap(desktop().openRecentProjectDirectory(projectPath));
+  return new DesktopDirectoryHandle([], selected.name);
+}
+
+export async function removeRecentDesktopProjectDirectory(projectPath) {
+  return unwrap(desktop().removeRecentProjectDirectory(projectPath));
+}

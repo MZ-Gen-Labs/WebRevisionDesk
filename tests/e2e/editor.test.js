@@ -2,11 +2,12 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { unzipSync } from "fflate";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const port = 21000 + Math.floor(Math.random() * 10000);
@@ -26,8 +27,12 @@ async function waitForServer() {
   throw new Error("Test server did not start.");
 }
 
-async function prepareMemoryProject(page, sourceUrl = "https://example.com/pages/sample") {
+async function prepareMemoryProject(page, sourceUrl = "https://example.com/pages/sample", initialProject = null) {
   const now = new Date().toISOString();
+  const project = initialProject || {
+    format: "web-revision-folder-project", version: 1, projectName: "Editor test",
+    baseUrl: "https://example.com/pages", createdAt: now, updatedAt: now, pages: [], discoveredPages: [],
+  };
   await page.addInitScript(({ project }) => {
     class MemoryFileHandle {
       constructor(name, content = "") { this.name = name; this.kind = "file"; this.content = content; }
@@ -63,11 +68,12 @@ async function prepareMemoryProject(page, sourceUrl = "https://example.com/pages
     const root = new MemoryDirectoryHandle("test-project");
     root.entries.set("project.json", new MemoryFileHandle("project.json", JSON.stringify(project)));
     window.__testProjectDirectory = root;
-    window.showDirectoryPicker = async () => root;
-  }, { project: {
-    format: "web-revision-folder-project", version: 1, projectName: "Editor test",
-    baseUrl: "https://example.com/pages", createdAt: now, updatedAt: now, pages: [], discoveredPages: [],
-  } });
+    window.__directoryPickerCalls = [];
+    window.showDirectoryPicker = async (options) => {
+      window.__directoryPickerCalls.push(options);
+      return root;
+    };
+  }, { project });
   await page.goto(baseUrl);
   assert.equal(await page.locator("#html-file").isDisabled(), true);
   await page.locator("#select-project-folder").click();
@@ -119,7 +125,7 @@ test("a user can add saved HTML to a project, edit, inspect changes and export",
   await page.locator("#text-value").press("Tab");
   await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
   assert.equal(await heading.textContent(), "自動テストで変更した見出し");
-  assert.match(await page.locator("#save-state").textContent(), /未保存/);
+  assert.match(await page.locator("#save-state").textContent(), /自動保存/);
 
   await page.locator("#undo").click();
   assert.notEqual(await heading.textContent(), "自動テストで変更した見出し");
@@ -135,8 +141,316 @@ test("a user can add saved HTML to a project, edit, inspect changes and export",
 
   const downloadPromise = page.waitForEvent("download");
   await page.locator("#download-package").click();
+  await page.locator("#package-dialog").waitFor({ state: "visible" });
+  await page.locator("#confirm-package-download").click();
   const download = await downloadPromise;
   assert.match(download.suggestedFilename(), /-revision-package\.zip$/);
+  await page.close();
+});
+
+test("a deleted image shows a visible deletion label in the redline page", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  const image = page.frameLocator("#page-frame").locator("img").first();
+  await image.click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-element").click();
+  await page.locator("#show-redline").click();
+  const label = page.frameLocator("#page-frame").locator(".wr-deleted-image > .wr-redline-label");
+  await label.waitFor();
+  assert.equal(await label.textContent(), "削除");
+  await page.close();
+});
+
+test("project page list supports shift ranges and ctrl additive selection", async () => {
+  const now = new Date().toISOString();
+  const pages = [1, 2, 3, 4].map((number) => ({
+    url: `https://example.com/pages/${number}`,
+    title: `Page ${number}`,
+    discoveredAt: now,
+    checkedAt: now,
+  }));
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, pages[0].url, {
+    format: "web-revision-folder-project", version: 1, projectName: "Range selection test",
+    baseUrl: "https://example.com/pages", createdAt: now, updatedAt: now,
+    pages: pages.map((item, index) => ({
+      ...item,
+      id: `page-${index + 1}`,
+      fileName: `${index + 1}.html`,
+      path: `pages/pages/${index + 1}`,
+      changeCount: 0,
+    })),
+    discoveredPages: pages,
+  });
+  const rows = page.locator(".project-page-row");
+  await rows.nth(0).locator(".project-page").click();
+  await page.locator("#status").filter({ hasText: "案件ページを開けませんでした" }).waitFor();
+  assert.match(await rows.nth(0).locator(".project-page").getAttribute("class"), /active/);
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [false, false, false, false]);
+  await rows.nth(1).locator(".project-page").dispatchEvent("click", { metaKey: true });
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [true, true, false, false]);
+  await page.locator("#clear-project-selection").click();
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [false, false, false, false]);
+
+  await rows.nth(0).locator('input[type="checkbox"]').check();
+  await rows.nth(2).locator(".project-page").click({ modifiers: ["Shift"] });
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [true, true, true, false]);
+  await rows.nth(3).locator(".project-page").dispatchEvent("click", { ctrlKey: true });
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [true, true, true, true]);
+  await rows.nth(1).locator(".project-page").dispatchEvent("click", { ctrlKey: true });
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [true, false, true, true]);
+  await page.locator("#clear-project-selection").click();
+  await page.locator("#select-all-project-pages").click();
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [true, true, true, true]);
+  await page.locator("#clear-project-selection").click();
+  assert.deepEqual(await rows.locator('input[type="checkbox"]').evaluateAll((items) => items.map((item) => item.checked)), [false, false, false, false]);
+  await page.close();
+});
+
+test("editor supports ctrl additive selection and shift sibling ranges", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  const frame = page.frameLocator("#page-frame");
+  const cards = frame.locator(".card");
+  await cards.nth(0).dispatchEvent("click");
+  await cards.nth(2).dispatchEvent("click", { shiftKey: true });
+  assert.equal(await frame.locator(".card.web-revision-selected").count(), 3);
+  await page.locator("#element-label").filter({ hasText: "3個の要素を選択" }).waitFor();
+
+  const heading = frame.locator("h1").first();
+  await heading.dispatchEvent("click", { ctrlKey: true });
+  assert.equal(await frame.locator(".web-revision-selected").count(), 4);
+  await heading.dispatchEvent("click", { ctrlKey: true });
+  assert.equal(await frame.locator(".web-revision-selected").count(), 3);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-element").click();
+  assert.equal(await frame.locator(".card").count(), 0);
+  await page.locator("#history-count").filter({ hasText: "3" }).waitFor();
+  await page.close();
+});
+
+test("sidebar can be resized, parent elements can be selected, and reversed moves cancel their history", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.locator("#select-project-folder").click();
+  assert.equal(await page.evaluate(() => window.__directoryPickerCalls[1].id), "web-revision-project");
+  assert.equal(await page.evaluate(() => window.__directoryPickerCalls[1].startIn === window.__testProjectDirectory), true);
+  const sidebar = page.locator(".project-sidebar");
+  const resizer = page.locator("#project-sidebar-resizer");
+  const beforeWidth = (await sidebar.boundingBox()).width;
+  const handle = await resizer.boundingBox();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 80, handle.y + 80);
+  await page.mouse.up();
+  assert.ok((await sidebar.boundingBox()).width >= beforeWidth + 70);
+
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  const frame = page.frameLocator("#page-frame");
+  await frame.locator(".card").nth(1).locator("p").dispatchEvent("click");
+  await page.locator("#select-parent-element").click();
+  assert.equal(await frame.locator(".card.web-revision-selected").count(), 1);
+  await page.locator("#select-parent-element").click();
+  assert.equal(await frame.locator("section.cards.web-revision-selected").count(), 1);
+  await page.locator("#return-child-element").click();
+  assert.equal(await frame.locator(".card.web-revision-selected").count(), 1);
+  await page.locator("#return-child-element").click();
+  assert.equal(await frame.locator(".card p.web-revision-selected").count(), 1);
+  assert.equal(await page.locator("#return-child-element").isDisabled(), true);
+
+  await frame.locator(".card").nth(1).dispatchEvent("click");
+  await page.locator("#move-before").click();
+  await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
+  await page.locator("#move-after").click();
+  await page.locator("#history-count").filter({ hasText: "0" }).waitFor();
+  assert.equal(await page.locator("#show-redline").isDisabled(), true);
+
+  await frame.locator(".card").nth(0).dispatchEvent("click");
+  await page.locator("#move-after").click();
+  await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
+  await frame.locator(".card").nth(0).dispatchEvent("click");
+  await page.locator("#move-after").click();
+  await page.locator("#history-count").filter({ hasText: "0" }).waitFor();
+  assert.deepEqual(await frame.locator(".card h2").allTextContents(), ["企画", "開発", "支援"]);
+  assert.equal(await page.locator("#show-redline").isDisabled(), true);
+  await page.close();
+});
+
+test("selected elements can be copied and pasted before or after targets across pages", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  let frame = page.frameLocator("#page-frame");
+  await frame.locator(".card").first().dispatchEvent("click");
+  await page.locator("#copy-element").click();
+  await frame.locator("h1").dispatchEvent("click");
+  await page.locator("#paste-after-element").click();
+  assert.equal(await frame.locator("h1 + article.card").count(), 1);
+  await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
+  await frame.locator("h1 + article.card h2").dispatchEvent("click");
+  await page.locator("#text-value").fill("貼り付け後の変更");
+  await page.locator("#text-value").dispatchEvent("change");
+  await page.locator("#history-count").filter({ hasText: "2" }).waitFor();
+  await page.locator("#select-parent-element").click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-element").click();
+  assert.equal(await frame.locator("h1 + article.card").count(), 0);
+  await page.locator("#history-count").filter({ hasText: "0" }).waitFor();
+  assert.equal(await page.locator("#show-redline").isDisabled(), true);
+
+  await frame.locator("h1").dispatchEvent("click");
+  await page.locator("#paste-after-element").click();
+  await page.locator("#undo").click();
+  assert.equal(await frame.locator("h1 + article.card").count(), 0);
+
+  const otherPage = `<!doctype html><html><head><meta name="web-revision-source-url" content="https://example.com/pages/other"></head><body><main><h1 id="target">別ページ</h1><p>貼り付け先</p></main></body></html>`;
+  await page.setInputFiles("#html-file", {
+    name: "other.html",
+    mimeType: "text/html",
+    buffer: Buffer.from(otherPage),
+  });
+  await page.locator("#file-name").filter({ hasText: "other.html" }).waitFor();
+  frame = page.frameLocator("#page-frame");
+  await frame.locator("#target").dispatchEvent("click");
+  assert.equal(await page.locator("#paste-before-element").isEnabled(), true);
+  await page.locator("#paste-before-element").click();
+  assert.equal(await frame.locator("article.card + #target").count(), 1);
+  assert.equal(await frame.locator("article.card h2").textContent(), "企画");
+  await page.close();
+});
+
+test("edits autosave and an explicit exit flush writes the latest working page", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  const frame = page.frameLocator("#page-frame");
+  await frame.locator("h1").dispatchEvent("click");
+  await page.locator("#text-value").fill("自動保存された見出し");
+  await page.locator("#text-value").dispatchEvent("change");
+  await page.locator("#save-state").filter({ hasText: "自動保存待ち" }).waitFor();
+  assert.equal(await page.locator("#save-project-page").textContent(), "今すぐ保存");
+  assert.deepEqual(await page.evaluate(() => window.webRevisionFlushAutosave()), { ok: true });
+  await page.locator("#save-state").filter({ hasText: "自動保存済み" }).waitFor();
+  const workingHtml = await page.evaluate(() => {
+    const rootDirectory = window.__testProjectDirectory;
+    const project = JSON.parse(rootDirectory.entries.get("project.json").content);
+    let directory = rootDirectory;
+    for (const segment of project.pages[0].path.split("/")) directory = directory.entries.get(segment);
+    return directory.entries.get("working.html").content;
+  });
+  assert.match(workingHtml, /自動保存された見出し/);
+  await page.close();
+});
+
+test("selected text inside a paragraph can receive, change, and undo an inline link", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", path.join(root, "test-data", "sample.html"));
+  const frame = page.frameLocator("#page-frame");
+  const paragraph = frame.locator("p.lead");
+  await paragraph.dblclick();
+  await paragraph.evaluate((element) => {
+    const text = element.firstChild;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 4);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator("#inline-link-tools").waitFor({ state: "visible" });
+  await page.locator("#inline-link-url").fill("https://example.com/inline");
+  await page.locator("#apply-inline-link").click();
+  assert.equal(await paragraph.locator('a[href="https://example.com/inline"]').textContent(), "私たちは");
+  await page.locator("#history-count").filter({ hasText: "1" }).waitFor();
+  await page.locator("#undo").click();
+  assert.equal(await paragraph.locator("a").count(), 0);
+  await page.locator("#redo").click();
+  assert.equal(await paragraph.locator('a[href="https://example.com/inline"]').count(), 1);
+
+  let existingLink = frame.locator('a[href="https://example.com/contact"]');
+  await existingLink.dblclick();
+  await existingLink.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator("#inline-link-url").fill("https://example.com/changed");
+  await page.locator("#apply-inline-link").click();
+  existingLink = frame.locator('a[href="https://example.com/changed"]');
+  assert.equal(await existingLink.textContent(), "お問い合わせはこちら");
+  await existingLink.dblclick();
+  await existingLink.evaluate((element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  });
+  await page.locator("#remove-inline-link").click();
+  assert.equal(await frame.locator('a[href="https://example.com/changed"]').count(), 0);
+  assert.match(await frame.locator("p").filter({ hasText: "お問い合わせはこちら" }).textContent(), /お問い合わせはこちら/);
+  await page.close();
+});
+
+test("a focused broken page is automatically removed through the single delete action", async () => {
+  const now = new Date().toISOString();
+  const url = "https://example.com/pages/missing";
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, url, {
+    format: "web-revision-folder-project", version: 1, projectName: "Broken page test",
+    baseUrl: "https://example.com/pages", createdAt: now, updatedAt: now,
+    pages: [{ id: "missing", url, title: "実体なしページ", fileName: "missing.html", path: "pages/pages/missing", changeCount: 0 }],
+    discoveredPages: [{ url, title: "実体なしページ", discoveredAt: now, checkedAt: now }],
+  });
+  const row = page.locator(".project-page-row").filter({ hasText: "実体なしページ" });
+  assert.equal(await row.locator('input[type="checkbox"]').isChecked(), false);
+  await row.locator(".project-page").click();
+  await page.locator("#status").filter({ hasText: "案件ページを開けませんでした" }).waitFor();
+  assert.equal(await row.locator(".project-page").getAttribute("class").then((value) => value.includes("active")), true);
+  assert.match(await row.locator(".page-status").textContent(), /保存データを開けません/);
+  assert.equal(await page.locator("#delete-project-pages").isEnabled(), true);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-project-pages").click();
+  await page.locator(".project-empty").waitFor();
+  assert.match(await page.locator("#status").textContent(), /一覧から削除しました/);
+  await page.close();
+});
+
+test("checked saved pages can be packaged together with selected output files", async () => {
+  const page = await browser.newPage({ acceptDownloads: true });
+  await prepareMemoryProject(page);
+  const fixture = path.join(root, "test-data", "sample.html");
+  await page.setInputFiles("#html-file", fixture);
+  await page.locator("#save-state").filter({ hasText: "保存済み" }).waitFor();
+  await page.locator("#setup-panel > summary").click();
+  await page.locator("#manual-page-url").fill("https://example.com/pages/second");
+  await page.setInputFiles("#html-file", fixture);
+  await page.waitForFunction(() => document.querySelectorAll(".project-page.saved").length === 2);
+  assert.equal(await page.locator(".project-page.saved").count(), 2);
+  await page.locator("#select-all-project-pages").click();
+
+  await page.locator("#download-package").click();
+  await page.locator("#package-target-summary").filter({ hasText: "2件" }).waitFor();
+  const fileOptions = page.locator('input[name="package-file"]');
+  for (let index = 0; index < await fileOptions.count(); index++) await fileOptions.nth(index).uncheck();
+  await page.locator('input[name="package-file"][value="modified"]').check();
+  const downloadPromise = page.waitForEvent("download");
+  await page.locator("#confirm-package-download").click();
+  const download = await downloadPromise;
+  const archive = unzipSync(await readFile(await download.path()));
+  const names = Object.keys(archive);
+  assert.equal(names.length, 2);
+  assert.equal(names.every((name) => name.endsWith("/modified.html")), true);
   await page.close();
 });
 
@@ -387,5 +701,11 @@ test("clicking an uncaptured project page previews it, captures it, saves it, an
   await page.locator(".project-page:not(.saved)").filter({ hasText: "未取得テストページ" }).waitFor();
   assert.equal(await page.locator("#empty-state").isVisible(), true);
   assert.match(await page.locator("#status").textContent(), /未取得状態へ戻しました/);
+  await page.locator('.project-page-row input[type="checkbox"]').check();
+  assert.equal(await page.locator("#delete-project-pages").isEnabled(), true);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#delete-project-pages").click();
+  await page.locator(".project-empty").waitFor();
+  assert.match(await page.locator("#status").textContent(), /一覧から削除しました/);
   await page.close();
 });

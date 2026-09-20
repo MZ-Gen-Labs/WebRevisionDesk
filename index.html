@@ -19,7 +19,7 @@
         <button id="undo" type="button" disabled title="直前の編集を元に戻す（Ctrl/Cmd+Z）">1つ戻す</button>
         <button id="redo" type="button" disabled title="戻した編集をやり直す（Ctrl/Cmd+Shift+Z）">やり直す</button>
         <button id="reset" type="button" disabled>すべてリセット</button>
-        <button id="save-project-page" class="button-primary" type="button" disabled>案件フォルダに保存</button>
+        <button id="save-project-page" class="button-subtle" type="button" disabled>今すぐ保存</button>
         <button id="download-package" class="button-package" type="button" disabled>共有用ファイル一式を保存</button>
         <details class="export-menu">
           <summary>その他の保存</summary>
@@ -73,6 +73,10 @@
       <button id="crawl-project-pages" type="button" disabled>関連ページを探す</button>
       <span id="project-state">案件フォルダ未選択</span>
     </section>
+    <section id="recent-projects" class="recent-projects" aria-label="最近開いた案件" hidden>
+      <strong>最近の案件</strong>
+      <div id="recent-project-list" class="recent-project-list"></div>
+    </section>
 
     <section class="login-bar" aria-label="ログイン準備">
       <label><input id="login-required" type="checkbox" /> このサイトはログインが必要</label>
@@ -97,23 +101,36 @@
     </section>
       </div>
     </details>
-    <main class="workspace">
+    <main id="workspace" class="workspace">
       <aside class="project-sidebar" aria-label="案件ページ一覧">
         <div class="project-heading">
           <p class="eyebrow">Project Pages</p>
           <h2>ページ一覧 <span id="project-page-count">0</span></h2>
         </div>
         <div class="project-batch-actions">
-          <button id="select-all-project-pages" class="small-button" type="button" disabled>すべて選択</button>
-          <button id="batch-capture-pages" class="small-button" type="button" disabled>選択を一括取得</button>
-          <button id="check-project-pages" class="small-button" type="button" disabled>選択を更新確認</button>
-          <button id="reset-project-pages" class="small-button danger-button" type="button" disabled>選択を未取得へ戻す</button>
+          <button id="select-all-project-pages" class="small-button" type="button" disabled>全選択</button>
+          <button id="clear-project-selection" class="small-button" type="button" disabled>解除</button>
+          <button id="batch-capture-pages" class="small-button" type="button" disabled>一括取得</button>
+          <button id="check-project-pages" class="small-button" type="button" disabled>更新確認</button>
+          <button id="reset-project-pages" class="small-button danger-button" type="button" disabled>解放</button>
+          <button id="delete-project-pages" class="small-button danger-button" type="button" disabled>削除</button>
           <span id="batch-progress"></span>
         </div>
         <nav id="project-pages" class="project-pages" aria-label="保存済みページ">
           <p class="project-empty">案件フォルダを選択し、基準URL配下のページを検索できます。</p>
         </nav>
       </aside>
+      <div
+        id="project-sidebar-resizer"
+        class="project-sidebar-resizer"
+        role="separator"
+        aria-label="ページ一覧の幅を調整"
+        aria-orientation="vertical"
+        aria-valuemin="160"
+        aria-valuemax="480"
+        tabindex="0"
+        title="左右へドラッグしてページ一覧の幅を調整"
+      ></div>
       <section class="canvas-panel" aria-label="ページプレビュー">
         <div class="canvas-meta">
           <span id="mode-badge" class="badge">未読込</span>
@@ -161,6 +178,15 @@
             リンク先URL
             <input id="link-value" type="text" placeholder="https://example.com/" />
           </label>
+          <div id="inline-link-tools" class="inline-link-tools" data-editor-field="inline-link" hidden>
+            <strong>文章中の選択文字へリンクを設定</strong>
+            <span id="inline-link-selection">文章をダブルクリックして編集状態にし、リンクにする文字を選択してください。</span>
+            <input id="inline-link-url" type="text" placeholder="https://example.com/" aria-label="選択文字のリンク先URL" />
+            <div>
+              <button id="apply-inline-link" type="button">リンク設定・変更</button>
+              <button id="remove-inline-link" type="button">リンク解除</button>
+            </div>
+          </div>
           <label class="advanced-field" data-editor-field="alt">
             画像のalt
             <input id="alt-value" type="text" placeholder="画像の説明" />
@@ -175,10 +201,14 @@
             <datalist id="class-options"></datalist>
           </label>
           <div class="element-actions">
-            <button id="duplicate-element" class="duplicate" type="button">複製</button>
+            <button id="select-parent-element" class="select-parent" type="button">親要素選択</button>
+            <button id="return-child-element" class="return-child" type="button">子要素戻る</button>
+            <button id="copy-element" class="copy-element" type="button">要素コピー</button>
+            <button id="delete-element" class="danger" type="button">要素削除</button>
+            <button id="paste-before-element" type="button">前に貼付け</button>
+            <button id="paste-after-element" type="button">後に貼付け</button>
             <button id="move-before" type="button">上／前へ移動</button>
             <button id="move-after" type="button">下／後へ移動</button>
-            <button id="delete-element" class="danger" type="button">削除</button>
           </div>
         </fieldset>
 
@@ -201,6 +231,32 @@
         </div>
       </aside>
     </main>
+
+    <dialog id="package-dialog" class="package-dialog">
+      <form method="dialog">
+        <div class="package-dialog-heading">
+          <div>
+            <p class="eyebrow">Share Package</p>
+            <h2>共有用ファイルを選択</h2>
+          </div>
+          <button value="cancel" type="submit" aria-label="閉じる">閉じる</button>
+        </div>
+        <p id="package-target-summary" class="package-target-summary"></p>
+        <fieldset class="package-file-options">
+          <legend>ZIPに含めるファイル</legend>
+          <label><input name="package-file" type="checkbox" value="original" checked /> original.html（修正前）</label>
+          <label><input name="package-file" type="checkbox" value="modified" checked /> modified.html（修正後）</label>
+          <label><input name="package-file" type="checkbox" value="diff" checked /> diff.html（修正内容一覧）</label>
+          <label><input name="package-file" type="checkbox" value="redline" checked /> redline.html（変更箇所ページ）</label>
+          <label><input name="package-file" type="checkbox" value="project" checked /> project.json（変更履歴データ）</label>
+          <label><input name="package-file" type="checkbox" value="readme" checked /> README.txt（内容説明）</label>
+        </fieldset>
+        <div class="package-dialog-actions">
+          <button value="cancel" type="submit">キャンセル</button>
+          <button id="confirm-package-download" class="button-primary" type="button">ZIPを保存</button>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="/src/main.js"></script>
   </body>
