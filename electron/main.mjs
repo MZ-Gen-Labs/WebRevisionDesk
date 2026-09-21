@@ -242,8 +242,24 @@ async function fetchResource(url, failures) {
       addFailure(`ファイルが${Math.ceil(MAX_RESOURCE_BYTES / 1024 / 1024)}MBを超過`);
       return null;
     }
-    const contentType = response.headers.get("content-type")?.split(";")[0] || "application/octet-stream";
-    if (!(contentType === "text/css" || /^(image|font|audio|video)\//i.test(contentType) || /font/i.test(contentType))) return null;
+    let contentType = response.headers.get("content-type")?.split(";")[0]?.trim() || "";
+    if (!contentType || contentType === "application/octet-stream") {
+      const pathname = new URL(url, "https://example.com").pathname.toLowerCase();
+      const extMatch = pathname.match(/\.(png|jpe?g|gif|webp|svg|ico|avif|bmp|woff2?|ttf|otf|css)$/);
+      if (extMatch) {
+        const ext = extMatch[1];
+        if (ext === "css") contentType = "text/css";
+        else if (ext === "svg") contentType = "image/svg+xml";
+        else if (ext === "ico") contentType = "image/x-icon";
+        else if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
+        else if (ext === "woff" || ext === "woff2" || ext === "ttf" || ext === "otf") contentType = `font/${ext}`;
+        else contentType = `image/${ext}`;
+      }
+    }
+    if (!(contentType === "text/css" || /^(image|font|audio|video)\//i.test(contentType) || /font/i.test(contentType))) {
+      addFailure(`非対応のContent-Type (${contentType || "不明"})`);
+      return null;
+    }
     return { body, contentType };
   } catch (error) {
     addFailure(error.message);

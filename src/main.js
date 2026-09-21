@@ -1,7 +1,7 @@
 import { PageEditor } from "./editor.js";
-import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
+import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR, sanitizeImportedHtml } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
-import { createProjectPackages, downloadProjectPackage } from "./project-package.js";
+import { createProjectPackages, createProjectPackagesAsync, downloadProjectPackage } from "./project-package.js";
 import { desktopFileSystemAvailable, saveDesktopOutput } from "./desktop-file-system.js";
 import {
   DEFAULT_SEARCH_REPLACE_RULE,
@@ -1543,11 +1543,12 @@ ui.file.addEventListener("change", async () => {
     if (!projectStore.project) throw new Error("先に案件フォルダを選択してください。");
     if (!(await preserveCurrentPage())) return;
     const html = await file.text();
-    const sourceUrl = sourceUrlFromHtml(html) || ui.manualPageUrl.value.trim();
+    const sanitized = sanitizeImportedHtml(html);
+    const sourceUrl = sourceUrlFromHtml(sanitized) || ui.manualPageUrl.value.trim();
     if (!sourceUrl) throw new Error("「その他の取り込み」のページURLに、このHTMLの元URLを入力してください。");
     projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
     pagePathForUrl(sourceUrl, projectStore.project.baseUrl);
-    await loadHtml(html, file.name, { sourceUrl, dirty: true });
+    await loadHtml(sanitized, file.name, { sourceUrl, dirty: true });
     await saveCurrentToProject({ quiet: true });
     setStatus("保存済みHTMLを案件へ追加しました。ページ内の要素を編集できます。", "success");
   } catch (error) {
@@ -1772,7 +1773,7 @@ ui.reset.addEventListener("click", async () => {
           activeProjectPageId: activePage.id,
           workingHtml: saved.originalHtml,
           changes: [],
-          resourceFailures: captured.resourceFailures,
+          resourceFailures: saved.page?.resourceFailures || [],
           dirty: false,
         });
       }
@@ -2394,7 +2395,8 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
     const packageName = packageInput.packageName
       ? `${packageInput.packageName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
       : pages.length > 1 ? "selected-pages-revision-package.zip" : "page-revision-package.zip";
-    const saved = await saveOutput(createProjectPackages(packageInput), packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    const packageBlob = await createProjectPackagesAsync(packageInput);
+    const saved = await saveOutput(packageBlob, packageName, [{ name: "ZIP", extensions: ["zip"] }]);
     ui.packageDialog.close();
     setStatus(saved ? `${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。` : "共有用ZIPの保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
@@ -2602,7 +2604,22 @@ ui.saveSelectedImage.addEventListener("click", async () => {
   }
   try {
     const blob = await (await fetch(image.src)).blob();
-    const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+    const mimeExtensions = {
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/png": "png",
+      "image/gif": "gif",
+      "image/webp": "webp",
+      "image/svg+xml": "svg",
+      "image/svg": "svg",
+      "image/avif": "avif",
+      "image/x-icon": "ico",
+      "image/vnd.microsoft.icon": "ico",
+      "image/bmp": "bmp",
+    };
+    const extension = mimeExtensions[blob.type.toLowerCase()]
+      || blob.type.split("/")[1]?.split("+")[0]?.replace("jpeg", "jpg")
+      || "png";
     const baseName = image.fileName.replace(/\.[a-z0-9]+$/i, "") || "image";
     const saved = await saveOutput(blob, `${baseName}.${extension}`, [{ name: "画像", extensions: [extension] }]);
     setStatus(saved ? "画像を保存しました。" : "画像の保存をキャンセルしました。", saved ? "success" : "info");

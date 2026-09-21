@@ -631,7 +631,7 @@ export class PageEditor {
   }
 
   addTableRow({ position = "after" } = {}) {
-    return this.#changeTable((context) => {
+    return this.#changeTable(position === "before" ? "行追加（上）" : "行追加（下）", (context) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
       const doc = this.getDocument();
       const insertAtRow = position === "before"
@@ -689,7 +689,7 @@ export class PageEditor {
   deleteTableRow() {
     const context = this.getTableContext();
     if (!context?.row || context.rowCount <= 1) return false;
-    return this.#changeTable((current) => {
+    return this.#changeTable("行削除", (current) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(current.table);
       const targetRowIndex = current.rowIndex;
       const targetRow = current.row;
@@ -753,7 +753,7 @@ export class PageEditor {
       if (grid[r]?.[c]?.cell === grid[otherR]?.[c]?.cell) return false;
     }
 
-    return this.#changeTable((current) => {
+    return this.#changeTable(direction === "up" ? "行を上へ移動" : "行を下へ移動", (current) => {
       const row = current.row;
       const targetRow = rows[otherR];
       if (direction === "up") targetRow.before(row);
@@ -763,7 +763,7 @@ export class PageEditor {
   }
 
   addTableColumn({ position = "after" } = {}) {
-    return this.#changeTable((context) => {
+    return this.#changeTable(position === "before" ? "列追加（左）" : "列追加（右）", (context) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
       const doc = this.getDocument();
       const insertAtCol = position === "before"
@@ -815,7 +815,7 @@ export class PageEditor {
   deleteTableColumn() {
     const context = this.getTableContext();
     if (!context || context.columnCount <= 1) return false;
-    return this.#changeTable((current) => {
+    return this.#changeTable("列削除", (current) => {
       const { grid, rowCount } = buildTableGrid(current.table);
       const targetCol = current.columnIndex;
       let selected = null;
@@ -848,7 +848,7 @@ export class PageEditor {
   toggleCellType() {
     const context = this.getTableContext();
     if (!context?.cell) return false;
-    return this.#changeTable((current) => {
+    return this.#changeTable("見出し切替", (current) => {
       const oldCell = current.cell;
       const newTag = oldCell.tagName === "TH" ? "td" : "th";
       const newCell = oldCell.ownerDocument.createElement(newTag);
@@ -864,7 +864,7 @@ export class PageEditor {
   setCellAlign(align) {
     const context = this.getTableContext();
     if (!context?.cell) return false;
-    return this.#changeTable((current) => {
+    return this.#changeTable(`文字配置（${align}）`, (current) => {
       current.cell.style.textAlign = align;
       return current.cell;
     });
@@ -873,7 +873,7 @@ export class PageEditor {
   toggleFirstColumnHeader() {
     const context = this.getTableContext();
     if (!context?.table) return false;
-    return this.#changeTable((current) => {
+    return this.#changeTable("1列目見出し切替", (current) => {
       const { grid, rowCount } = buildTableGrid(current.table);
       const firstColCells = [];
       for (let r = 0; r < rowCount; r++) {
@@ -909,7 +909,7 @@ export class PageEditor {
     if (!rightEntry || !rightEntry.isOrigin) return false;
     if (rightEntry.rowSpan !== currentEntry.rowSpan) return false;
 
-    return this.#changeTable(() => {
+    return this.#changeTable("セル結合（右）", () => {
       const leftCell = currentEntry.cell;
       const rightCell = rightEntry.cell;
       leftCell.colSpan = currentEntry.colSpan + rightEntry.colSpan;
@@ -935,7 +935,7 @@ export class PageEditor {
     if (!downEntry || !downEntry.isOrigin) return false;
     if (downEntry.colSpan !== currentEntry.colSpan) return false;
 
-    return this.#changeTable(() => {
+    return this.#changeTable("セル結合（下）", () => {
       const topCell = currentEntry.cell;
       const bottomCell = downEntry.cell;
       topCell.rowSpan = currentEntry.rowSpan + downEntry.rowSpan;
@@ -955,7 +955,7 @@ export class PageEditor {
     const rowSpan = cell.rowSpan || 1;
     if (colSpan <= 1 && rowSpan <= 1) return false;
 
-    return this.#changeTable((current) => {
+    return this.#changeTable("セル分割", (current) => {
       const { grid } = buildTableGrid(current.table);
       const startR = current.rowIndex;
       const startC = current.columnIndex;
@@ -1088,6 +1088,7 @@ export class PageEditor {
     if (!pasted.length) return 0;
     pasted.forEach((element) => {
       this.#assignNewIds(element);
+      this.#dedupeHtmlIds(element);
       parent.insertBefore(element, reference);
     });
     const batchId = pasted.length > 1 ? crypto.randomUUID() : "";
@@ -1169,21 +1170,51 @@ export class PageEditor {
     return clone.outerHTML;
   }
 
-  #changeTable(mutator) {
+  #changeTable(actionOrMutator, maybeMutator) {
+    const action = typeof actionOrMutator === "string" ? actionOrMutator : "";
+    const mutator = typeof actionOrMutator === "function" ? actionOrMutator : maybeMutator;
     const context = this.getTableContext();
-    if (!context || !this.editable) return false;
+    if (!context || !this.editable || !mutator) return false;
     const before = this.#cleanOuterHtml(context.table);
     const selection = mutator(context);
     this.#assignNewIdsToMissing(context.table);
     const after = this.#cleanOuterHtml(context.table);
     if (before === after) return false;
-    this.#emitChange("table-change", context.table, before, after, { beforeHtml: before, afterHtml: after });
+    this.#emitChange("table-change", context.table, before, after, {
+      action,
+      beforeHtml: before,
+      afterHtml: after,
+    });
     this.select(selection?.isConnected ? selection : context.table);
     return true;
   }
 
   #assignNewIdsToMissing(root) {
     [root, ...root.querySelectorAll("*")].forEach((element) => this.#ensureElementId(element));
+  }
+
+  #dedupeHtmlIds(root) {
+    const doc = this.getDocument();
+    if (!doc) return;
+    const elementsWithId = [];
+    if (root.id) elementsWithId.push(root);
+    if (root.querySelectorAll) elementsWithId.push(...root.querySelectorAll("[id]"));
+
+    elementsWithId.forEach((element) => {
+      const origId = element.id;
+      if (!origId) return;
+      const existing = doc.querySelectorAll(`[id="${CSS.escape(origId)}"]`);
+      const isDuplicate = [...existing].some((el) => el !== element && !root.contains(el));
+      if (isDuplicate) {
+        let counter = 1;
+        let candidate = `${origId}-copy`;
+        while (doc.getElementById(candidate) || root.querySelector?.(`[id="${CSS.escape(candidate)}"]`)) {
+          counter += 1;
+          candidate = `${origId}-copy-${counter}`;
+        }
+        element.id = candidate;
+      }
+    });
   }
 
   #describe(element) {
@@ -1239,6 +1270,9 @@ export class PageEditor {
     const image = this.selected;
     let link = image.closest("a");
     const before = link?.getAttribute("href") ?? "";
+    const beforeAttributes = link
+      ? Object.fromEntries([...link.attributes].map((attr) => [attr.name, attr.value]))
+      : null;
     const after = value.trim();
     if (before === after && Boolean(link) === Boolean(after)) return false;
 
@@ -1253,7 +1287,13 @@ export class PageEditor {
     } else if (link) {
       link.replaceWith(image);
     }
-    this.#emitChange("image-link-change", image, before, after);
+    const afterAttributes = after && link
+      ? Object.fromEntries([...link.attributes].map((attr) => [attr.name, attr.value]))
+      : null;
+    this.#emitChange("image-link-change", image, before, after, {
+      beforeAttributes,
+      afterAttributes,
+    });
     this.select(image);
     return true;
   }
@@ -1396,6 +1436,7 @@ export class PageEditor {
     const source = this.selected;
     const clone = source.cloneNode(true);
     this.#assignNewIds(clone);
+    this.#dedupeHtmlIds(clone);
     clone.classList.remove(EDITOR_CLASS);
     clone.removeAttribute("contenteditable");
     clone.querySelectorAll?.(`.${EDITOR_CLASS}, [contenteditable]`).forEach((element) => {
@@ -1529,14 +1570,23 @@ export class PageEditor {
       value ? element.setAttribute("href", value) : element.removeAttribute("href");
     } else if (change.type === "image-link-change") {
       let link = element.closest("a");
-      if (value && link) {
+      const targetAttrs = undo ? change.beforeAttributes : change.afterAttributes;
+      if (value) {
+        if (!link) {
+          link = element.ownerDocument.createElement("a");
+          element.replaceWith(link);
+          link.append(element);
+          this.#ensureElementId(link);
+        }
+        if (targetAttrs) {
+          [...link.attributes].forEach((attr) => {
+            if (attr.name !== EDITOR_ID_ATTR) link.removeAttribute(attr.name);
+          });
+          Object.entries(targetAttrs).forEach(([name, val]) => {
+            if (name !== EDITOR_ID_ATTR) link.setAttribute(name, val);
+          });
+        }
         link.setAttribute("href", value);
-      } else if (value) {
-        link = element.ownerDocument.createElement("a");
-        link.setAttribute("href", value);
-        element.replaceWith(link);
-        link.append(element);
-        this.#ensureElementId(link);
       } else if (link) {
         link.replaceWith(element);
       }

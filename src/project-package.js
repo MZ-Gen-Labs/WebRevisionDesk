@@ -1,4 +1,4 @@
-import { strToU8, zipSync } from "fflate";
+import { strToU8, zip, zipSync } from "fflate";
 import { createDiffReport, createRedlineReport } from "./diff-report.js";
 import { cleanHtmlString } from "./html.js";
 
@@ -58,7 +58,7 @@ function createPageEntries({ fileName, originalHtml, modifiedHtml, changes = [],
   return entries;
 }
 
-export function createProjectPackages({ pages, files = DEFAULT_FILES }) {
+function collectEntries({ pages, files = DEFAULT_FILES }) {
   if (!pages?.length) throw new Error("保存するページがありません。");
   const selectedFiles = new Set(files);
   if (!selectedFiles.size) throw new Error("保存するファイルを1つ以上選択してください。");
@@ -70,17 +70,35 @@ export function createProjectPackages({ pages, files = DEFAULT_FILES }) {
       : "";
     Object.assign(entries, createPageEntries({ ...page, path }, selectedFiles));
   });
+  return entries;
+}
 
+export function createProjectPackages({ pages, files = DEFAULT_FILES }) {
+  const entries = collectEntries({ pages, files });
   return new Blob([zipSync(entries, { level: 6 })], { type: "application/zip" });
+}
+
+export function createProjectPackagesAsync({ pages, files = DEFAULT_FILES }) {
+  return new Promise((resolve, reject) => {
+    try {
+      const entries = collectEntries({ pages, files });
+      zip(entries, { level: 6 }, (err, data) => {
+        if (err) reject(err);
+        else resolve(new Blob([data], { type: "application/zip" }));
+      });
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 export function createProjectPackage(input) {
   return createProjectPackages({ pages: [input], files: input.files });
 }
 
-export function downloadProjectPackage(input) {
+export async function downloadProjectPackage(input) {
   const pages = input.pages || [input];
-  const blob = createProjectPackages({ pages, files: input.files });
+  const blob = await createProjectPackagesAsync({ pages, files: input.files });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

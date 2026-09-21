@@ -221,6 +221,24 @@ function createTextRedline(doc, element, before, after) {
       marker.textContent = run.text;
       element.append(marker);
     });
+  } else {
+    const diffPanel = doc.createElement("div");
+    diffPanel.className = "wr-redline-text-diff-box";
+    const title = doc.createElement("strong");
+    title.textContent = "文章変更（文字差分）: ";
+    diffPanel.append(title);
+    const content = doc.createElement("span");
+    diffCharacters(before, after).forEach((run) => {
+      if (run.type === "equal") {
+        content.append(doc.createTextNode(run.text));
+        return;
+      }
+      const marker = doc.createElement(run.type === "delete" ? "del" : "ins");
+      marker.textContent = run.text;
+      content.append(marker);
+    });
+    diffPanel.append(content);
+    element.before(diffPanel);
   }
   addLabel(element, "文章変更", "text");
 }
@@ -383,7 +401,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
 
   changes
     .filter((change) => change.type !== "text-change" && !metadataTypes.has(change.type) && !handledImageChanges.has(change))
-    .toSorted((left, right) => Number(left.type === "image-change") - Number(right.type === "image-change"))
+    .slice()
+    .sort((left, right) => Number(left.type === "image-change") - Number(right.type === "image-change"))
     .forEach((change) => {
     let element = change.elementId
       ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.elementId)}"]`)
@@ -418,6 +437,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       "inline-link-change": [`文章内リンク: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "alt-change": [`alt変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "class-change": [`class変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
+      "table-change": [change.action ? `表の構成変更（${change.action}）` : "表の構成変更", "change"],
     };
     const [label, kind] = labels[change.type] ?? [changeLabel(change.type), "change"];
     addLabel(element, label, kind);
@@ -430,6 +450,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     del+ins{margin-left:.35em}
     .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:3px!important}
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:table-caption!important;caption-side:top!important}
+    .wr-redline-text-diff-box{position:relative!important;z-index:2147483646!important;display:block!important;margin:6px 0!important;padding:8px 12px!important;border:2px solid #a65a20!important;border-radius:6px!important;background:#fff8ec!important;font:13px/1.5 system-ui,sans-serif!important;color:#24242d!important}.wr-redline-text-diff-box>strong{color:#8d4918!important;margin-right:6px!important}
     .wr-page-info-changes{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px!important;padding:14px!important;border:3px solid #a65a20!important;border-radius:8px!important;color:#24242d!important;background:#fff8ec!important;font:14px/1.5 system-ui,sans-serif!important}.wr-page-info-changes>strong{color:#8d4918!important}.wr-page-info-changes>div{display:grid!important;grid-template-columns:minmax(130px,auto) 1fr!important;gap:10px!important}.wr-page-info-changes span{overflow-wrap:anywhere!important}
     .wr-image-change-summary{position:relative!important;z-index:2147483646!important;display:grid!important;gap:12px!important;margin:12px!important;padding:14px!important;border:3px solid #9a7010!important;border-radius:8px!important;color:#24242d!important;background:#fffbed!important;font:14px/1.5 system-ui,sans-serif!important}.wr-image-change-summary>strong{color:#7e5908!important;font-size:16px!important}.wr-image-change-summary>article{display:grid!important;gap:8px!important;padding:12px!important;border:1px solid #dfc574!important;border-radius:7px!important;background:#fff!important}.wr-image-change-summary h3{margin:0!important;color:#7e5908!important;font:800 14px/1.4 system-ui,sans-serif!important}.wr-image-change-summary article>div:not(.wr-image-comparison){display:grid!important;grid-template-columns:minmax(120px,auto) minmax(0,1fr)!important;gap:10px!important}.wr-image-change-summary article>div>span{overflow-wrap:anywhere!important;word-break:break-word!important}
     .wr-image-label-host{position:relative!important}.wr-image-marker{position:absolute!important;z-index:2147483647!important;top:4px!important;left:4px!important;display:inline-block!important;max-width:calc(100% - 8px)!important;padding:3px 7px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;box-shadow:0 1px 4px #0004!important;font:700 11px/1.4 system-ui,sans-serif!important;white-space:nowrap!important;text-decoration:none!important;pointer-events:none!important}

@@ -371,3 +371,79 @@ test("deleteTableColumn on table with merged cell shrinks colspan and removes ce
   assert.deepEqual([...dataRow.cells].map((c) => c.textContent), ["C1", "C3"]);
 });
 
+test("duplicateSelected appends -copy suffix to prevent duplicate HTML ids", async () => {
+  const { editor } = setupEditorEnvironment();
+  const html = `<div id="card"><span id="title">Card Title</span></div>`;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const card = doc.getElementById("card");
+  editor.select(card);
+
+  const duplicated = editor.duplicateSelected();
+  assert.equal(duplicated, true);
+
+  const cards = doc.querySelectorAll("[id^='card']");
+  assert.equal(cards.length, 2, "Should have 2 card elements");
+  assert.equal(cards[0].id, "card");
+  assert.equal(cards[1].id, "card-copy", "Duplicated element should have -copy id suffix");
+
+  const titles = doc.querySelectorAll("[id^='title']");
+  assert.equal(titles.length, 2);
+  assert.equal(titles[0].id, "title");
+  assert.equal(titles[1].id, "title-copy", "Nested elements with id should also have -copy suffix");
+});
+
+test("image-link-change preserves and restores original anchor attributes on undo", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
+  const html = `<p><a id="custom-link" class="btn primary" target="_blank" rel="noopener" href="https://example.com"><img id="pic" src="data:image/png;base64,iVBORw0KGgo=" alt="Icon"></a></p>`;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const pic = doc.getElementById("pic");
+  editor.select(pic);
+
+  // Update image link URL
+  editor.updateImageLink("https://newsite.org");
+  const link = doc.getElementById("custom-link");
+  assert.equal(link.getAttribute("href"), "https://newsite.org");
+  assert.equal(link.getAttribute("target"), "_blank");
+  assert.equal(link.getAttribute("class"), "btn primary");
+
+  // Remove link
+  editor.updateImageLink("");
+  assert.equal(doc.getElementById("custom-link"), null, "Link should be removed");
+
+  // Undo removal
+  const lastChange = recordedChanges.at(-1);
+  assert.equal(lastChange.type, "image-link-change");
+  editor.applyChange(lastChange, "undo");
+
+  const restoredLink = doc.getElementById("pic").closest("a");
+  assert.ok(restoredLink, "Anchor should be restored");
+  assert.equal(restoredLink.getAttribute("href"), "https://newsite.org");
+  assert.equal(restoredLink.getAttribute("target"), "_blank", "target attribute must be preserved on undo");
+  assert.equal(restoredLink.getAttribute("class"), "btn primary", "class attribute must be preserved on undo");
+});
+
+test("table operations emit table-change with descriptive action string", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
+  const html = `<table><tbody><tr><td id="c1">A</td><td id="c2">B</td></tr><tr><td id="c3">C</td><td id="c4">D</td></tr></tbody></table>`;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const c1 = doc.getElementById("c1");
+  editor.select(c1);
+
+  editor.addTableRow({ position: "after" });
+  let change = recordedChanges.at(-1);
+  assert.equal(change.type, "table-change");
+  assert.equal(change.action, "行追加（下）");
+
+  editor.select(doc.getElementById("c1"));
+  editor.mergeCellRight();
+  change = recordedChanges.at(-1);
+  assert.equal(change.action, "セル結合（右）");
+});
+
+

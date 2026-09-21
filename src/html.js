@@ -13,6 +13,16 @@ export function serializeDocument(doc, { keepEditorIds = false } = {}) {
   clone.querySelectorAll("[contenteditable]").forEach((element) => {
     element.removeAttribute("contenteditable");
   });
+  clone.querySelectorAll("script, meta[http-equiv='refresh' i], meta[http-equiv='content-security-policy' i]").forEach((element) => {
+    element.remove();
+  });
+  clone.querySelectorAll("*").forEach((element) => {
+    [...element.attributes].forEach((attribute) => {
+      if (attribute.name.toLowerCase().startsWith("on")) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
   if (!keepEditorIds) {
     clone.querySelectorAll(`[${EDITOR_ID_ATTR}]`).forEach((element) => {
       element.removeAttribute(EDITOR_ID_ATTR);
@@ -23,6 +33,12 @@ export function serializeDocument(doc, { keepEditorIds = false } = {}) {
     ? `<!DOCTYPE ${doc.doctype.name}${doc.doctype.publicId ? ` PUBLIC \"${doc.doctype.publicId}\"` : ""}${doc.doctype.systemId ? ` \"${doc.doctype.systemId}\"` : ""}>\n`
     : "<!doctype html>\n";
   return doctype + clone.outerHTML;
+}
+
+export function sanitizeImportedHtml(html) {
+  if (!html || typeof html !== "string") return html;
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  return serializeDocument(doc);
 }
 
 export function collectClassNames(doc) {

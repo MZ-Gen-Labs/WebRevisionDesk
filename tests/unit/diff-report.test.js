@@ -36,7 +36,7 @@ test("redline report preserves child elements in elements with children on text-
   globalThis.DOMParser = dom.window.DOMParser;
   globalThis.CSS = dom.window.CSS || { escape: (s) => s };
 
-  const html = `<html><body><p data-editor-id="wr-1">前文 <a href="https://example.com">リンクテキスト</a> 後文</p></body></html>`;
+  const html = `<html><body><p data-web-revision-id="wr-1">前文 <a href="https://example.com">リンクテキスト</a> 後文</p></body></html>`;
   const changes = [{
     type: "text-change",
     elementId: "wr-1",
@@ -46,4 +46,25 @@ test("redline report preserves child elements in elements with children on text-
   const redlineHtml = createRedlineReport(html, changes, "test.html");
   assert.match(redlineHtml, /href="https:\/\/example\.com"/, "Links and other child elements must not be stripped");
   assert.match(redlineHtml, /wr-redline-text/, "Redline highlight class must be added");
+  assert.match(redlineHtml, /wr-redline-text-diff-box/, "Diff box with del/ins should be rendered for elements with children");
+  assert.match(redlineHtml, /<ins> 後文<\/ins>/, "Inserted text should be highlighted in diff box");
+});
+
+test("redline report displays specific table action in table-change label", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><table data-web-revision-id="tbl-1"><tbody><tr><td>Cell</td></tr></tbody></table></body></html>`;
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-1",
+    action: "行追加（下）",
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  assert.match(redlineHtml, /表の構成変更（行追加（下））/);
 });
