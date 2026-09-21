@@ -476,10 +476,11 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
 
         if (Array.isArray(change.deletedCellsInfo)) {
           let badgeAdded = false;
+          const actualRows = [...(element.rows || [])].filter((row) => !row.classList.contains("wr-redline-deleted-row"));
           for (let r = 0; r < change.deletedCellsInfo.length; r++) {
             const info = change.deletedCellsInfo[r];
-            const row = element.rows[r];
-            if (!row || row.classList.contains("wr-redline-deleted-row")) continue;
+            const row = actualRows[r];
+            if (!row) continue;
 
             if (info.action === "shrink") {
               const cell = (info.cellId ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(info.cellId)}"], #${CSS.escape(info.cellId)}`) : null)
@@ -508,9 +509,10 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
               }
 
               let refCell = null;
-              if (afterGrid.grid[r]) {
+              const gridRowIndex = afterGrid.rows.indexOf(row);
+              if (gridRowIndex !== -1 && afterGrid.grid[gridRowIndex]) {
                 for (let c = targetCol; c < afterGrid.colCount; c++) {
-                  const afterEntry = afterGrid.grid[r]?.[c];
+                  const afterEntry = afterGrid.grid[gridRowIndex]?.[c];
                   if (afterEntry && afterEntry.cell.parentElement === row) {
                     refCell = afterEntry.cell;
                     break;
@@ -526,9 +528,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
             }
           }
         } else if (Array.isArray(change.deletedColTexts)) {
-          const rows = [...(element.rows || [])];
-          rows.forEach((row, r) => {
-            if (row.classList.contains("wr-redline-deleted-row")) return;
+          const actualRows = [...(element.rows || [])].filter((row) => !row.classList.contains("wr-redline-deleted-row"));
+          actualRows.forEach((row, r) => {
             const text = change.deletedColTexts[r] || "（削除）";
             const cell = doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
             cell.className = "wr-redline-deleted-cell wr-redline-delete";
@@ -547,9 +548,10 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
             }
 
             let refCell = null;
-            if (afterGrid.grid[r]) {
+            const gridRowIndex = afterGrid.rows.indexOf(row);
+            if (gridRowIndex !== -1 && afterGrid.grid[gridRowIndex]) {
               for (let c = targetCol; c < afterGrid.colCount; c++) {
-                const afterEntry = afterGrid.grid[r]?.[c];
+                const afterEntry = afterGrid.grid[gridRowIndex]?.[c];
                 if (afterEntry && afterEntry.cell.parentElement === row) {
                   refCell = afterEntry.cell;
                   break;

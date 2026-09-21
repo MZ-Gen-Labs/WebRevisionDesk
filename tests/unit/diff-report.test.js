@@ -191,4 +191,72 @@ test("redline report accurately restores merged cell colspan and inserts deleted
   assert.equal(table.querySelectorAll("[data-wr-label*='セル: 列削除']").length, 0, "Non-deleted cells should not have cell deletion label");
 });
 
+test("redline report applies column deletion to all rows including the very last row when combined with row deletion", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  // 行削除と列削除がされた後のテーブル（2行目「削除行」が消え、1列目が消えている）
+  const html = `<html><body>
+    <table data-web-revision-id="tbl-multi-op">
+      <thead>
+        <tr><th id="h2">見出し2</th></tr>
+      </thead>
+      <tbody>
+        <tr><td id="r1c2">データ1-2</td></tr>
+        <tr><td id="r2c2">最下行データ2-2</td></tr>
+      </tbody>
+    </table>
+  </body></html>`;
+
+  const changes = [
+    // 先に行削除が実行された
+    {
+      type: "table-change",
+      elementId: "tbl-multi-op",
+      action: "行削除（2行目：「削除された行データ」）",
+      deletedRowIndex: 1,
+      deletedRowHtml: `<tr><td>削除された行データ</td></tr>`,
+      cellId: null,
+      before: "<table>...</table>",
+      after: "<table>...</table>",
+    },
+    // 次に1列目が削除された
+    {
+      type: "table-change",
+      elementId: "tbl-multi-op",
+      action: "列削除（1列目：「見出し1 / データ1-1 / 最下行データ2-1」）",
+      deletedColIndex: 0,
+      cellId: null,
+      deletedCellsInfo: [
+        { action: "deleted", cellHtml: `<th id="h1">見出し1</th>`, text: "見出し1" },
+        { action: "deleted", cellHtml: `<td id="r1c1">データ1-1</td>`, text: "データ1-1" },
+        { action: "deleted", cellHtml: `<td id="r2c1">最下行データ2-1</td>`, text: "最下行データ2-1" },
+      ],
+      before: "<table>...</table>",
+      after: "<table>...</table>",
+    },
+  ];
+
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  const parsedDom = new JSDOM(redlineHtml);
+  const table = parsedDom.window.document.querySelector("table");
+
+  // 最下行（「最下行データ2-2」の行）を取得
+  const lastRow = table.rows[table.rows.length - 1];
+  assert.equal(lastRow.cells.length, 2, "Last row must contain both deleted cell and remaining cell");
+  assert.ok(
+    lastRow.cells[0].classList.contains("wr-redline-deleted-cell"),
+    "Last row's first cell must be the restored deleted cell"
+  );
+  assert.match(
+    lastRow.cells[0].textContent,
+    /最下行データ2-1/,
+    "Last row's deleted cell content must not be skipped"
+  );
+});
+
+
 
