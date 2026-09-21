@@ -152,6 +152,9 @@ test("normal table row operations and undo function correctly", async () => {
 
   const lastChange = recordedChanges.at(-1);
   assert.equal(lastChange.type, "table-change");
+  assert.equal(lastChange.deletedRowIndex, 1);
+  assert.ok(lastChange.deletedRowHtml && lastChange.deletedRowHtml.includes("R2C1"));
+  assert.match(lastChange.action, /行削除（2行目/);
 
   // Undo table change
   const undoResult = editor.applyChange(lastChange, "undo");
@@ -160,14 +163,12 @@ test("normal table row operations and undo function correctly", async () => {
   assert.equal(restoredTable.rows.length, 3, "Table should restore to 3 rows after undo");
 });
 
-test("table column add and delete function correctly on normal table", async () => {
+test("table column add and delete updates structure and records deletion details", async () => {
   const { editor, recordedChanges } = setupEditorEnvironment();
   const html = `
     <table id="tbl">
-      <tbody>
-        <tr><td id="cell">R1C1</td></tr>
-        <tr><td>R2C1</td></tr>
-      </tbody>
+      <tr><td id="cell">セル1</td></tr>
+      <tr><td>セル2</td></tr>
     </table>
   `;
   await editor.load(html, true);
@@ -182,9 +183,16 @@ test("table column add and delete function correctly on normal table", async () 
   assert.equal(table.rows[0].cells.length, 2);
   assert.equal(table.rows[1].cells.length, 2);
 
+  editor.select(cell);
   const colDeleted = editor.deleteTableColumn();
   assert.equal(colDeleted, true);
   assert.equal(table.rows[0].cells.length, 1);
+
+  const deleteColChange = recordedChanges.at(-1);
+  assert.equal(deleteColChange.type, "table-change");
+  assert.equal(deleteColChange.deletedColIndex, 0);
+  assert.deepEqual(deleteColChange.deletedColTexts, ["セル1", "セル2"]);
+  assert.match(deleteColChange.action, /列削除（1列目/);
 });
 
 test("addTableColumn on table with merged cell auto-expands colspan and inherits styles", async () => {

@@ -89,3 +89,51 @@ test("redline report highlights specific merged cell when cellId is provided", (
   assert.match(redlineHtml, /表の構成変更（セル結合（右））/);
   assert.match(redlineHtml, /セル: セル結合（右）/);
 });
+
+test("redline report visualizes deleted table row at original row position", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><table data-web-revision-id="tbl-del-row"><tbody><tr><td>残る行</td></tr></tbody></table></body></html>`;
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-del-row",
+    action: "行削除（2行目：「削除されたデータ」）",
+    deletedRowIndex: 1,
+    deletedRowHtml: `<tr><td>削除されたデータ</td></tr>`,
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  assert.match(redlineHtml, /wr-redline-deleted-row/, "Should insert deleted row with deleted row class");
+  assert.match(redlineHtml, /削除行（2行目）/, "Should display badge for deleted row");
+  assert.match(redlineHtml, /削除されたデータ/, "Should preserve deleted row content");
+});
+
+test("redline report visualizes deleted table column at original column position across rows", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><table data-web-revision-id="tbl-del-col"><tbody><tr><th>残る見出し</th></tr><tr><td>残るセル</td></tr></tbody></table></body></html>`;
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-del-col",
+    action: "列削除（1列目：「削除見出し」）",
+    deletedColIndex: 0,
+    deletedColTexts: ["削除見出し", "削除セルデータ"],
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  assert.match(redlineHtml, /wr-redline-deleted-cell/, "Should insert deleted cells with deleted cell class");
+  assert.match(redlineHtml, /削除列（1列目）/, "Should display badge for deleted column header");
+  assert.match(redlineHtml, /削除見出し/, "Should preserve deleted header content");
+  assert.match(redlineHtml, /削除セルデータ/, "Should preserve deleted cell content");
+});
+

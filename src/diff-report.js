@@ -439,11 +439,73 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       "class-change": [`class変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "table-change": [change.action ? `表の構成変更（${change.action}）` : "表の構成変更", "change"],
     };
-    if (change.type === "table-change" && change.cellId) {
-      const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.cellId)}"]`);
-      if (cell) {
-        addLabel(cell, change.action ? `セル: ${change.action}` : "セル変更", "change");
+    if (change.type === "table-change") {
+      if (change.deletedRowHtml && change.deletedRowIndex !== undefined) {
+        const template = doc.createElement("template");
+        template.innerHTML = change.deletedRowHtml;
+        const deletedTr = template.content.firstElementChild;
+        if (deletedTr) {
+          deletedTr.classList.add("wr-redline-deleted-row", "wr-redline-delete");
+          [...deletedTr.cells].forEach((cell) => {
+            cell.classList.add("wr-redline-delete");
+            cell.style.textDecoration = "line-through";
+            cell.style.backgroundColor = "#ffecec";
+            cell.style.color = "#a52020";
+            cell.style.opacity = "0.85";
+            cell.style.border = "2px dashed #cc3434";
+          });
+          const badge = doc.createElement("span");
+          badge.className = "wr-redline-label";
+          badge.style.background = "#a52020";
+          badge.textContent = `削除行（${change.deletedRowIndex + 1}行目）`;
+          deletedTr.cells[0]?.prepend(badge);
+
+          const targetRow = element.rows?.[change.deletedRowIndex] ?? null;
+          if (targetRow) {
+            targetRow.before(deletedTr);
+          } else {
+            const tbody = element.querySelector("tbody") || element;
+            tbody.append(deletedTr);
+          }
+        }
       }
+      if (change.deletedColIndex !== undefined && Array.isArray(change.deletedColTexts)) {
+        const rows = [...(element.rows || [])];
+        rows.forEach((row, r) => {
+          if (row.classList.contains("wr-redline-deleted-row")) return;
+          const text = change.deletedColTexts[r] || "（削除）";
+          const cell = doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
+          cell.className = "wr-redline-deleted-cell wr-redline-delete";
+          cell.style.textDecoration = "line-through";
+          cell.style.backgroundColor = "#ffecec";
+          cell.style.color = "#a52020";
+          cell.style.opacity = "0.85";
+          cell.style.border = "2px dashed #cc3434";
+          cell.textContent = text;
+          if (r === 0) {
+            const badge = doc.createElement("span");
+            badge.className = "wr-redline-label";
+            badge.style.background = "#a52020";
+            badge.textContent = `削除列（${change.deletedColIndex + 1}列目）`;
+            cell.prepend(badge);
+          }
+          const refCell = row.cells[change.deletedColIndex] || null;
+          if (refCell) {
+            refCell.before(cell);
+          } else {
+            row.append(cell);
+          }
+        });
+      }
+      if (change.cellId) {
+        const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.cellId)}"]`);
+        if (cell) {
+          addLabel(cell, change.action ? `セル: ${change.action}` : "セル変更", "change");
+        }
+      }
+      const label = change.action ? `表の構成変更（${change.action}）` : "表の構成変更";
+      addLabel(element, label, "change");
+      return;
     }
     const [label, kind] = labels[change.type] ?? [changeLabel(change.type), "change"];
     addLabel(element, label, kind);

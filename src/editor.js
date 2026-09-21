@@ -689,12 +689,27 @@ export class PageEditor {
   deleteTableRow() {
     const context = this.getTableContext();
     if (!context?.row || context.rowCount <= 1) return false;
-    return this.#changeTable("行削除", (current) => {
+    return this.#changeTable("行削除", (current, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(current.table);
       const targetRowIndex = current.rowIndex;
       const targetRow = current.row;
       const nextRow = targetRowIndex + 1 < rowCount ? rows[targetRowIndex + 1] : null;
       const prevRow = targetRowIndex > 0 ? rows[targetRowIndex - 1] : null;
+
+      const rowTextSummary = [...targetRow.cells]
+        .map((c) => c.textContent.trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(" / ");
+      const rowSnippet = rowTextSummary ? `：「${rowTextSummary.slice(0, 15)}」` : "";
+      const actionName = `行削除（${targetRowIndex + 1}行目${rowSnippet}）`;
+      const deletedRowHtml = this.#cleanOuterHtml(targetRow);
+
+      setDetails?.({
+        action: actionName,
+        deletedRowIndex: targetRowIndex,
+        deletedRowHtml,
+      });
 
       const modifiedSpans = new Set();
 
@@ -815,11 +830,26 @@ export class PageEditor {
   deleteTableColumn() {
     const context = this.getTableContext();
     if (!context || context.columnCount <= 1) return false;
-    return this.#changeTable("列削除", (current) => {
+    return this.#changeTable("列削除", (current, setDetails) => {
       const { grid, rowCount } = buildTableGrid(current.table);
       const targetCol = current.columnIndex;
       let selected = null;
       const modifiedCells = new Set();
+      const colTexts = [];
+
+      for (let r = 0; r < rowCount; r++) {
+        const entry = grid[r]?.[targetCol];
+        colTexts.push(entry?.cell?.textContent?.trim() || "");
+      }
+      const colTextSummary = colTexts.filter(Boolean).slice(0, 3).join(" / ");
+      const colSnippet = colTextSummary ? `：「${colTextSummary.slice(0, 15)}」` : "";
+      const actionName = `列削除（${targetCol + 1}列目${colSnippet}）`;
+
+      setDetails?.({
+        action: actionName,
+        deletedColIndex: targetCol,
+        deletedColTexts: colTexts,
+      });
 
       for (let r = 0; r < rowCount; r++) {
         const entry = grid[r]?.[targetCol];
@@ -1176,17 +1206,21 @@ export class PageEditor {
     const context = this.getTableContext();
     if (!context || !this.editable || !mutator) return false;
     const before = this.#cleanOuterHtml(context.table);
-    const selection = mutator(context);
+    const detailsOverride = {};
+    const selection = mutator(context, (details) => {
+      if (details && typeof details === "object") Object.assign(detailsOverride, details);
+    });
     this.#assignNewIdsToMissing(context.table);
     const after = this.#cleanOuterHtml(context.table);
     if (before === after) return false;
     const cellElement = selection?.closest?.("th, td") || (selection?.tagName === "TH" || selection?.tagName === "TD" ? selection : null) || context.cell?.closest?.("th, td") || null;
     const cellId = cellElement && context.table.contains(cellElement) ? this.#ensureElementId(cellElement) : null;
     this.#emitChange("table-change", context.table, before, after, {
-      action,
+      action: detailsOverride.action || action,
       cellId,
       beforeHtml: before,
       afterHtml: after,
+      ...detailsOverride,
     });
     this.select(selection?.isConnected ? selection : context.table);
     return true;
