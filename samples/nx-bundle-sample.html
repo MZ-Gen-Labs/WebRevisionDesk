@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NXバンドル製品構成 サンプル表</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 32px 24px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        color: #24242d;
+        background: #fbfbfd;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0 0 8px 0;
+        border-bottom: 3px solid #cc1414;
+        padding-bottom: 8px;
+        display: inline-block;
+      }
+      p.desc {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 24px;
+      }
+      table.matrix-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        background: #fff;
+        border: 2px solid #dfa528;
+      }
+      table.matrix-table th,
+      table.matrix-table td {
+        border: 1px solid #e0e0e0;
+        padding: 8px 6px;
+        text-align: center;
+        vertical-align: middle;
+      }
+      table.matrix-table thead th {
+        font-weight: 600;
+      }
+      .group-design {
+        background-color: #eaffea;
+        color: #1f6f1f;
+      }
+      .group-cae {
+        background-color: #e1f5fe;
+        color: #0277bd;
+      }
+      .group-cam {
+        background-color: #fff3e0;
+        color: #e65100;
+      }
+      .vertical-header {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        white-space: nowrap;
+        height: 220px;
+        padding: 12px 6px;
+        font-size: 12px;
+        text-align: left;
+        letter-spacing: 0.05em;
+      }
+      .product-title-cell {
+        background: #f8f9fa;
+        font-size: 14px;
+        font-weight: 600;
+        width: 140px;
+      }
+      .category-cell {
+        background: #f8f9fa;
+        font-weight: 600;
+        width: 120px;
+      }
+      .subitem-cell {
+        text-align: left !important;
+        width: 240px;
+        padding-left: 12px !important;
+      }
+      .mark-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #2e7d32;
+      }
+      .mark-dot-blue {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #0288d1;
+      }
+      .mark-dot-orange {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #ef6c00;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>NXバンドル製品構成</h1>
+      <p class="desc">colspan および rowspan を豊富に含む製品構成マトリクス表の検証用サンプルです。</p>
+
+      <table class="matrix-table" id="product-matrix-table">
+        <thead>
+          <tr>
+            <th colspan="2" rowspan="2" class="product-title-cell">製品名</th>
+            <th colspan="5" class="group-design">設計</th>
+            <th colspan="2" class="group-cae">解析</th>
+            <th colspan="4" class="group-cam">加工</th>
+          </tr>
+          <tr>
+            <th class="vertical-header">NX Design Standard Floating</th>
+            <th class="vertical-header">NX Design Advanced</th>
+            <th class="vertical-header">NX Design Premium</th>
+            <th class="vertical-header">NX Design for Industrial Design</th>
+            <th class="vertical-header">NX Cool Shape Design Bundle</th>
+            <th class="vertical-header">Simcenter Engineering Desktop</th>
+            <th class="vertical-header">Simcenter Structures</th>
+            <th class="vertical-header">NX CAD/CAM Turning Foundation</th>
+            <th class="vertical-header">NX CAD/CAM 3 Axis Milling Foundation</th>
+            <th class="vertical-header">NX Advanced 5 Axis Machining</th>
+            <th class="vertical-header">NX Total Machining</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- PDMグループ -->
+          <tr>
+            <td class="category-cell">PDM</td>
+            <td class="subitem-cell">NX Embedded Client (Teamcenter Integration for NX)</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+          </tr>
+
+          <!-- トランスレータグループ -->
+          <tr>
+            <td rowspan="2" class="category-cell">トランスレータ</td>
+            <td class="subitem-cell">データ変換機能（IGES、DXF/DWG、STEP203/214、JTなど）</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">2D/3Dトランスレータ拡張機能</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+
+          <!-- CAD基本機能グループ -->
+          <tr>
+            <td rowspan="4" class="category-cell">CAD基本機能</td>
+            <td class="subitem-cell">ソリッド/フィーチャ作成機能</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">シンクロナステクノロジ</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">コンバージェントモデリング（基本機能）</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">製図機能</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td>-</td>
+            <td><span class="mark-dot"></span></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+
+          <!-- CAMグループ -->
+          <tr>
+            <td rowspan="11" class="category-cell">CAM</td>
+            <td class="subitem-cell">作業指示書作成</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">加工指示書作成</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">ポスト作成/実行</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">旋盤加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">2.5軸ミル加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">3軸ミル加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">5軸ミル加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">ロータリー加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">ターボマシナリミリング（インペラ加工）</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">フィーチャベース加工</td>
+            <td></td>
+            <td></td>
+            <td>-</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">マシンツールシミュレーション</td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>
