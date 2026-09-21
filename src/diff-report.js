@@ -442,10 +442,23 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     };
     if (change.type === "table-change") {
       if (change.deletedRowHtml && change.deletedRowIndex !== undefined) {
+        if (Array.isArray(change.affectedRowSpans)) {
+          change.affectedRowSpans.forEach((spanInfo) => {
+            const cell = spanInfo.cellId
+              ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(spanInfo.cellId)}"], #${CSS.escape(spanInfo.cellId)}`)
+              : null;
+            if (cell && spanInfo.originalRowSpan) {
+              cell.rowSpan = Math.max(cell.rowSpan || 1, spanInfo.originalRowSpan);
+            }
+          });
+        }
         const template = doc.createElement("template");
         template.innerHTML = change.deletedRowHtml;
         const deletedTr = template.content.firstElementChild;
         if (deletedTr) {
+          if (change.deletedRowId) {
+            deletedTr.setAttribute(EDITOR_ID_ATTR, change.deletedRowId);
+          }
           deletedTr.classList.add("wr-redline-deleted-row", "wr-redline-delete");
           [...deletedTr.cells].forEach((cell) => {
             cell.classList.add("wr-redline-delete");
@@ -476,6 +489,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
 
         if (Array.isArray(change.deletedCellsInfo)) {
           let badgeAdded = false;
+          const processedRows = new Set();
           const actualRows = [...(element.rows || [])].filter((row) => !row.classList.contains("wr-redline-deleted-row"));
           for (let r = 0; r < change.deletedCellsInfo.length; r++) {
             const info = change.deletedCellsInfo[r];
@@ -490,6 +504,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
                 cell.colSpan = info.originalColSpan;
               }
             } else if (info.action === "deleted") {
+              if (processedRows.has(row)) continue;
+              processedRows.add(row);
               const template = doc.createElement("template");
               template.innerHTML = info.cellHtml || "<td></td>";
               const isHeader = row.parentElement?.tagName === "THEAD";

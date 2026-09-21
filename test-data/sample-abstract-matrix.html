@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>Abstract Matrix Test Table</title>
+    <style>
+      table { border-collapse: collapse; width: 100%; font-family: monospace; font-size: 12px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: center; }
+      th { background-color: #f0f0f0; }
+      .corner-cell { background-color: #e0e4e8; font-weight: bold; }
+      .group-cell { background-color: #e8eef4; font-weight: bold; }
+      .cat-cell { background-color: #f4f6f8; font-weight: bold; }
+      .sub-cell { background-color: #fafbfc; text-align: left; }
+    </style>
+  </head>
+  <body>
+    <div class="test-container">
+      <table id="abstract-matrix-table">
+        <thead>
+          <!-- 行 0: コーナーマージ(2x2) + グループ1(colspan=4) + グループ2(colspan=3) + グループ3(colspan=3) = 計12列 -->
+          <tr>
+            <th rowspan="2" colspan="2" class="corner-cell">CORNER_2x2</th>
+            <th colspan="4" class="group-cell">GRP_A_col4</th>
+            <th colspan="3" class="group-cell">GRP_B_col3</th>
+            <th colspan="3" class="group-cell">GRP_C_col3</th>
+          </tr>
+          <!-- 行 1: 個別列ヘッダー 10列 (0..3, 4..6, 7..9) -->
+          <tr>
+            <th>C01</th>
+            <th>C02</th>
+            <th>C03</th>
+            <th>C04</th>
+            <th>C05</th>
+            <th>C06</th>
+            <th>C07</th>
+            <th>C08</th>
+            <th>C09</th>
+            <th>C10</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- セクション 1: CAT_ALPHA (rowspan=4) -->
+          <tr>
+            <td rowspan="4" class="cat-cell">CAT_ALPHA_row4</td>
+            <td class="sub-cell">SUB_A1</td>
+            <td>A1-01</td>
+            <td>A1-02</td>
+            <td>A1-03</td>
+            <td>A1-04</td>
+            <td>A1-05</td>
+            <td>A1-06</td>
+            <td>A1-07</td>
+            <td>A1-08</td>
+            <td>A1-09</td>
+            <td>A1-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_A2</td>
+            <td>A2-01</td>
+            <td>A2-02</td>
+            <td>A2-03</td>
+            <td>A2-04</td>
+            <td>A2-05</td>
+            <td>A2-06</td>
+            <td>A2-07</td>
+            <td>A2-08</td>
+            <td>A2-09</td>
+            <td>A2-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_A3</td>
+            <!-- データセル内に横マージ (colspan=2) を含む -->
+            <td colspan="2">A3-SPAN2</td>
+            <td>A3-03</td>
+            <td>A3-04</td>
+            <td>A3-05</td>
+            <td>A3-06</td>
+            <td>A3-07</td>
+            <td>A3-08</td>
+            <td>A3-09</td>
+            <td>A3-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_A4</td>
+            <td>A4-01</td>
+            <td>A4-02</td>
+            <td>A4-03</td>
+            <td>A4-04</td>
+            <td>A4-05</td>
+            <td>A4-06</td>
+            <td>A4-07</td>
+            <td>A4-08</td>
+            <td>A4-09</td>
+            <td>A4-10</td>
+          </tr>
+
+          <!-- セクション 2: CAT_BETA (rowspan=3) + 行列マージ (rowspan=2, colspan=2) -->
+          <tr>
+            <td rowspan="3" class="cat-cell">CAT_BETA_row3</td>
+            <td class="sub-cell">SUB_B1</td>
+            <td>B1-01</td>
+            <td>B1-02</td>
+            <!-- データセル内に行列同時マージ (rowspan=2, colspan=2) -->
+            <td rowspan="2" colspan="2">B_BLOCK_2x2</td>
+            <td>B1-05</td>
+            <td>B1-06</td>
+            <td>B1-07</td>
+            <td>B1-08</td>
+            <td>B1-09</td>
+            <td>B1-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_B2</td>
+            <td>B2-01</td>
+            <td>B2-02</td>
+            <!-- B_BLOCK_2x2 がここを跨ぐ -->
+            <td>B2-05</td>
+            <td>B2-06</td>
+            <td>B2-07</td>
+            <td>B2-08</td>
+            <td>B2-09</td>
+            <td>B2-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_B3</td>
+            <td>B3-01</td>
+            <td>B3-02</td>
+            <td>B3-03</td>
+            <td>B3-04</td>
+            <td>B3-05</td>
+            <td>B3-06</td>
+            <td>B3-07</td>
+            <td>B3-08</td>
+            <td>B3-09</td>
+            <td>B3-10</td>
+          </tr>
+
+          <!-- セクション 3: CAT_GAMMA (rowspan=5) -->
+          <tr>
+            <td rowspan="5" class="cat-cell">CAT_GAMMA_row5</td>
+            <td class="sub-cell">SUB_C1</td>
+            <td>C1-01</td>
+            <td>C1-02</td>
+            <td>C1-03</td>
+            <td>C1-04</td>
+            <td>C1-05</td>
+            <td>C1-06</td>
+            <td>C1-07</td>
+            <td>C1-08</td>
+            <td>C1-09</td>
+            <td>C1-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_C2</td>
+            <td>C2-01</td>
+            <td>C2-02</td>
+            <td>C2-03</td>
+            <td>C2-04</td>
+            <td>C2-05</td>
+            <td>C2-06</td>
+            <td>C2-07</td>
+            <td>C2-08</td>
+            <td>C2-09</td>
+            <td>C2-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_C3</td>
+            <td>C3-01</td>
+            <td>C3-02</td>
+            <td>C3-03</td>
+            <td>C3-04</td>
+            <td>C3-05</td>
+            <td>C3-06</td>
+            <td>C3-07</td>
+            <td>C3-08</td>
+            <td>C3-09</td>
+            <td>C3-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_C4</td>
+            <td>C4-01</td>
+            <td>C4-02</td>
+            <td>C4-03</td>
+            <td>C4-04</td>
+            <td>C4-05</td>
+            <td>C4-06</td>
+            <td>C4-07</td>
+            <td>C4-08</td>
+            <td>C4-09</td>
+            <td>C4-10</td>
+          </tr>
+          <tr>
+            <td class="sub-cell">SUB_C5</td>
+            <td>C5-01</td>
+            <td>C5-02</td>
+            <td>C5-03</td>
+            <td>C5-04</td>
+            <td>C5-05</td>
+            <td>C5-06</td>
+            <td>C5-07</td>
+            <td>C5-08</td>
+            <td>C5-09</td>
+            <td>C5-10</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </body>
+</html>

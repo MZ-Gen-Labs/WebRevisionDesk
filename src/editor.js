@@ -715,30 +715,20 @@ export class PageEditor {
       const rowSnippet = rowTextSummary ? `：「${rowTextSummary.slice(0, 15)}」` : "";
       const actionName = `行削除（${targetRowIndex + 1}行目${rowSnippet}）`;
 
-      // 削除行の完全なスナップショット（跨がれている rowspan セルも独立セルとして補完）
+      // 削除行の物理的セルのみのスナップショット（親のrowspanセルは親側で管理・復元する）
       const doc = current.table.ownerDocument;
+      const deletedRowId = this.#ensureElementId(targetRow);
       const snapshotTr = doc.createElement("tr");
-      const visitedCells = new Set();
-      for (let c = 0; c < colCount; c++) {
-        const entry = grid[targetRowIndex]?.[c];
-        if (!entry) continue;
-        if (visitedCells.has(entry.cell)) continue;
-        visitedCells.add(entry.cell);
-
-        const clonedCell = entry.cell.cloneNode(true);
-        clonedCell.rowSpan = 1;
-        snapshotTr.append(clonedCell);
+      snapshotTr.setAttribute(EDITOR_ID_ATTR, deletedRowId);
+      for (const cell of targetRow.cells) {
+        const cloned = cell.cloneNode(true);
+        cloned.rowSpan = 1; // 削除行プレースホルダーは下行へ跨いではならない
+        snapshotTr.append(cloned);
       }
       const deletedRowHtml = this.#cleanOuterHtml(snapshotTr);
 
-      setDetails?.({
-        action: actionName,
-        deletedRowIndex: targetRowIndex,
-        deletedRowHtml,
-        cellId: null,
-      });
-
       const modifiedSpans = new Set();
+      const affectedRowSpans = [];
 
       for (let c = 0; c < colCount; c++) {
         const entry = grid[targetRowIndex]?.[c];
@@ -767,11 +757,24 @@ export class PageEditor {
               }
             } else {
               // 上の行から始まってこの行をまたぐセルは単に rowSpan を減らす
+              affectedRowSpans.push({
+                cellId: this.#ensureElementId(entry.cell),
+                originalRowSpan: entry.rowSpan,
+              });
               entry.cell.rowSpan -= 1;
             }
           }
         }
       }
+
+      setDetails?.({
+        action: actionName,
+        deletedRowIndex: targetRowIndex,
+        deletedRowId,
+        deletedRowHtml,
+        affectedRowSpans,
+        cellId: null,
+      });
 
       const replacementRow = nextRow || prevRow;
       const fallbackEntry = grid[replacementRow === nextRow ? targetRowIndex + 1 : targetRowIndex - 1]?.[current.columnIndex];
