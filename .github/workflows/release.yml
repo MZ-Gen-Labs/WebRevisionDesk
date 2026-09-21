@@ -10,27 +10,6 @@ on:
         description: "Existing version tag, for example v1.0.0"
         required: true
         type: string
-      update_type:
-        description: "Update type"
-        required: true
-        default: normal
-        type: choice
-        options: [normal, security]
-      severity:
-        description: "Security severity (blank for normal updates)"
-        required: false
-        default: none
-        type: choice
-        options: [none, low, moderate, high, critical]
-      mandatory:
-        description: "Mark the update as mandatory"
-        required: true
-        default: false
-        type: boolean
-      notes:
-        description: "Short update notice shown in the app"
-        required: false
-        type: string
 
 permissions:
   contents: write

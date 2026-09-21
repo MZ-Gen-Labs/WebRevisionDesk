@@ -23,10 +23,29 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run test:unit
       - run: npm run build
-      - name: Install browser for end-to-end tests
-        run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e
-      - run: node --check server.js
-      - run: node --check src/update-service.js
-      - run: node --check scripts/build-windows-portable.mjs
       - run: node --check scripts/check-version.mjs
+
+  electron-smoke:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run build:electron:win
+        env:
+          WEB_REVISION_ELECTRON_RELEASE: "1"
+      - name: Smoke test packaged Electron editor
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem release-electron -Filter *.zip | Select-Object -First 1
+          if (-not $archive) { throw "Electron release ZIP was not created." }
+          $target = Join-Path $env:RUNNER_TEMP "electron-ci-smoke"
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
+          $executable = Get-ChildItem $target -Filter WebRevisionDesk.exe -Recurse | Select-Object -First 1
+          if (-not $executable) { throw "Packaged Electron executable was not found." }
+          $process = Start-Process -FilePath $executable.FullName -ArgumentList "--editor-smoke-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Electron editor smoke test failed with exit code $($process.ExitCode)." }

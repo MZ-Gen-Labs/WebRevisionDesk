@@ -500,6 +500,8 @@ export class PageEditor {
       columnIndex: cell ? cells.indexOf(cell) : 0,
       rowCount: rows.length,
       columnCount: Math.max(0, ...rows.map((item) => item.cells.length)),
+      hasComplexStructure: rows.some((item) => [...item.cells].some((cell) => cell.colSpan !== 1 || cell.rowSpan !== 1))
+        || new Set(rows.map((item) => item.cells.length)).size > 1,
     };
   }
 
@@ -587,6 +589,7 @@ export class PageEditor {
   }
 
   addTableColumn() {
+    if (this.getTableContext()?.hasComplexStructure) return false;
     return this.#changeTable((context) => {
       let selected = null;
       [...context.table.rows].forEach((row, rowIndex) => {
@@ -605,7 +608,7 @@ export class PageEditor {
 
   deleteTableColumn() {
     const context = this.getTableContext();
-    if (!context || context.columnCount <= 1) return false;
+    if (!context || context.columnCount <= 1 || context.hasComplexStructure) return false;
     return this.#changeTable((current) => {
       let selected = null;
       [...current.table.rows].forEach((row, rowIndex) => {
@@ -628,6 +631,15 @@ export class PageEditor {
 
   getSelectionCount() {
     return this.selectedElements.size;
+  }
+
+  getSelectedImageDetails() {
+    const image = this.selected?.tagName === "IMG" ? this.selected : this.selected?.querySelector?.("img");
+    if (!image) return null;
+    return {
+      src: image.getAttribute("src") || "",
+      fileName: image.getAttribute(IMAGE_ASSET_NAME_ATTR) || "image",
+    };
   }
 
   hasClipboard() {
@@ -704,6 +716,7 @@ export class PageEditor {
       this.#assignNewIds(element);
       parent.insertBefore(element, reference);
     });
+    const batchId = pasted.length > 1 ? crypto.randomUUID() : "";
     const changes = pasted.map((element) => ({
       type: "element-add",
       target: this.#describe(element),
@@ -713,6 +726,7 @@ export class PageEditor {
       before: "",
       after: this.#cleanOuterHtml(element),
       action: "paste",
+      batchId,
       timestamp: new Date().toISOString(),
     }));
     this.#replaceSelection(pasted, pasted.at(-1));
@@ -1033,6 +1047,7 @@ export class PageEditor {
         return position & left.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1;
       });
     if (!removedElements.length) return false;
+    const batchId = removedElements.length > 1 ? crypto.randomUUID() : "";
     const changes = removedElements.map((removed) => ({
       type: "element-delete",
       target: this.#describe(removed),
@@ -1042,6 +1057,7 @@ export class PageEditor {
       index: removed.parentElement ? [...removed.parentElement.children].indexOf(removed) : -1,
       before: this.#cleanOuterHtml(removed),
       after: "",
+      batchId,
       timestamp: new Date().toISOString(),
     }));
     this.selectedElements.forEach((element) => element.classList.remove(EDITOR_CLASS));

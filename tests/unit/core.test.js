@@ -7,7 +7,6 @@ import path from "node:path";
 import { removeProjectEntry } from "../../electron/project-file-system.mjs";
 import { normalizeClasses } from "../../src/html.js";
 import { pagePathForUrl, ProjectStore } from "../../src/project-storage.js";
-import { compareVersions, normalizedVersion, parseRepository, releaseAsset } from "../../src/update-service.js";
 
 test("class names are normalized without duplicates", () => {
   assert.deepEqual(normalizeClasses("  hero  centered hero\nlarge "), ["hero", "centered", "large"]);
@@ -167,33 +166,4 @@ test("Electron removes empty project folders and preserves non-empty folders", a
   assert.equal(await readFile(path.join(nonEmpty, "child.txt"), "utf8"), "keep");
   await removeProjectEntry(nonEmpty, true);
   await assert.rejects(() => readFile(path.join(nonEmpty, "child.txt")), { code: "ENOENT" });
-});
-
-test("GitHub repository URLs are strictly validated", () => {
-  assert.deepEqual(parseRepository("https://github.com/MZ-Gen-Labs/WebRevisionDesk.git"), {
-    owner: "MZ-Gen-Labs",
-    repo: "WebRevisionDesk",
-    url: "https://github.com/MZ-Gen-Labs/WebRevisionDesk",
-  });
-  assert.equal(parseRepository(""), null);
-  assert.throws(() => parseRepository("https://example.com/repository"), /github\.com/);
-});
-
-test("versions are normalized and compared numerically", () => {
-  assert.equal(normalizedVersion("v1.2.3"), "1.2.3");
-  assert.equal(compareVersions("1.10.0", "1.9.9"), 1);
-  assert.equal(compareVersions("v1.2.0", "1.2"), 0);
-  assert.equal(compareVersions("1.1.9", "1.2.0"), -1);
-});
-
-test("update release prefers non-complete Windows x64 archive", () => {
-  const selected = releaseAsset({ assets: [
-    { name: "WebRevisionDesk-1.0.0-win-x64-complete.zip" },
-    { name: "WebRevisionDesk-1.0.0-linux-x64.zip" },
-    { name: "WebRevisionDesk-1.0.0-win-x64.zip" },
-  ] });
-  assert.equal(selected.name, "WebRevisionDesk-1.0.0-win-x64.zip");
-  assert.equal(releaseAsset({ assets: [] }), null);
-  assert.equal(releaseAsset({ assets: [{ name: "app-linux-x64.zip" }] }), null);
-  assert.equal(releaseAsset({ assets: [{ name: "app-win-x64-complete.zip" }] }), null);
 });

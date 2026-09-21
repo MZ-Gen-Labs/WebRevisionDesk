@@ -1,7 +1,8 @@
 import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
-import { downloadProjectPackage } from "./project-package.js";
+import { createProjectPackages, downloadProjectPackage } from "./project-package.js";
+import { desktopFileSystemAvailable, saveDesktopOutput } from "./desktop-file-system.js";
 import {
   DEFAULT_SEARCH_REPLACE_RULE,
   MAX_SEARCH_REPLACE_RULES,
@@ -11,7 +12,6 @@ import {
 } from "./search-replace.js";
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
-import { shouldCheckForUpdatesOnStartup } from "./update-policy.js";
 import { appFetch } from "./runtime-api.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -29,7 +29,7 @@ const ui = {
   link: $("#link-value"), removeImageLink: $("#remove-image-link"), alt: $("#alt-value"), image: $("#image-file"), imageUrl: $("#image-url-value"),
   inlineLinkTools: $("#inline-link-tools"), inlineLinkSelection: $("#inline-link-selection"),
   inlineLinkUrl: $("#inline-link-url"), applyInlineLink: $("#apply-inline-link"), removeInlineLink: $("#remove-inline-link"),
-  classes: $("#class-value"), classOptions: $("#class-options"), before: $("#move-before"),
+  classes: $("#class-value"), classOptions: $("#class-options"), saveSelectedImage: $("#save-selected-image"), before: $("#move-before"),
   after: $("#move-after"), selectParent: $("#select-parent-element"), returnChild: $("#return-child-element"), delete: $("#delete-element"),
   copyElement: $("#copy-element"), pasteBefore: $("#paste-before-element"), pasteAfter: $("#paste-after-element"),
   historyCount: $("#history-count"), historyList: $("#history-list"), clearHistory: $("#clear-history"),
@@ -48,12 +48,7 @@ const ui = {
   batchCapturePages: $("#batch-capture-pages"),
   checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"),
   deleteProjectPages: $("#delete-project-pages"), batchProgress: $("#batch-progress"),
-  appUpdateButton: $("#app-update-button"), updatePanel: $("#update-panel"),
-  closeUpdatePanel: $("#close-update-panel"), updateRepository: $("#update-repository"),
-  checkUpdatesOnStartup: $("#check-updates-on-startup"), saveUpdateSettings: $("#save-update-settings"),
-  checkAppUpdate: $("#check-app-update"), updateResult: $("#update-result"),
-  openUpdateRelease: $("#open-update-release"), downloadAppUpdate: $("#download-app-update"),
-  applyAppUpdate: $("#apply-app-update"),
+  appVersion: $("#app-version"),
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
   pageStructurePanel: $("#page-structure-panel"), pageTitle: $("#page-title-value"),
   pageDescription: $("#page-description-value"), pageH1: $("#page-h1-value"),
@@ -65,6 +60,7 @@ const ui = {
   deleteTableColumn: $("#delete-table-column"), deleteTable: $("#delete-table"),
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
+  resourceFailures: $("#resource-failures"), resourceFailureList: $("#resource-failure-list"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
@@ -96,6 +92,7 @@ const state = {
   projectSelectionAnchorUrl: "",
   selectedProjectUrls: new Set(), batchRunning: false, queuedCaptureUrls: new Set(), activeCaptureUrl: "",
   unavailableProjectUrls: new Set(),
+  resourceFailures: [],
 };
 let captureSessionId = "";
 let loginSessionId = "";
@@ -117,8 +114,6 @@ function syncLoginControls() {
   ui.loginState.textContent = loginBusy ? "処理中…" : loginSessionId ? "ブラウザで認証後、「ログイン完了」を押してください" : !enabled ? "ログイン待機なし" : loginReady ? "ログイン完了を確認済み（利用者確認）" : "ログイン完了待ち：検索・一括取得は待機中";
   syncProjectControls();
 }
-let latestAppUpdate = null;
-let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
 const PACKAGE_FILE_SELECTION_KEY = "web-revision-package-file-selection";
@@ -353,79 +348,16 @@ function relaySearchDialogWheel(event) {
 
 window.addEventListener("wheel", relaySearchDialogWheel, { capture: true, passive: false });
 
-function formatBytes(value) {
-  if (!Number.isFinite(value)) return "";
-  if (value < 1024 * 1024) return `${Math.ceil(value / 1024)}KB`;
-  return `${(value / 1024 / 1024).toFixed(1)}MB`;
-}
-
 async function loadAppInfo() {
   try {
     const response = await appFetch("/api/app-info", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    ui.appUpdateButton.textContent = `v${data.version}`;
-    ui.appUpdateButton.title = `設定保存先: ${data.dataDirectory}`;
-    canApplyAppUpdate = data.canApplyUpdate === true;
-    ui.updateRepository.value = data.settings.githubRepository || "";
-    ui.checkUpdatesOnStartup.checked = data.settings.checkUpdatesOnStartup !== false;
-    if (shouldCheckForUpdatesOnStartup(data.settings)) await checkAppUpdate({ quiet: true });
+    ui.appVersion.textContent = `v${data.version}`;
+    ui.appVersion.title = `アプリのバージョン: v${data.version}`;
   } catch (error) {
-    ui.appUpdateButton.textContent = "更新設定";
+    ui.appVersion.textContent = "v--";
     console.warn("App information could not be loaded:", error);
-  }
-}
-
-async function saveUpdateSettings() {
-  const response = await postJson("/api/settings", {
-    githubRepository: ui.updateRepository.value.trim(),
-    checkUpdatesOnStartup: ui.checkUpdatesOnStartup.checked,
-  });
-  const data = await response.json();
-  ui.updateRepository.value = data.settings.githubRepository || "";
-  ui.updateResult.dataset.kind = "current";
-  ui.updateResult.textContent = "更新設定を保存しました。設定はアプリ本体とは別の場所に保持されます。";
-}
-
-async function checkAppUpdate({ quiet = false } = {}) {
-  setButtonProcessing(ui.checkAppUpdate, true);
-  if (!quiet) {
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = "GitHub Releasesを確認しています…";
-  }
-  try {
-    const response = await postJson("/api/update/check", {});
-    latestAppUpdate = await response.json();
-    const security = latestAppUpdate.updateType === "security";
-    const severity = latestAppUpdate.severity ? `・重要度 ${latestAppUpdate.severity.toUpperCase()}` : "";
-    const asset = latestAppUpdate.asset ? `\n配布ファイル: ${latestAppUpdate.asset.name}（${formatBytes(latestAppUpdate.asset.size)}）` : "";
-    if (latestAppUpdate.updateAvailable) {
-      ui.updateResult.dataset.kind = security ? "security" : "available";
-      ui.updateResult.textContent = `${security ? "セキュリティ更新" : "新しいバージョン"}があります。\n現在 v${latestAppUpdate.currentVersion} → 最新 v${latestAppUpdate.latestVersion}${severity}${asset}\n\n${latestAppUpdate.notes || "更新内容はGitHubで確認できます。"}`;
-      ui.downloadAppUpdate.hidden = !latestAppUpdate.downloadable;
-      ui.applyAppUpdate.hidden = true;
-      if (quiet) {
-        ui.updatePanel.hidden = false;
-        setStatus(`${security ? "セキュリティ更新" : "更新版"} v${latestAppUpdate.latestVersion} が公開されています。`, security ? "error" : "info");
-      }
-    } else {
-      ui.updateResult.dataset.kind = "current";
-      ui.updateResult.textContent = `v${latestAppUpdate.currentVersion} は最新です。`;
-      ui.downloadAppUpdate.hidden = true;
-      ui.applyAppUpdate.hidden = true;
-    }
-    ui.openUpdateRelease.href = latestAppUpdate.releaseUrl;
-    ui.openUpdateRelease.hidden = false;
-  } catch (error) {
-    latestAppUpdate = null;
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = `更新を確認できませんでした: ${error.message}`;
-    ui.downloadAppUpdate.hidden = true;
-    ui.applyAppUpdate.hidden = true;
-    if (!quiet) setStatus(`アプリの更新確認に失敗しました: ${error.message}`, "error");
-  } finally {
-    setButtonProcessing(ui.checkAppUpdate, false);
-    ui.checkAppUpdate.disabled = false;
   }
 }
 function recordChange(change) {
@@ -889,6 +821,7 @@ function showSelection(element, selectedElements = element ? [element] : []) {
   ui.alt.value = image?.alt ?? "";
   ui.alt.disabled = !image;
   ui.image.disabled = !image;
+  ui.saveSelectedImage.disabled = !image;
   ui.imageUrl.value = image?.getAttribute("src") ?? "";
   ui.imageUrl.disabled = !image;
   ui.classes.value = classNames.join(" ");
@@ -918,7 +851,9 @@ async function loadHtml(html, fileName, options = {}) {
   state.activeProjectPageId = options.activeProjectPageId || "";
   state.dirty = options.dirty ?? true;
   state.previewOnly = options.previewOnly ?? false;
+  state.resourceFailures = Array.isArray(options.resourceFailures) ? options.resourceFailures : [];
   clearScreenshotPreview();
+  renderResourceFailures();
   renderHistory();
   ui.fileName.textContent = state.fileName;
   ui.empty.hidden = true;
@@ -930,6 +865,16 @@ async function loadHtml(html, fileName, options = {}) {
   renderProjectPages();
   updateGuidance();
   document.querySelector("#setup-panel").open = false;
+}
+
+function renderResourceFailures() {
+  const failures = state.resourceFailures || [];
+  ui.resourceFailures.hidden = failures.length === 0;
+  ui.resourceFailureList.replaceChildren(...failures.map((failure) => {
+    const item = document.createElement("li");
+    item.textContent = `${failure.url || "関連ファイル"}：${failure.reason || "取得できませんでした"}`;
+    return item;
+  }));
 }
 
 function sourceUrlFromHtml(html) {
@@ -1066,10 +1011,13 @@ function renderProjectPages() {
 async function captureUrlDirectly(url, priority = "normal") {
   const response = await postJson("/api/capture/direct", { url }, { browserPriority: priority });
   const html = await response.text();
+  let resourceFailures = [];
+  try { resourceFailures = JSON.parse(decodeURIComponent(response.headers.get("X-Captured-Resource-Failures") || "[]")); } catch {}
   return {
     html,
     fileName: decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html"),
     url: decodeURIComponent(response.headers.get("X-Captured-Url") || url),
+    resourceFailures: Array.isArray(resourceFailures) ? resourceFailures : [],
   };
 }
 
@@ -1141,7 +1089,7 @@ async function previewUncapturedProjectPage(page) {
       showScreenshotPreview(preview);
       setStatus(`「${page.title}」の編集用ページを取得しています…`, "info");
       const captured = await captureUrlDirectly(preview.url, "interactive");
-      await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
+      await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, resourceFailures: captured.resourceFailures, dirty: true });
       await saveCurrentToProject({ quiet: true });
       setStatus(`「${page.title}」を案件フォルダへ取得しました。中央の画面で編集できます。`, "success");
     } catch (error) {
@@ -1281,6 +1229,7 @@ async function processSelectedPages(mode) {
           originalHtml: captured.html,
           workingHtml: captured.html,
           changes: [],
+          resourceFailures: captured.resourceFailures,
         });
       }
       completed++;
@@ -1348,7 +1297,7 @@ ui.importPreviewPage.addEventListener("click", async () => {
   try {
     setStatus("編集用HTMLを取得しています…", "info");
     const captured = await captureUrlDirectly(state.sourceUrl);
-    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, dirty: true });
+    await loadHtml(captured.html, captured.fileName, { sourceUrl: captured.url, resourceFailures: captured.resourceFailures, dirty: true });
     await saveCurrentToProject({ quiet: true });
     setStatus("ページを案件フォルダへ取り込みました。中央の画面で編集できます。", "success");
   } catch (error) {
@@ -1394,6 +1343,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
     originalHtml: state.originalHtml,
     workingHtml: state.modifiedHtml,
     changes: changesFromOriginal(),
+    resourceFailures: state.resourceFailures,
   };
   const page = await projectStore.savePage({
     ...saveData,
@@ -1419,6 +1369,7 @@ async function openProjectPage(pageId) {
     await loadHtml(saved.originalHtml, saved.page.fileName, {
       workingHtml: saved.workingHtml,
       changes: saved.changes,
+      resourceFailures: saved.page.resourceFailures,
       sourceUrl: saved.page.url,
       activeProjectPageId: saved.page.id,
       dirty: false,
@@ -1639,8 +1590,10 @@ ui.finishCapture.addEventListener("click", async () => {
     const html = await response.text();
     const fileName = decodeURIComponent(response.headers.get("X-Captured-Filename") || "captured-page.html");
     const sourceUrl = decodeURIComponent(response.headers.get("X-Captured-Url") || ui.manualPageUrl.value.trim());
+    let resourceFailures = [];
+    try { resourceFailures = JSON.parse(decodeURIComponent(response.headers.get("X-Captured-Resource-Failures") || "[]")); } catch {}
     captureSessionId = "";
-    await loadHtml(html, fileName, { sourceUrl, dirty: true });
+    await loadHtml(html, fileName, { sourceUrl, resourceFailures, dirty: true });
     if (projectStore.project) await saveCurrentToProject({ quiet: true });
     ui.captureSessionActions.hidden = true;
     setStatus("表示中ページを案件へ取り込みました。編集を開始できます。", "success");
@@ -1802,6 +1755,7 @@ ui.reset.addEventListener("click", async () => {
           activeProjectPageId: activePage.id,
           workingHtml: saved.originalHtml,
           changes: [],
+          resourceFailures: captured.resourceFailures,
           dirty: false,
         });
       }
@@ -1826,21 +1780,35 @@ ui.reset.addEventListener("click", async () => {
   await render("modified", { captureCurrent: false });
   setStatus("読み込み時点へ戻しました。", "success");
 });
-ui.download.addEventListener("click", () => {
+async function saveOutput(blob, suggestedName, filters) {
+  if (!desktopFileSystemAvailable()) return false;
+  const saved = await saveDesktopOutput(blob, { suggestedName, filters });
+  return Boolean(saved);
+}
+
+ui.download.addEventListener("click", async () => {
   const html = state.mode === "modified" ? editor.getExportHtml() : cleanHtmlString(state.modifiedHtml);
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  downloadHtml(html, state.fileName);
-  setStatus("修正後HTMLをダウンロードしました。", "success");
+  const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-modified.html`;
+  const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
+  if (!desktopFileSystemAvailable()) downloadHtml(html, state.fileName);
+  setStatus(saved ? "修正後HTMLを保存しました。" : "修正後HTMLの保存をキャンセルしました。", saved ? "success" : "info");
 });
-ui.downloadRedline.addEventListener("click", () => {
+ui.downloadRedline.addEventListener("click", async () => {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  downloadRedlineReport(state.fileName, state.modifiedHtml, changesFromOriginal());
-  setStatus("ページ上で変更箇所を示す赤入れHTMLをダウンロードしました。", "success");
+  const html = createRedlineReport(state.modifiedHtml, changesFromOriginal(), state.fileName);
+  const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-redline.html`;
+  const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
+  if (!desktopFileSystemAvailable()) downloadRedlineReport(state.fileName, state.modifiedHtml, changesFromOriginal());
+  setStatus(saved ? "変更箇所ページを保存しました。" : "変更箇所ページの保存をキャンセルしました。", saved ? "success" : "info");
 });
-ui.downloadDiff.addEventListener("click", () => {
+ui.downloadDiff.addEventListener("click", async () => {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
-  downloadDiffReport(state.fileName, changesFromOriginal());
-  setStatus("差分・修正指示HTMLをダウンロードしました。", "success");
+  const html = createDiffReport(state.fileName, changesFromOriginal());
+  const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-diff.html`;
+  const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
+  if (!desktopFileSystemAvailable()) downloadDiffReport(state.fileName, changesFromOriginal());
+  setStatus(saved ? "修正内容一覧を保存しました。" : "修正内容一覧の保存をキャンセルしました。", saved ? "success" : "info");
 });
 function selectedSavedPackagePages() {
   return actionTargetPages().filter((page) => page.saved);
@@ -2384,7 +2352,8 @@ async function packagePagesForDownload() {
       ...saved.page,
       originalHtml: saved.originalHtml,
       modifiedHtml: saved.workingHtml,
-      changes: saved.changes,
+        changes: saved.changes,
+        resourceFailures: saved.page.resourceFailures,
       sourceUrl: saved.page.url,
     };
   }));
@@ -2400,13 +2369,18 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
   try {
     await flushAutoSave();
     const pages = await packagePagesForDownload();
-    downloadProjectPackage({
+    const packageInput = {
       pages,
       files,
       packageName: pages.length > 1 ? projectStore.project?.projectName || "selected-pages" : undefined,
-    });
+    };
+    const packageName = packageInput.packageName
+      ? `${packageInput.packageName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
+      : pages.length > 1 ? "selected-pages-revision-package.zip" : "page-revision-package.zip";
+    const saved = await saveOutput(createProjectPackages(packageInput), packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    if (!desktopFileSystemAvailable()) downloadProjectPackage(packageInput);
     ui.packageDialog.close();
-    setStatus(`${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。`, "success");
+    setStatus(saved ? `${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。` : "共有用ZIPの保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
     setStatus(`共有用ZIPを保存できませんでした: ${error.message}`, "error");
   } finally {
@@ -2419,14 +2393,23 @@ function applyUndoRedo(direction) {
   if (state.mode !== "modified") return;
   const source = direction === "undo" ? state.changes : state.redoChanges;
   const destination = direction === "undo" ? state.redoChanges : state.changes;
-  const change = source.pop();
+  const change = source.at(-1);
   if (!change) return;
-  if (!editor.applyChange(change, direction)) {
-    source.push(change);
+  const group = change.batchId ? source.slice().reverse().filter((item) => item.batchId === change.batchId) : [change];
+  const applied = [];
+  for (const item of group) {
+    if (!editor.applyChange(item, direction)) {
+      applied.reverse().forEach((completed) => editor.applyChange(completed, direction === "undo" ? "redo" : "undo"));
+      return setStatus("この操作を復元できませんでした。すべてリセットは利用できます。", "error");
+    }
+    applied.push(item);
+  }
+  source.splice(source.length - group.length, group.length);
+  destination.push(...group);
+  if (!applied.length) {
     setStatus("この操作を復元できませんでした。すべてリセットは利用できます。", "error");
     return;
   }
-  destination.push(change);
   state.modifiedHtml = editor.getHtml();
   markDirtyAndScheduleAutoSave();
   renderHistory();
@@ -2522,8 +2505,12 @@ ui.insertTable.addEventListener("click", () => {
 });
 ui.addTableRow.addEventListener("click", () => editor.addTableRow());
 ui.deleteTableRow.addEventListener("click", () => editor.deleteTableRow());
-ui.addTableColumn.addEventListener("click", () => editor.addTableColumn());
-ui.deleteTableColumn.addEventListener("click", () => editor.deleteTableColumn());
+ui.addTableColumn.addEventListener("click", () => {
+  if (!editor.addTableColumn()) setStatus("結合セルや行ごとの列数が異なる表では、列の追加は行いません。セル編集・行操作をご利用ください。", "info");
+});
+ui.deleteTableColumn.addEventListener("click", () => {
+  if (!editor.deleteTableColumn()) setStatus("結合セルや行ごとの列数が異なる表では、列の削除は行いません。セル編集・行操作をご利用ください。", "info");
+});
 ui.deleteTable.addEventListener("click", () => {
   if (window.confirm("選択中の表全体を削除しますか？")) editor.deleteTable();
 });
@@ -2565,70 +2552,30 @@ ui.image.addEventListener("change", () => {
   });
   reader.readAsDataURL(file);
 });
-
-ui.appUpdateButton.addEventListener("click", () => {
-  ui.updatePanel.hidden = !ui.updatePanel.hidden;
-});
-ui.closeUpdatePanel.addEventListener("click", () => { ui.updatePanel.hidden = true; });
-ui.saveUpdateSettings.addEventListener("click", async () => {
-  ui.saveUpdateSettings.disabled = true;
-  try {
-    await saveUpdateSettings();
-  } catch (error) {
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = `設定を保存できませんでした: ${error.message}`;
-  } finally {
-    ui.saveUpdateSettings.disabled = false;
+ui.saveSelectedImage.addEventListener("click", async () => {
+  const image = editor.getSelectedImageDetails();
+  if (!image?.src) return;
+  if (!image.src.startsWith("data:image/")) {
+    setStatus("埋め込み済みの画像を選択すると、保存できます。", "info");
+    return;
   }
-});
-ui.checkAppUpdate.addEventListener("click", async () => {
   try {
-    await saveUpdateSettings();
-    await checkAppUpdate();
+    const blob = await (await fetch(image.src)).blob();
+    const extension = blob.type.split("/")[1]?.replace("jpeg", "jpg") || "png";
+    const baseName = image.fileName.replace(/\.[a-z0-9]+$/i, "") || "image";
+    const saved = await saveOutput(blob, `${baseName}.${extension}`, [{ name: "画像", extensions: [extension] }]);
+    setStatus(saved ? "画像を保存しました。" : "画像の保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = `更新を確認できませんでした: ${error.message}`;
-  }
-});
-ui.downloadAppUpdate.addEventListener("click", async () => {
-  if (!latestAppUpdate?.updateAvailable) return;
-  setButtonProcessing(ui.downloadAppUpdate, true);
-  try {
-    const response = await postJson("/api/update/download", {});
-    const data = await response.json();
-    ui.updateResult.dataset.kind = "current";
-    ui.updateResult.textContent = `v${data.version} を安全にダウンロードしました。\nSHA-256を確認済みです。\n保存先: ${data.path}\n\n${canApplyAppUpdate ? "「再起動して更新を適用」で新しい版へ切り替えられます。" : "開発版では自動切り替えを行いません。Windowsポータブル版では自動適用できます。"}`;
-    ui.applyAppUpdate.hidden = !canApplyAppUpdate;
-    setStatus(`更新版 v${data.version} をダウンロードしました。現在のバージョンはそのまま動作しています。`, "success");
-  } catch (error) {
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = `更新ZIPをダウンロードできませんでした: ${error.message}`;
-    setStatus(`更新版のダウンロードに失敗しました: ${error.message}`, "error");
-  } finally {
-    setButtonProcessing(ui.downloadAppUpdate, false);
-    ui.downloadAppUpdate.disabled = false;
-  }
-});
-ui.applyAppUpdate.addEventListener("click", async () => {
-  if (!window.confirm("編集中の内容を保存しましたか？ アプリを終了して新しいバージョンへ切り替えます。")) return;
-  setButtonProcessing(ui.applyAppUpdate, true);
-  try {
-    const response = await postJson("/api/update/apply", {});
-    const data = await response.json();
-    ui.updateResult.dataset.kind = "available";
-    ui.updateResult.textContent = `v${data.version} を適用しています。\nこの画面はまもなく閉じ、新しいバージョンで開き直します。`;
-    setStatus("アプリを再起動して更新を適用しています…", "info");
-  } catch (error) {
-    setButtonProcessing(ui.applyAppUpdate, false);
-    ui.applyAppUpdate.disabled = false;
-    ui.updateResult.dataset.kind = "";
-    ui.updateResult.textContent = `更新を適用できませんでした: ${error.message}`;
+    setStatus(`画像を保存できませんでした: ${error.message}`, "error");
   }
 });
 
 window.webRevisionFlushAutosave = async () => {
   try {
     await flushAutoSave();
+    if (state.dirty && state.originalHtml && !canAutoSaveCurrentPage()) {
+      return { ok: true, needsManualSave: true };
+    }
     if (state.dirty && state.originalHtml) throw autoSaveError || new Error("未保存の編集内容があります。");
     return { ok: true };
   } catch (error) {

@@ -37,7 +37,7 @@ function createPageEntries({ fileName, originalHtml, modifiedHtml, changes = [],
     ["readme", "README.txt     この内容説明"],
   ].filter(([key]) => selectedFiles.has(key)).map(([, description]) => description);
   const readme = [
-    "Web Revision Editor 案件一式",
+    "Web Revision Desk 案件一式",
     "",
     `対象ファイル: ${fileName}`,
     `取得元URL: ${resolvedSourceUrl || "（ローカルHTML）"}`,

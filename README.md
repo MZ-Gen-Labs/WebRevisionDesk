@@ -5,7 +5,7 @@
 [![CI](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-SingleFileを使わず、URLをElectron内蔵Chromiumで開いて現在の表示を単一HTMLとして取り込めます。外部ブラウザ、Playwright、localhost APIを必要としません。
+SingleFileを使わず、URLをElectron内蔵Chromiumで開いて現在の表示を単一HTMLとして取り込めます。外部ブラウザやlocalhost APIを必要としません。
 
 ## Electron版
 
@@ -49,22 +49,19 @@ npm ci
 npm run electron:dev
 ```
 
-従来のローカルWeb版は互換性確認用として`npm run dev`で起動できます。
-
 ## テスト
 
-依存モジュール更新後を含む通常の確認は、Chromiumをインストールしたうえで次を実行します。
+依存モジュール更新後を含む通常の確認は、次を実行します。
 
 ```bash
-npx playwright install chromium
 npm test
 ```
 
-`npm test` は、URL階層・Windowsファイル名・更新判定・SHA-256拒否等の単体テスト、本番ビルド、HTML読込・編集・Undo/Redo・ZIP出力・詳細設定・検索置換・表編集のブラウザテストを順に実行します。現時点では単体37件、画面操作32件を実行します。GitHub ActionsでもPull Requestと`main`へのpushごとに同じ主要テストを実行します。Windows Releaseでは生成したElectron ZIPを展開し、連続取得、取得エラー後の解放、起動を追加確認します。
+`npm test` は、URL階層、案件保存、検索・置換、差分生成、表編集、Windowsファイル名などの単体テストと本番ビルドを実行します。GitHub ActionsではPull Requestと`main`へのpushごとにWindows版Electronアーカイブの生成・起動スモークテストも実行します。
 
 ## バージョンとリリース
 
-`package.json` をアプリのバージョン番号の正本とします。画面表示、Windows ZIP名、`release.json`、更新確認はこの値を使用します。`npm run version:check` は `package.json`、`package-lock.json`、リリース時のGitタグが一致することを検証し、不一致の場合はCIとリリースを停止します。
+`package.json` をアプリのバージョン番号の正本とします。画面表示とWindows ZIP名はこの値を使用します。`npm run version:check` は `package.json`、`package-lock.json`、リリース時のGitタグが一致することを検証し、不一致の場合はCIとリリースを停止します。
 
 通常の機能追加版を公開する手順は次のとおりです。
 
@@ -89,8 +86,8 @@ git push origin vX.Y.Z
 3. 右側の「編集メニュー」に表示された項目から内容を変更する
 4. 文章はページ上でダブルクリックして直接編集することもできる
 5. 「修正前」「修正後」「変更箇所」で表示を比較する
-6. 「共有用ファイル一式を保存」で提出・保管用ZIPを出力する
-7. 修正後ページ、修正内容一覧、変更箇所ページだけが必要な場合は「その他の保存」から選ぶ
+6. 「共有用ファイル一式を保存」で提出・保管用ZIPを、OSの保存画面から出力する
+7. 修正後ページ、修正内容一覧、変更箇所ページだけが必要な場合は「その他の保存」から選び、OSの保存画面から出力する
 
 「1つ戻す」「やり直す」で編集操作を段階的に戻せます。「すべてリセット」は全変更を読み込み時点へ戻します。ページ一覧で複数ページをチェックしている場合は、チェックした全ページの編集内容と変更履歴を取得時点へ戻します。取得済みデータと一覧は残ります。
 通常は文章・リンク・画像差し替えだけが表示されます。画像のaltやCSS classを変更する場合は「詳細設定を表示」を有効にします。案件ページの変更は自動保存され、「自動保存待ち」「自動保存中」「自動保存済み」で状態を確認できます。「今すぐ保存」は自動保存を待たず確定したい場合に利用します。
@@ -200,7 +197,7 @@ SingleFile等で保存済みのHTMLを使用する場合は、「取り込み・
 
 取得用ブラウザのログイン状態はElectronの専用ユーザーデータ領域に保存され、外部サービスへは送信されません。Windowsでは通常`%APPDATA%\WebRevisionDesk`配下です。共有PCでは利用後のプロファイル管理に注意してください。
 
-## アプリの設定と更新確認
+## アプリの設定
 
 ### ログインが必要なページの取得準備
 
@@ -209,10 +206,6 @@ SingleFile等で保存済みのHTMLを使用する場合は、「取り込み・
 スイッチは選択中の案件へ保存されます。完了状態は画面を開いている間だけ保持し、案件の切り替えやURLの手入力変更で再確認待ちに戻ります。ログイン成功や期限切れの自動判定は行いません。認証が切れた場合は再度ログイン用ブラウザを開いてください。
 
 完了時にブラウザを閉じ、専用プロファイルに残るCookie等を後続処理で使用します。ブラウザ終了時に失効する認証やsessionStorageのみを使うサイトでは、一括処理に認証を引き継げない場合があります。その場合は取得用ブラウザでログイン後、そのまま「表示中ページを取り込む」を利用してください。待機の中止はログアウトや認証情報の消去ではありません。専用プロファイルは案件間で共通です。
-
-### 更新確認
-
-アプリは設定したGitHub Releasesを定期確認し、新しい正式版を通知します。Windows配布版では更新ZIPのダウンロードと再起動による切り替えに対応します。案件データと設定はアプリ本体とは別に保持されるため、更新後も同じ案件を継続できます。
 
 ## Windows Electron版の作成
 

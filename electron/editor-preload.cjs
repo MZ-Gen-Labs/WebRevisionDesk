@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("webRevisionDesktop", Object.freeze({
     ensureFile: (parts, create) => invokeFile("ensure-file", { parts, create }),
     readText: (parts) => invokeFile("read-text", { parts }),
     writeText: (parts, content) => invokeFile("write-text", { parts, content }),
+    saveOutput: ({ suggestedName, contentBase64, filters }) => invokeFile("save-output", { suggestedName, contentBase64, filters }),
     remove: (parts, recursive) => invokeFile("remove", { parts, recursive }),
   }),
 }));

@@ -10,23 +10,13 @@
 
 Electron distributions include Chromium, Node.js, and other third-party components. Distributed Electron builds must retain the license files included in the official Electron distribution.
 
-## Playwright
-
-- Project: Microsoft Playwright
-- Website: https://playwright.dev/
-- Source: https://github.com/microsoft/playwright
-- License: Apache License 2.0
-- Use in this project: Launching a local Chromium browser and reading a user-selected rendered page for HTML capture.
-
-Playwright is used without incorporating SingleFile source code. Keep Playwright's license and notices with distributed builds.
-
 ## Vite
 
 - Project: Vite
 - Website: https://vite.dev/
 - Source: https://github.com/vitejs/vite
 - License: MIT
-- Use in this project: Local development server and frontend build.
+- Use in this project: Frontend build.
 
 ## fflate
 

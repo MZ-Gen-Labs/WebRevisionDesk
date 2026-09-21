@@ -1,6 +1,6 @@
 {
   "name": "web-revision-desk",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "main": "electron/main.mjs",
   "private": true,
   "description": "Capture, edit, compare, and create clear revision instructions for existing web pages.",
@@ -18,23 +18,19 @@
     "nodeVersion": "24.18.0"
   },
   "scripts": {
-    "dev": "node server.js",
     "electron:dev": "npm run build && electron electron/main.mjs",
     "electron:feasibility": "electron electron/main.mjs --feasibility-ui",
     "electron:package:win": "node scripts/build-electron-feasibility.mjs",
     "electron:migration:package:win": "npm run build && node scripts/build-electron-migration.mjs",
     "build:electron:win": "npm run build && node scripts/build-electron-migration.mjs",
     "build": "vite build",
-    "build:portable": "node scripts/build-windows-portable.mjs",
     "version:check": "node scripts/check-version.mjs",
     "preview": "vite preview",
-    "test": "npm run version:check && npm run test:unit && npm run build && npm run test:e2e",
-    "test:unit": "node --test tests/unit/*.test.js",
-    "test:e2e": "node --test --test-timeout=60000 tests/e2e/*.test.js"
+    "test": "npm run version:check && npm run test:unit && npm run build",
+    "test:unit": "node --test tests/unit/*.test.js"
   },
   "dependencies": {
-    "fflate": "^0.8.3",
-    "playwright": "^1.55.0"
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "electron": "44.4.3",

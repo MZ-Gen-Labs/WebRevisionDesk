@@ -226,17 +226,29 @@ async function inspectContents(contents) {
   return { ...result, inspectedAt: new Date().toISOString() };
 }
 
-async function fetchResource(url) {
+async function fetchResource(url, failures) {
+  const addFailure = (reason) => {
+    if (failures.length >= 20) return;
+    failures.push({ url: redactUrl(url).slice(0, 240), reason: String(reason || "取得に失敗").slice(0, 160) });
+  };
   try {
     const response = await captureSession.fetch(url, { signal: AbortSignal.timeout(20_000) });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      addFailure(`HTTP ${response.status}`);
+      return null;
+    }
     const body = Buffer.from(await response.arrayBuffer());
-    if (body.length > MAX_RESOURCE_BYTES) return null;
+    if (body.length > MAX_RESOURCE_BYTES) {
+      addFailure(`ファイルが${Math.ceil(MAX_RESOURCE_BYTES / 1024 / 1024)}MBを超過`);
+      return null;
+    }
     const contentType = response.headers.get("content-type")?.split(";")[0] || "application/octet-stream";
     if (!(contentType === "text/css" || /^(image|font|audio|video)\//i.test(contentType) || /font/i.test(contentType))) return null;
     return { body, contentType };
   } catch (error) {
-    await record("resource-failed", { url: redactUrl(url), message: error.message });
+    addFailure(error.message);
+    const failure = { url: redactUrl(url), message: error.message || "取得に失敗" };
+    await record("resource-failed", failure);
     return null;
   }
 }
@@ -254,13 +266,14 @@ async function captureCurrentPage({ includeScreenshot = true, window = ensurePag
   const assets = new Map();
   const cssSources = new Map(metadata.stylesheetTexts.map(({ url, css }) => [url, css]));
   const queue = [...new Set(metadata.resourceUrls)];
+  const resourceFailures = [];
   cssSources.forEach((css, url) => extractCssUrls(css, url).forEach((nested) => queue.push(nested)));
   let totalBytes = 0;
   for (let index = 0; index < queue.length && totalBytes < MAX_TOTAL_BYTES; index += 1) {
     const url = queue[index];
     if (!/^https?:/i.test(url) || assets.has(url) || cssSources.has(url)) continue;
     progress(`関連ファイルを取得しています（${index + 1}/${queue.length}）`);
-    const resource = await fetchResource(url);
+    const resource = await fetchResource(url, resourceFailures);
     if (!resource) continue;
     totalBytes += resource.body.length;
     if (resource.contentType === "text/css") {
@@ -312,6 +325,7 @@ async function captureCurrentPage({ includeScreenshot = true, window = ensurePag
     screenshot,
     metadata,
     statistics: { assets: assets.size, stylesheets: cssSources.size, embeddedBytes: totalBytes },
+    resourceFailures,
     capturedAt: new Date().toISOString(),
   };
   await record("capture-complete", { url: redactUrl(metadata.url), ...lastCapture.statistics });
@@ -451,14 +465,10 @@ function jsonResponse(value, status = 200) {
 
 async function readEditorSettings() {
   try {
-    return {
-      githubRepository: "MZ-Gen-Labs/WebRevisionDesk",
-      checkUpdatesOnStartup: true,
-      ...JSON.parse(await readFile(path.join(app.getPath("userData"), "settings.json"), "utf8")),
-    };
+    return JSON.parse(await readFile(path.join(app.getPath("userData"), "settings.json"), "utf8"));
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    return { githubRepository: "MZ-Gen-Labs/WebRevisionDesk", checkUpdatesOnStartup: true };
+    return {};
   }
 }
 
@@ -467,8 +477,6 @@ async function writeEditorSettings(settings) {
   const next = {
     ...current,
     ...settings,
-    githubRepository: String(settings.githubRepository || current.githubRepository || "MZ-Gen-Labs/WebRevisionDesk").trim(),
-    checkUpdatesOnStartup: settings.checkUpdatesOnStartup ?? current.checkUpdatesOnStartup ?? true,
     lastProjectDirectory: String(settings.lastProjectDirectory ?? current.lastProjectDirectory ?? ""),
     recentProjects: Array.isArray(settings.recentProjects) ? settings.recentProjects.slice(0, 12) : current.recentProjects || [],
   };
@@ -504,24 +512,7 @@ async function openCapturePage(url, { show = true } = {}) {
 async function handleEditorApi({ url, method, bodyBase64 }) {
   const body = bodyBase64 ? JSON.parse(Buffer.from(bodyBase64, "base64").toString("utf8")) : {};
   if (method === "GET" && url === "/api/app-info") {
-    return jsonResponse({
-      version: packageJson.version,
-      dataDirectory: app.getPath("userData"),
-      canApplyUpdate: false,
-      settings: await readEditorSettings(),
-    });
-  }
-  if (method === "POST" && url === "/api/settings") {
-    return jsonResponse({ settings: await writeEditorSettings(body) });
-  }
-  if (method === "POST" && url === "/api/update/check") {
-    return jsonResponse({
-      currentVersion: packageJson.version,
-      latestVersion: packageJson.version,
-      updateAvailable: false,
-      downloadable: false,
-      releaseUrl: "https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases",
-    });
+    return jsonResponse({ version: packageJson.version });
   }
   if (method === "POST" && url === "/api/capture/start") {
     const metadata = await openCapturePage(body.url, { show: true });
@@ -537,6 +528,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
       "Content-Type": "text/html; charset=utf-8",
       "X-Captured-Filename": encodedHeader(capturedFileName(lastCapture.metadata)),
       "X-Captured-Url": encodedHeader(lastCapture.metadata.url),
+      "X-Captured-Resource-Failures": encodedHeader(JSON.stringify(lastCapture.resourceFailures)),
     } });
   }
   if (method === "POST" && (url === "/api/capture/cancel" || url === "/api/login/finish")) {
@@ -550,6 +542,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
       "Content-Type": "text/html; charset=utf-8",
       "X-Captured-Filename": encodedHeader(capturedFileName(captured.metadata)),
       "X-Captured-Url": encodedHeader(captured.metadata.url),
+      "X-Captured-Resource-Failures": encodedHeader(JSON.stringify(captured.resourceFailures || [])),
     } });
   }
   if (method === "POST" && url === "/api/preview/screenshot") {
@@ -561,7 +554,6 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
     } });
   }
   if (method === "POST" && url === "/api/crawl") return jsonResponse(await crawl(body.baseUrl, body.maxPages));
-  if (url.startsWith("/api/update/")) return jsonResponse({ error: "Electron移行版では更新機能を準備中です。" }, 501);
   return jsonResponse({ error: "対応していない操作です。" }, 404);
 }
 
@@ -582,7 +574,7 @@ function fileResultError(error) {
   return { ok: false, errorName, message: error.message };
 }
 
-async function handleFileSystem({ operation, parts = [], create = false, content = "", recursive = false }) {
+async function handleFileSystem({ operation, parts = [], create = false, content = "", contentBase64 = "", suggestedName = "", filters = [], recursive = false }) {
   try {
     if (operation === "select") {
       const settings = await readEditorSettings();
@@ -624,6 +616,16 @@ async function handleFileSystem({ operation, parts = [], create = false, content
         : settings.lastProjectDirectory;
       await writeEditorSettings({ ...settings, lastProjectDirectory, recentProjects });
       return { ok: true, value: recentProjects };
+    }
+    if (operation === "save-output") {
+      const selected = await dialog.showSaveDialog(mainWindow, {
+        title: "保存先を選択",
+        defaultPath: path.basename(String(suggestedName || "web-revision-output")),
+        filters: Array.isArray(filters) ? filters : [],
+      });
+      if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+      await writeFile(selected.filePath, Buffer.from(String(contentBase64), "base64"));
+      return { ok: true, value: { path: selected.filePath } };
     }
     const target = validatedProjectPath(parts);
     if (operation === "ensure-directory") {
@@ -735,7 +737,22 @@ async function createMainWindow({ show = true } = {}) {
       } catch (error) {
         result = { ok: false, message: error.message };
       }
-      if (!result?.ok) {
+      if (result?.needsManualSave) {
+        const confirmation = await dialog.showMessageBox(mainWindow, {
+          type: "warning",
+          title: "編集内容が保存されていません",
+          message: "案件フォルダに保存されていない編集内容があります。",
+          detail: "「終了をキャンセル」を選び、修正後ページまたは共有用ZIPを保存してから終了してください。",
+          buttons: ["終了をキャンセル", "保存せず終了"],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        });
+        if (confirmation.response !== 1) {
+          mainWindowClosePending = false;
+          return;
+        }
+      } else if (!result?.ok) {
         const confirmation = await dialog.showMessageBox(mainWindow, {
           type: "warning",
           title: "編集内容を保存できませんでした",

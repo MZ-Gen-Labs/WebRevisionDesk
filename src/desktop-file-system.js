@@ -62,6 +62,25 @@ export function desktopFileSystemAvailable() {
   return Boolean(globalThis.webRevisionDesktop?.fileSystem);
 }
 
+function base64FromBytes(bytes) {
+  let text = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    text += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(text);
+}
+
+export async function saveDesktopOutput(blob, { suggestedName, filters = [] } = {}) {
+  if (!desktopFileSystemAvailable()) return null;
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  return unwrap(desktop().saveOutput({
+    suggestedName,
+    contentBase64: base64FromBytes(bytes),
+    filters,
+  }));
+}
+
 export async function selectDesktopProjectDirectory() {
   const selected = await unwrap(desktop().selectProjectDirectory());
   if (!selected) {

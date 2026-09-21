@@ -195,7 +195,7 @@ export class ProjectStore {
     return this.project.discoveredPages;
   }
 
-  async savePage({ fileName, sourceUrl, originalHtml, workingHtml, changes }) {
+  async savePage({ fileName, sourceUrl, originalHtml, workingHtml, changes, resourceFailures = [] }) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
     if (!this.project.baseUrl) throw new Error("基準URLを入力してください。");
     const normalizedUrl = normalizePageUrl(sourceUrl);
@@ -213,6 +213,7 @@ export class ProjectStore {
       path: path.join("/"),
       status: existing?.status || "editing",
       changeCount: changes.length,
+      resourceFailures: Array.isArray(resourceFailures) ? resourceFailures.slice(0, 30) : [],
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     };
@@ -249,7 +250,7 @@ export class ProjectStore {
       readTextFile(directory, "page.json"),
     ]);
     const data = JSON.parse(dataText);
-    return { page, originalHtml, workingHtml, changes: data.changes || [] };
+    return { page: { ...page, resourceFailures: data.resourceFailures || page.resourceFailures || [] }, originalHtml, workingHtml, changes: data.changes || [] };
   }
 
   async resetPageChanges(pageIds) {

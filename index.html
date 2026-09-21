@@ -10,7 +10,7 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">Web Revision Desk</p>
-        <h1>Webサイト修正案エディター <button id="app-update-button" class="version-button" type="button">v--</button></h1>
+        <h1>Webサイト修正案エディター <span id="app-version" class="version-button">v--</span></h1>
       </div>
       <div class="toolbar" aria-label="編集・保存操作">
         <button id="show-original" type="button" disabled>修正前</button>
@@ -36,33 +36,6 @@
     <div id="status" class="status" role="status" aria-live="polite">
       案件フォルダを選択してください。
     </div>
-
-    <section id="update-panel" class="update-panel" aria-labelledby="update-title" hidden>
-      <div class="update-panel-heading">
-        <div>
-          <p class="eyebrow">Application Update</p>
-          <h2 id="update-title">アプリの更新</h2>
-        </div>
-        <button id="close-update-panel" type="button">閉じる</button>
-      </div>
-      <div class="update-settings">
-        <label>GitHubリポジトリURL
-          <input id="update-repository" type="url" placeholder="https://github.com/owner/repository" />
-        </label>
-        <label class="update-checkbox">
-          <input id="check-updates-on-startup" type="checkbox" checked />
-          起動時に更新を確認する
-        </label>
-        <button id="save-update-settings" type="button">設定を保存</button>
-        <button id="check-app-update" class="button-primary" type="button">今すぐ確認</button>
-      </div>
-      <div id="update-result" class="update-result">GitHubリポジトリを登録すると、公開された最新版を確認できます。</div>
-      <div class="update-actions">
-        <a id="open-update-release" class="button" href="#" target="_blank" rel="noopener" hidden>更新内容を開く</a>
-        <button id="download-app-update" class="button-primary" type="button" hidden>更新ZIPをダウンロード</button>
-        <button id="apply-app-update" class="button-primary" type="button" hidden>再起動して更新を適用</button>
-      </div>
-    </section>
 
     <details id="setup-panel" class="setup-panel" open>
       <summary>取り込み・案件設定 <span>案件フォルダ／ログイン／その他</span></summary>
@@ -172,6 +145,10 @@
         <div id="screenshot-preview" class="screenshot-preview" hidden>
           <img id="screenshot-preview-image" alt="公開ページのスクリーンショット" />
         </div>
+        <details id="resource-failures" class="resource-failures" hidden>
+          <summary>一部の関連ファイルを取り込めませんでした</summary>
+          <ul id="resource-failure-list"></ul>
+        </details>
         <iframe
           id="page-frame"
           title="編集対象ページ"
@@ -246,6 +223,7 @@
           <label data-editor-field="image">
             画像を差し替える
             <input id="image-file" type="file" accept="image/*" />
+            <button id="save-selected-image" class="small-button" type="button" disabled>この画像を保存</button>
           </label>
           <label data-editor-field="image-url">
             画像URL（src）

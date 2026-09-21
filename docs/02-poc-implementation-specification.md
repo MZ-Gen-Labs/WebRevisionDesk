@@ -66,7 +66,7 @@ VvvebJsは、PoC後に自由度の高い追加・配置、Undo/Redo、階層ナ�
 | 表示 | sandbox付き `iframe.srcdoc` |
 | 編集 | `contenteditable`, DOM API, `classList` |
 | 画像 | File API + data URL |
-| 保存 | `Blob`, object URL, `download` 属性 |
+| 保存 | ElectronのOS標準保存ダイアログ（HTML・ZIP・画像）。Web表示時のみBlob/object URLへフォールバック |
 | 永続化 | Electron IPC経由の案件フォルダ保存。開発時のブラウザ動作ではFile System Access APIも利用可能 |
 | URL取得 | Electron内蔵Chromium + 独自のHTML/CSS/画像埋め込み処理 |
 | 案件フォルダ | OS標準フォルダ選択、URL階層に対応する相対パス |
@@ -102,8 +102,7 @@ Playwrightおよび外部ブラウザは標準配布版で使用しない。Sing
   redoChanges: [],
   sourceUrl: "https://example.com/page",
   activeProjectPageId: "",
-  dirty: false,
-  selectedElements: []
+  dirty: false
 }
 ```
 
@@ -111,6 +110,7 @@ Playwrightおよび外部ブラウザは標準配布版で使用しない。Sing
 - `modifiedHtml`: 編集iframeから直列化した最新文字列
 - 修正前モードは参照専用
 - 修正後モードのみ選択・編集可能。検索・置換の開始時は、修正前・変更箇所から修正後へ自動切替する
+- 選択中要素はページ固有の編集状態であり、`PageEditor.selectedElements` が保持する。案件一覧の複数選択、取得待ち、プレビュー専用状態などの画面制御情報はアプリケーション状態で別途保持する
 
 ## 7. 機能仕様
 
@@ -232,24 +232,29 @@ WebRevisionDesk/
 ├── index.html
 ├── package.json
 ├── README.md
-├── server.js
 ├── electron/
 │   ├── main.mjs
-│   └── preload.mjs
-├── windows/
+│   ├── editor-preload.cjs
+│   ├── preload.cjs
+│   ├── project-file-system.mjs
+│   └── ui/
+│       ├── index.html
+│       ├── renderer.js
+│       └── styles.css
 ├── scripts/
 ├── src/
 │   ├── main.js
 │   ├── editor.js
 │   ├── html.js
-│   ├── capture-page.js
+│   ├── browser-task-queue.js
 │   ├── desktop-file-system.js
 │   ├── diff-report.js
+│   ├── electron-feasibility-core.js
 │   ├── project-storage.js
 │   ├── project-package.js
 │   ├── page-comparison.js
+│   ├── runtime-api.js
 │   ├── search-replace.js
-│   ├── update-service.js
 │   └── styles.css
 ├── tests/
 │   ├── unit/
@@ -257,6 +262,8 @@ WebRevisionDesk/
 └── test-data/
     └── sample.html
 ```
+
+Electronのpreloadは、用途別にCommonJS（`.cjs`）で分離する。画面・配布物上の製品名は **Web Revision Desk** を用いる。更新機能および旧Node.js／Playwright実装は標準配布物に含めず、将来の更新方式は別途設計する。
 
 ## 9. 受入テスト
 
@@ -291,11 +298,11 @@ WebRevisionDesk/
 
 | 区分 | 主な対象 | 現在の件数 |
 |---|---|---:|
-| 単体テスト | URL階層、保存、更新判定、Electron IPC、検索条件、Windows起動・更新スクリプト | 37件 |
-| 画面操作テスト | 読込・編集・Undo/Redo・差分・案件管理・検索置換・表編集・安全制御 | 32件 |
+| 単体テスト | URL階層、案件保存、Electron IPC、検索条件、文字差分、表編集の安全制御 | 22件 |
+| Electronスモークテスト | Windows ZIPの生成、起動、preload・IPC・連続取得・終了処理 | CIで実行 |
 | ビルド検証 | バージョン整合性、Vite本番ビルド | 各1件 |
 
-開発時の総合確認は `npm test` を実行する。これはバージョン整合性、単体テスト、本番ビルド、画面操作テストの順に行う。画面操作テストは一時的な案件フォルダとローカルサーバーを使用し、実案件データを変更しない。
+開発時の総合確認は `npm test` を実行する。これはバージョン整合性、単体テスト、本番ビルドの順に行う。Pull Requestと`main`へのpushでは、Windows CIが生成済みElectron ZIPの起動スモークテストを追加実行する。
 
 ## 10. 互換性検証マトリクス
 

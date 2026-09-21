@@ -120,6 +120,25 @@ function addLabel(element, label, kind = "change") {
     marker.title = label;
     return element;
   }
+  if (element.tagName === "TABLE") {
+    element.classList.add("wr-redline-target", `wr-redline-${kind}`);
+    const host = element.parentElement;
+    if (!host) return element;
+    const labels = element.getAttribute("data-wr-label");
+    const combinedLabel = labels ? `${labels} / ${label}` : label;
+    element.setAttribute("data-wr-label", combinedLabel);
+    const markerId = element.getAttribute(EDITOR_ID_ATTR) || `table-${Math.random().toString(36).slice(2)}`;
+    if (!element.getAttribute(EDITOR_ID_ATTR)) element.setAttribute(EDITOR_ID_ATTR, markerId);
+    let badge = [...host.children].find((child) => child.getAttribute("data-wr-table-label-for") === markerId);
+    if (!badge) {
+      badge = element.ownerDocument.createElement("span");
+      badge.className = "wr-redline-label wr-table-redline-label";
+      badge.setAttribute("data-wr-table-label-for", markerId);
+      host.insertBefore(badge, element);
+    }
+    badge.textContent = combinedLabel;
+    return element;
+  }
   const target = element;
   target.classList.add("wr-redline-target", `wr-redline-${kind}`);
   const labels = target.getAttribute("data-wr-label");
@@ -408,7 +427,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     ins{display:inline;color:#08733f;background:#dff7e9;text-decoration:none;border-bottom:2px solid #19a260}
     del+ins{margin-left:.35em}
     .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:3px!important}
-    .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}
+    .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:table-caption!important;caption-side:top!important}
     .wr-page-info-changes{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px!important;padding:14px!important;border:3px solid #a65a20!important;border-radius:8px!important;color:#24242d!important;background:#fff8ec!important;font:14px/1.5 system-ui,sans-serif!important}.wr-page-info-changes>strong{color:#8d4918!important}.wr-page-info-changes>div{display:grid!important;grid-template-columns:minmax(130px,auto) 1fr!important;gap:10px!important}.wr-page-info-changes span{overflow-wrap:anywhere!important}
     .wr-image-change-summary{position:relative!important;z-index:2147483646!important;display:grid!important;gap:12px!important;margin:12px!important;padding:14px!important;border:3px solid #9a7010!important;border-radius:8px!important;color:#24242d!important;background:#fffbed!important;font:14px/1.5 system-ui,sans-serif!important}.wr-image-change-summary>strong{color:#7e5908!important;font-size:16px!important}.wr-image-change-summary>article{display:grid!important;gap:8px!important;padding:12px!important;border:1px solid #dfc574!important;border-radius:7px!important;background:#fff!important}.wr-image-change-summary h3{margin:0!important;color:#7e5908!important;font:800 14px/1.4 system-ui,sans-serif!important}.wr-image-change-summary article>div:not(.wr-image-comparison){display:grid!important;grid-template-columns:minmax(120px,auto) minmax(0,1fr)!important;gap:10px!important}.wr-image-change-summary article>div>span{overflow-wrap:anywhere!important;word-break:break-word!important}
     .wr-image-label-host{position:relative!important}.wr-image-marker{position:absolute!important;z-index:2147483647!important;top:4px!important;left:4px!important;display:inline-block!important;max-width:calc(100% - 8px)!important;padding:3px 7px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;box-shadow:0 1px 4px #0004!important;font:700 11px/1.4 system-ui,sans-serif!important;white-space:nowrap!important;text-decoration:none!important;pointer-events:none!important}
