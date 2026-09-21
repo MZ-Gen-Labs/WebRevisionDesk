@@ -639,9 +639,14 @@ export class PageEditor {
         ? context.rowIndex
         : context.rowIndex + (context.cellInfo?.rowSpan || 1);
 
-      const refRow = rows[context.rowIndex] || rows[0];
-      let section = refRow?.parentElement;
-      if (!section || section.tagName === "THEAD") section = context.table.tBodies[0] || context.table.createTBody();
+      // For a row-spanning selected cell, the insertion point is after the
+      // final covered row, not after the row where that cell originates.
+      const refRow = position === "before"
+        ? (rows[context.rowIndex] || rows[0])
+        : (rows[insertAtRow - 1] || rows.at(-1));
+      // Keep a new row in the same table section as the selected row.  Moving
+      // a THEAD row into TBODY changes both the semantics and logical position.
+      const section = refRow?.parentElement || context.table.tBodies[0] || context.table.createTBody();
 
       const newRow = doc.createElement("tr");
       const modifiedSpans = new Set();
@@ -667,6 +672,9 @@ export class PageEditor {
         newCell.textContent = isHeader ? "見出し" : "セル";
         newCell.style.padding = ".45em";
         if (refCell) copyCellStyle(refCell, newCell);
+        // The loop advances by the reference cell's logical width, so the new
+        // cell must occupy that same width rather than leaving a gap.
+        if (refEntry?.colSpan > 1) newCell.colSpan = refEntry.colSpan;
         newRow.append(newCell);
         this.#ensureElementId(newCell);
         addedCells.push(newCell);
@@ -824,7 +832,16 @@ export class PageEditor {
       const bottomRow = rows[bottomR];
 
       originCellsToMove.forEach((cell) => {
-        bottomRow.prepend(cell);
+        // A shared rowspan cell must originate in the row that becomes the
+        // new top row. Preserve its logical column instead of prepending it,
+        // which incorrectly moves a non-first-column cell to column zero.
+        const column = grid[topR].find((entry) => entry?.cell === cell)?.col ?? 0;
+        const nextCell = [...bottomRow.cells].find((candidate) => {
+          const entry = grid[bottomR].find((item) => item?.cell === candidate);
+          return entry && entry.col > column;
+        });
+        if (nextCell) nextCell.before(cell);
+        else bottomRow.append(cell);
       });
 
       bottomRow.after(topRow);
@@ -854,6 +871,26 @@ export class PageEditor {
 
     const leftC = Math.min(c, otherC);
     const rightC = Math.max(c, otherC);
+
+    // Moving a row-spanning cell would reparent it into a covered row.  A
+    // column-spanning cell has the inverse problem: moving only one of its
+    // logical columns desynchronizes it from cells in other rows.  Until
+    // span-aware column reordering is implemented, reject either case.
+    const affectedCells = new Set();
+    for (let r = 0; r < rowCount; r++) {
+      for (const column of [leftC, rightC]) {
+        const entry = grid[r]?.[column];
+        if (entry) affectedCells.add(entry.cell);
+      }
+    }
+    if ([...affectedCells].some((cell) => (cell.rowSpan || 1) > 1)) return false;
+    // A group which covers both exchanged logical columns stays in place and
+    // remains valid.  Reject only a colspan group crossed at one of its edges.
+    for (let r = 0; r < rowCount; r++) {
+      const left = grid[r]?.[leftC];
+      const right = grid[r]?.[rightC];
+      if (left && right && left.cell !== right.cell && (left.colSpan > 1 || right.colSpan > 1)) return false;
+    }
 
     const actionName = direction === "left" ? "列を左へ移動" : "列を右へ移動";
     return this.#changeTable(actionName, (current, setDetails) => {
@@ -1065,8 +1102,12 @@ export class PageEditor {
       const { grid, rowCount } = buildTableGrid(current.table);
       const firstColCells = [];
       for (let r = 0; r < rowCount; r++) {
-        const cell = grid[r]?.[0]?.cell;
-        if (cell && !firstColCells.includes(cell)) firstColCells.push(cell);
+        const entry = grid[r]?.[0];
+        // A full-width/category heading starts in column zero too, but is not a
+        // first-column header.  Leave horizontally merged headings untouched.
+        if (entry?.isOrigin && entry.colSpan === 1 && !firstColCells.includes(entry.cell)) {
+          firstColCells.push(entry.cell);
+        }
       }
       const allTh = firstColCells.every((c) => c.tagName === "TH");
       const targetTag = allTh ? "td" : "th";
@@ -1122,6 +1163,8 @@ export class PageEditor {
     const downEntry = grid[downRow]?.[c];
     if (!downEntry || !downEntry.isOrigin) return false;
     if (downEntry.colSpan !== currentEntry.colSpan) return false;
+    // HTML cells may not span row-group boundaries (THEAD/TBODY/TFOOT).
+    if (currentEntry.cell.parentElement?.parentElement !== downEntry.cell.parentElement?.parentElement) return false;
 
     return this.#changeTable("セル結合（下）", () => {
       const topCell = currentEntry.cell;
@@ -1156,27 +1199,29 @@ export class PageEditor {
       for (let dr = 0; dr < rowSpan; dr++) {
         const r = startR + dr;
         const row = current.table.rows[r];
+        if (!row) continue;
+        // Use a live insertion anchor.  The grid is intentionally a snapshot
+        // from before the split, so it cannot describe cells created earlier
+        // in this loop (which otherwise reverses their DOM order).
+        let insertionAnchor = dr === 0 ? targetCell : null;
+        if (!insertionAnchor) {
+          for (let checkC = startC - 1; checkC >= 0; checkC--) {
+            const prevEntry = grid[r]?.[checkC];
+            if (prevEntry?.cell !== targetCell && prevEntry?.cell.parentElement === row) {
+              insertionAnchor = prevEntry.cell;
+              break;
+            }
+          }
+        }
         for (let dc = 0; dc < colSpan; dc++) {
           if (dr === 0 && dc === 0) continue;
-          const c = startC + dc;
           const newCell = doc.createElement(targetCell.tagName.toLowerCase());
           newCell.textContent = "";
           newCell.style.padding = ".45em";
           copyCellStyle(targetCell, newCell);
-
-          let inserted = false;
-          for (let checkC = c - 1; checkC >= 0; checkC--) {
-            const prevEntry = grid[r]?.[checkC];
-            if (prevEntry && prevEntry.cell !== targetCell && prevEntry.cell.parentElement === row) {
-              prevEntry.cell.after(newCell);
-              inserted = true;
-              break;
-            }
-          }
-          if (!inserted) {
-            if (dr === 0) targetCell.after(newCell);
-            else row.prepend(newCell);
-          }
+          if (insertionAnchor) insertionAnchor.after(newCell);
+          else row.prepend(newCell);
+          insertionAnchor = newCell;
         }
       }
 
@@ -1364,6 +1409,7 @@ export class PageEditor {
     const context = this.getTableContext();
     if (!context || !this.editable || !mutator) return false;
     const before = this.#cleanOuterHtml(context.table);
+    const targetCellText = context.cell?.textContent?.trim().replace(/\s+/g, " ").slice(0, 80) || "";
     const detailsOverride = {};
     const selection = mutator(context, (details) => {
       if (details && typeof details === "object") Object.assign(detailsOverride, details);
@@ -1378,8 +1424,12 @@ export class PageEditor {
     this.#emitChange("table-change", context.table, before, after, {
       action: detailsOverride.action || action,
       cellId: resolvedCellId,
-      beforeHtml: before,
-      afterHtml: after,
+      selectionCellId: cellElement && context.table.contains(cellElement)
+        ? this.#ensureElementId(cellElement)
+        : null,
+      targetRowIndex: context.rowIndex,
+      targetColIndex: context.columnIndex,
+      targetCellText,
       ...detailsOverride,
     });
     this.select(selection?.isConnected ? selection : context.table);
@@ -1748,7 +1798,10 @@ export class PageEditor {
       const replacement = this.#elementFromHtml(undo ? change.before : change.after);
       if (!replacement) return false;
       element.replaceWith(replacement);
-      this.select(replacement.querySelector("th, td") || replacement);
+      const selected = change.selectionCellId
+        ? replacement.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.selectionCellId)}"]`)
+        : null;
+      this.select(selected || replacement.querySelector("th, td") || replacement);
       return true;
     }
 

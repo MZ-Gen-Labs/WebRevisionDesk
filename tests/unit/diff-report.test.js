@@ -29,6 +29,14 @@ test("diff report escapes page and change content", () => {
   assert.equal(changeLabel("unknown"), "変更");
 });
 
+test("diff report identifies the target cell for table operations", () => {
+  const report = createDiffReport("test.html", [{
+    type: "table-change", target: "table", action: "セル分割",
+    targetRowIndex: 2, targetColIndex: 4, targetCellText: "SPAN_H_R02_C04-05",
+  }]);
+  assert.match(report, /操作対象: 3行目・5列目（SPAN_H_R02_C04-05）/);
+});
+
 test("redline report preserves child elements in elements with children on text-change", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
@@ -90,7 +98,7 @@ test("redline report highlights specific merged cell when cellId is provided", (
   assert.match(redlineHtml, /セル: セル結合（右）/);
 });
 
-test("redline report visualizes deleted table row at original row position", () => {
+test("redline report lists a deleted row without changing the final table", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -107,13 +115,14 @@ test("redline report visualizes deleted table row at original row position", () 
     before: "<table>...</table>",
     after: "<table>...</table>",
   }];
-  const redlineHtml = createRedlineReport(html, changes, "test.html");
-  assert.match(redlineHtml, /wr-redline-deleted-row/, "Should insert deleted row with deleted row class");
-  assert.match(redlineHtml, /削除行（2行目）/, "Should display badge for deleted row");
-  assert.match(redlineHtml, /削除されたデータ/, "Should preserve deleted row content");
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  assert.equal(parsed.querySelector("table").rows.length, 1, "Final table must remain unchanged");
+  const panel = parsed.querySelector(".wr-table-deletions");
+  assert.match(panel.textContent, /2行目を削除/);
+  assert.match(panel.textContent, /削除されたデータ/);
 });
 
-test("redline report visualizes deleted table column at original column position across rows", () => {
+test("redline report lists a deleted column without changing the final table", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -130,14 +139,15 @@ test("redline report visualizes deleted table column at original column position
     before: "<table>...</table>",
     after: "<table>...</table>",
   }];
-  const redlineHtml = createRedlineReport(html, changes, "test.html");
-  assert.match(redlineHtml, /wr-redline-deleted-cell/, "Should insert deleted cells with deleted cell class");
-  assert.match(redlineHtml, /削除列（1列目）/, "Should display badge for deleted column header");
-  assert.match(redlineHtml, /削除見出し/, "Should preserve deleted header content");
-  assert.match(redlineHtml, /削除セルデータ/, "Should preserve deleted cell content");
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  assert.equal([...parsed.querySelectorAll("table tr")].every((row) => row.cells.length === 1), true);
+  const panel = parsed.querySelector(".wr-table-deletions");
+  assert.match(panel.textContent, /1列目を削除/);
+  assert.match(panel.textContent, /削除見出し/);
+  assert.match(panel.textContent, /削除セルデータ/);
 });
 
-test("redline report accurately restores merged cell colspan and inserts deleted cells without shifting columns", () => {
+test("redline report preserves the final merged-cell structure when a column was deleted", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -177,21 +187,19 @@ test("redline report accurately restores merged cell colspan and inserts deleted
   // 見出し行の確認
   const headerThs = table.querySelectorAll("thead th");
   assert.equal(headerThs.length, 2, "Header row should not have extra cells inserted");
-  assert.equal(headerThs[0].colSpan, 2, "Merged header should be restored to original colSpan 2");
+  assert.equal(headerThs[0].colSpan, 1, "Final colSpan must not be rewritten");
 
   // データ行の確認
   const bodyTds = table.querySelectorAll("tbody td");
-  assert.equal(bodyTds.length, 3, "Body row should have restored cell + existing 2 cells (3 total)");
-  assert.equal(bodyTds[0].id, "c1", "Deleted cell c1 should be restored at column index 0");
-  assert.ok(bodyTds[0].classList.contains("wr-redline-deleted-cell"), "Restored cell should have wr-redline-deleted-cell class");
-  assert.match(bodyTds[0].textContent, /削除列（1列目）/, "Restored cell should display badge");
-  assert.match(bodyTds[0].textContent, /1-1/, "Restored cell text should be preserved");
+  assert.equal(bodyTds.length, 2, "Deleted cells must not be inserted into the final table");
+  assert.deepEqual([...bodyTds].map((cell) => cell.id), ["c2", "c3"]);
+  assert.match(parsedDom.window.document.querySelector(".wr-table-deletions").textContent, /1-1/);
 
   // 残ったセルに誤ってセルバッジが付いていないことを確認
   assert.equal(table.querySelectorAll("[data-wr-label*='セル: 列削除']").length, 0, "Non-deleted cells should not have cell deletion label");
 });
 
-test("redline report applies column deletion to all rows including the very last row when combined with row deletion", () => {
+test("redline report aggregates row and column deletion summaries without changing table rows", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -244,18 +252,36 @@ test("redline report applies column deletion to all rows including the very last
   const parsedDom = new JSDOM(redlineHtml);
   const table = parsedDom.window.document.querySelector("table");
 
-  // 最下行（「最下行データ2-2」の行）を取得
-  const lastRow = table.rows[table.rows.length - 1];
-  assert.equal(lastRow.cells.length, 2, "Last row must contain both deleted cell and remaining cell");
-  assert.ok(
-    lastRow.cells[0].classList.contains("wr-redline-deleted-cell"),
-    "Last row's first cell must be the restored deleted cell"
-  );
-  assert.match(
-    lastRow.cells[0].textContent,
-    /最下行データ2-1/,
-    "Last row's deleted cell content must not be skipped"
-  );
+  assert.equal(table.rows.length, 3);
+  assert.equal([...table.rows].every((row) => row.cells.length === 1), true);
+  const panel = parsedDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(panel.querySelectorAll("article").length, 2);
+  assert.match(panel.textContent, /削除された行データ/);
+  const columnSummary = panel.querySelectorAll("article")[1];
+  assert.equal(columnSummary.querySelectorAll("li").length, 2);
+  assert.match(columnSummary.textContent, /ほか1件/);
+  assert.doesNotMatch(columnSummary.textContent, /最下行データ2-1/);
+});
+
+test("redline report limits deleted row contents to two non-empty cells", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><table data-web-revision-id="table"><tbody><tr><td>残存</td></tr></tbody></table></body></html>`;
+  const change = {
+    type: "table-change",
+    elementId: "table",
+    deletedRowIndex: 0,
+    deletedRowHtml: "<tr><td>第一</td><td></td><td>第二</td><td>第三</td><td>第四</td></tr>",
+  };
+  const parsed = new JSDOM(createRedlineReport(html, [change], "test.html")).window.document;
+  const summary = parsed.querySelector(".wr-table-deletions article");
+  assert.deepEqual([...summary.querySelectorAll("li")].map((item) => item.textContent), ["第一", "第二"]);
+  assert.match(summary.textContent, /ほか2件/);
+  assert.doesNotMatch(summary.textContent, /第三|第四/);
 });
 
 test("redline report highlights all cells in added column across all rows", () => {
@@ -297,6 +323,63 @@ test("redline report highlights all cells in added column across all rows", () =
   assert.match(table.querySelector("thead th:last-child").textContent, /追加列（2列目）/, "Header should display badge");
 });
 
+test("redline report keeps text diff panels inside table cells", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
 
+  const html = `<html><body><table><tbody><tr><td data-web-revision-id="cell"><a href="/old">旧</a></td></tr></tbody></table></body></html>`;
+  const report = createRedlineReport(html, [{ type: "text-change", elementId: "cell", before: "旧", after: "新" }], "test.html");
+  const parsed = new JSDOM(report).window.document;
+  const row = parsed.querySelector("tr");
+  assert.equal([...row.children].every((child) => child.tagName === "TD" || child.tagName === "TH"), true);
+  assert.ok(row.querySelector("td > .wr-redline-text-diff-box"));
+});
 
+test("redline report lists successive row deletions without restoring them", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
 
+  // Final HTML after deleting original row 5, then original row 2.
+  const html = `<html><body><table data-web-revision-id="table"><tbody><tr><td>0</td></tr><tr><td>1</td></tr><tr><td>3</td></tr><tr><td>4</td></tr></tbody></table></body></html>`;
+  const changes = [
+    { type: "table-change", elementId: "table", deletedRowIndex: 5, deletedRowHtml: "<tr><td>5</td></tr>" },
+    { type: "table-change", elementId: "table", deletedRowIndex: 2, deletedRowHtml: "<tr><td>2</td></tr>" },
+  ];
+  const report = createRedlineReport(html, changes, "test.html");
+  const parsed = new JSDOM(report).window.document;
+  const rows = [...parsed.querySelector("table").rows];
+  assert.deepEqual(rows.map((row) => row.textContent.trim()), ["0", "1", "3", "4"]);
+  const articles = [...parsed.querySelectorAll(".wr-table-deletions article")];
+  assert.equal(articles.length, 2);
+  assert.match(articles[0].textContent, /6行目を削除.*5/s);
+  assert.match(articles[1].textContent, /3行目を削除.*2/s);
+});
+
+test("redline report lists successive column deletions without restoring them", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  // Original: A B C D E. Delete B, then (in the shortened table) delete D.
+  const html = `<html><body><table data-web-revision-id="table"><tbody><tr data-web-revision-id="row"><td>A</td><td>C</td><td>E</td></tr></tbody></table></body></html>`;
+  const changes = [
+    { type: "table-change", elementId: "table", deletedColIndex: 1, deletedCellsInfo: [{ rowId: "row", action: "deleted", cellHtml: "<td>B</td>" }] },
+    { type: "table-change", elementId: "table", deletedColIndex: 2, deletedCellsInfo: [{ rowId: "row", action: "deleted", cellHtml: "<td>D</td>" }] },
+  ];
+  const report = createRedlineReport(html, changes, "test.html");
+  const parsed = new JSDOM(report).window.document;
+  const cells = [...parsed.querySelector("tr").cells];
+  assert.deepEqual(cells.map((cell) => cell.textContent.trim()), ["A", "C", "E"]);
+  const articles = [...parsed.querySelectorAll(".wr-table-deletions article")];
+  assert.equal(articles.length, 2);
+  assert.match(articles[0].textContent, /2列目を削除.*B/s);
+  assert.match(articles[1].textContent, /3列目を削除.*D/s);
+});

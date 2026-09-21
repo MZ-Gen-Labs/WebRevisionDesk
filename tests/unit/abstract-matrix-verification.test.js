@@ -5,6 +5,7 @@ import path from "node:path";
 import { JSDOM } from "jsdom";
 import { PageEditor, buildTableGrid } from "../../src/editor.js";
 import { createRedlineReport } from "../../src/diff-report.js";
+import { generateAbstractTableHtml } from "../helpers/abstract-table-fixture.js";
 
 function setupEditor(html) {
   const dom = new JSDOM(html);
@@ -35,6 +36,25 @@ function setupEditor(html) {
 
 const htmlPath = path.resolve(process.cwd(), "test-data/sample-abstract-matrix.html");
 const abstractHtml = fs.readFileSync(htmlPath, "utf-8");
+
+test("abstract table generator creates neutral coordinate-labelled merge fixtures", () => {
+  const html = generateAbstractTableHtml({
+    rows: 4, cols: 5, headerRows: 1,
+    merges: [{ row: 0, col: 1, colSpan: 3 }, { row: 1, col: 2, rowSpan: 2, colSpan: 2 }],
+  });
+  const table = new JSDOM(html).window.document.querySelector("table");
+  const grid = buildTableGrid(table);
+  assert.equal(grid.rowCount, 4);
+  assert.equal(grid.colCount, 5);
+  assert.equal(table.rows[0].cells[1].textContent, "SPAN_H_R0_C1-3");
+  assert.equal(table.rows[1].cells[2].textContent, "SPAN_BOX_R1-2_C2-3");
+  assert.equal(table.rows[3].cells[1].textContent, "VAL_R03_C01");
+});
+
+test("abstract table generator rejects invalid merge definitions", () => {
+  assert.throws(() => generateAbstractTableHtml({ rows: 2, cols: 2, merges: [{ row: 1, col: 1, colSpan: 2 }] }), RangeError);
+  assert.throws(() => generateAbstractTableHtml({ rows: 2, cols: 2, merges: [{ row: 0, col: 0, colSpan: 2 }, { row: 0, col: 1 }] }), RangeError);
+});
 
 test("Abstract matrix table: initial structure integrity (2x2 corner, colspan, rowspan)", () => {
   const dom = new JSDOM(abstractHtml);
@@ -68,15 +88,13 @@ test("Abstract matrix table: multiple column deletions across colspan groups", a
   const rTable = rDom.window.document.getElementById("abstract-matrix-table");
   const rGrid = buildTableGrid(rTable);
 
-  assert.equal(rGrid.colCount, 12, "Restored grid must have exactly 12 columns");
+  assert.equal(rGrid.colCount, 9, "Redline must preserve the final 9-column table");
   for (let r = 0; r < rGrid.rowCount; r++) {
-    assert.equal(rGrid.grid[r].length, 12, `Row ${r} must have 12 cols`);
+    assert.equal(rGrid.grid[r].length, 9, `Row ${r} must have 9 cols`);
   }
 
-  const deletedCells = rTable.querySelectorAll(".wr-redline-deleted-cell");
-  assert.ok(deletedCells.length > 0, "Must contain deleted cells");
-  const labels = [...rTable.querySelectorAll(".wr-redline-label")].filter((l) => l.textContent.includes("削除列"));
-  assert.equal(labels.length, 3, "Must contain 3 削除列 badges");
+  const panel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(panel.querySelectorAll("article").length, 3, "Must list 3 deleted columns");
 });
 
 test("Abstract matrix table: multiple row deletions within rowspan group preserve parent span", async () => {
@@ -101,13 +119,13 @@ test("Abstract matrix table: multiple row deletions within rowspan group preserv
   const rTable = rDom.window.document.getElementById("abstract-matrix-table");
   const rGrid = buildTableGrid(rTable);
 
-  assert.equal(rGrid.rowCount, 14, "Must restore deleted rows to 14 rows total");
+  assert.equal(rGrid.rowCount, 11, "Redline must preserve the final 11-row table");
   for (let r = 0; r < rGrid.rowCount; r++) {
     assert.equal(rGrid.grid[r].length, 12, `Row ${r} must have 12 cols`);
   }
 
-  const delRows = rTable.querySelectorAll(".wr-redline-deleted-row");
-  assert.equal(delRows.length, 3, "Must have 3 deleted rows");
+  const panel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(panel.querySelectorAll("article").length, 3, "Must list 3 deleted rows");
 });
 
 test("Abstract matrix table: complex 4-way multi-add multi-delete and text edit integrity", async () => {
@@ -171,11 +189,11 @@ test("Abstract matrix table: complex 4-way multi-add multi-delete and text edit 
   const rTable = rDom.window.document.getElementById("abstract-matrix-table");
   const rGrid = buildTableGrid(rTable);
 
-  assert.equal(rGrid.rowCount, 16, "Must have exactly 16 rows");
-  assert.equal(rGrid.colCount, 14, "Must have exactly 14 columns");
+  assert.equal(rGrid.rowCount, 14, "Must preserve the final 14 rows");
+  assert.equal(rGrid.colCount, 12, "Must preserve the final 12 columns");
 
   for (let r = 0; r < rGrid.rowCount; r++) {
-    assert.equal(rGrid.grid[r].length, 14, `Row ${r} must have 14 columns`);
+    assert.equal(rGrid.grid[r].length, 12, `Row ${r} must have 12 columns`);
   }
 
   // 赤入れ差分要素の検証
@@ -184,11 +202,8 @@ test("Abstract matrix table: complex 4-way multi-add multi-delete and text edit 
   assert.ok(dels.length >= 2, "Must contain deleted text runs");
   assert.ok(inss.length >= 2, "Must contain inserted text runs");
 
-  const delRows = rTable.querySelectorAll(".wr-redline-deleted-row");
-  assert.equal(delRows.length, 2, "Must contain 2 deleted row placeholders");
-
-  const delCells = rTable.querySelectorAll(".wr-redline-deleted-cell");
-  assert.ok(delCells.length > 0, "Must contain deleted column cells");
+  const deletionPanel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(deletionPanel.querySelectorAll("article").length, 4, "Must list 2 deleted rows and 2 deleted columns");
 
   const addedCells = rTable.querySelectorAll(".wr-redline-added-cell");
   assert.ok(addedCells.length > 0, "Must contain added cells");
@@ -228,14 +243,13 @@ test("2-row merged cell: deleting the first row (where rowspan=2 starts) keeps s
   const rDom = new JSDOM(redlineHtml);
   const rTable = rDom.window.document.querySelector("table");
   const rg = buildTableGrid(rTable);
-  assert.equal(rg.rowCount, 4);
+  assert.equal(rg.rowCount, 3);
   assert.equal(rg.colCount, 3);
   for (let r = 0; r < rg.rowCount; r++) {
     assert.equal(rg.grid[r].length, 3, `Redline Row ${r} must have 3 columns`);
   }
-  assert.ok(rTable.rows[1].classList.contains("wr-redline-deleted-row"));
-  assert.ok(rTable.rows[1].cells[0].textContent.includes("MERGED_CAT"));
-  assert.equal(rTable.rows[2].cells[0].textContent.trim(), "MERGED_CAT");
+  assert.equal(rTable.rows[1].cells[0].textContent.trim(), "MERGED_CAT");
+  assert.match(rDom.window.document.querySelector(".wr-table-deletions").textContent, /MERGED_CAT/);
 });
 
 test("2-row merged cell: deleting the second row (spanned by rowspan=2) keeps structure and redlines correctly", async () => {
@@ -272,13 +286,11 @@ test("2-row merged cell: deleting the second row (spanned by rowspan=2) keeps st
   const rDom = new JSDOM(redlineHtml);
   const rTable = rDom.window.document.querySelector("table");
   const rg = buildTableGrid(rTable);
-  assert.equal(rg.rowCount, 4);
+  assert.equal(rg.rowCount, 3);
   assert.equal(rg.colCount, 3);
   for (let r = 0; r < rg.rowCount; r++) {
     assert.equal(rg.grid[r].length, 3, `Redline Row ${r} must have 3 columns`);
   }
-  assert.equal(rTable.rows[1].cells[0].rowSpan, 2);
-  assert.ok(rTable.rows[2].classList.contains("wr-redline-deleted-row"));
-  assert.equal(rTable.rows[2].cells.length, 2);
+  assert.equal(rTable.rows[1].cells[0].rowSpan, 1);
+  assert.match(rDom.window.document.querySelector(".wr-table-deletions").textContent, /SUB_2/);
 });
-

@@ -193,7 +193,7 @@ await runCheck("6. 行削除と赤入れ表示（元の位置に復元）", asyn
 
   const deletedRow = rTable.querySelector(".wr-redline-deleted-row");
   if (!deletedRow) throw new Error("Deleted row not found in redline");
-  if (!deletedRow.textContent.includes("共通基盤")) throw new Error("Deleted row does not contain category text");
+  if (!deletedRow.textContent.includes("ROW_ITEM_02")) throw new Error("Deleted row does not contain expected text");
 });
 
 // 7. 行移動（上／下）
@@ -209,7 +209,7 @@ await runCheck("7. 大分類rowspan配下の行移動（上／下）と状態維
   const okDown = editor.moveTableRow("down");
   if (!okDown) throw new Error("moveTableRow down failed");
 
-  if (table.rows[13].querySelector(".subitem-cell").textContent.trim() !== "旋盤加工制御") {
+  if (table.rows[13].querySelector(".subitem-cell").textContent.trim() !== "ROW_ITEM_12") {
     throw new Error("Row was not moved down correctly");
   }
 
@@ -218,7 +218,7 @@ await runCheck("7. 大分類rowspan配下の行移動（上／下）と状態維
   const okUp = editor.moveTableRow("up");
   if (!okUp) throw new Error("moveTableRow up failed");
 
-  if (table.rows[12].querySelector(".subitem-cell").textContent.trim() !== "旋盤加工制御") {
+  if (table.rows[12].querySelector(".subitem-cell").textContent.trim() !== "ROW_ITEM_12") {
     throw new Error("Row was not moved up correctly");
   }
 });
@@ -235,7 +235,7 @@ await runCheck("8. 列の左右移動と整合性", async () => {
   const okRight = editor.moveTableColumn("right");
   if (!okRight) throw new Error("moveTableColumn right failed");
 
-  if (!table.rows[1].cells[1].textContent.includes("Plan Standard Entry")) {
+  if (!table.rows[1].cells[1].textContent.includes("COL_02")) {
     throw new Error("Column not moved right correctly");
   }
 
@@ -243,7 +243,7 @@ await runCheck("8. 列の左右移動と整合性", async () => {
   const okLeft = editor.moveTableColumn("left");
   if (!okLeft) throw new Error("moveTableColumn left failed");
 
-  if (!table.rows[1].cells[0].textContent.includes("Plan Standard Entry")) {
+  if (!table.rows[1].cells[0].textContent.includes("COL_02")) {
     throw new Error("Column not moved back left correctly");
   }
 });
@@ -308,7 +308,7 @@ await runCheck("10. 複合編集（行削除＋列削除＋テキスト変更）
 
   // 行削除プレースホルダー
   const delRow = rTable.querySelector(".wr-redline-deleted-row");
-  if (!delRow || !delRow.textContent.includes("2D図面・製図作成機能")) {
+  if (!delRow || !delRow.textContent.includes("ROW_ITEM_08")) {
     throw new Error("Deleted row placeholder missing or text mismatch");
   }
 

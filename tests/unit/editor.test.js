@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { PageEditor } from "../../src/editor.js";
+import { PageEditor, buildTableGrid } from "../../src/editor.js";
 
 function setupEditorEnvironment() {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
@@ -541,6 +541,109 @@ test("table operations emit table-change with descriptive action string", async 
   change = recordedChanges.at(-1);
   assert.equal(change.action, "セル結合（右）");
   assert.ok(change.cellId, "cellId should be captured on cell merge");
+  assert.equal(change.targetRowIndex, 0);
+  assert.equal(change.targetColIndex, 0);
+  assert.equal(change.targetCellText, "A");
 });
 
+test("addTableRow preserves THEAD and the logical width of colspan cells", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th id="head" colspan="3">GROUP</th></tr></thead><tbody><tr><td>A</td><td>B</td><td>C</td></tr></tbody></table>`, true);
 
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("head"));
+  assert.equal(editor.addTableRow({ position: "before" }), true);
+
+  const table = doc.querySelector("table");
+  assert.equal(table.tHead.rows.length, 2, "new header row must remain in THEAD");
+  assert.equal(table.tBodies[0].rows.length, 1);
+  assert.equal(table.tHead.rows[0].cells[0].colSpan, 3);
+  assert.equal(buildTableGrid(table).colCount, 3);
+});
+
+test("addTableRow after a rowspan cell inserts below its covered rows", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td id="span" rowspan="2">A</td><td>B1</td></tr><tr><td>B2</td></tr><tr><td>C1</td><td>C2</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("span"));
+  assert.equal(editor.addTableRow({ position: "after" }), true);
+  const table = doc.querySelector("table");
+  assert.equal(table.rows.length, 4);
+  assert.equal(table.rows[1].textContent, "B2", "the covered row must remain directly below the span origin");
+  assert.equal(table.rows[2].cells.length, 2, "the new row belongs below the rowspan range");
+  assert.equal(buildTableGrid(table).colCount, 2);
+});
+
+test("moveTableRow preserves a shared non-first-column rowspan cell position", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td>A1</td><td id="span" rowspan="2">B</td><td>C1</td></tr><tr><td id="a2">A2</td><td>C2</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("a2"));
+  assert.equal(editor.moveTableRow("up"), true);
+  const table = doc.querySelector("table");
+  assert.deepEqual([...table.rows[0].cells].map((cell) => cell.textContent), ["A2", "B", "C2"]);
+  assert.equal(table.rows[0].cells[1].id, "span");
+  assert.equal(buildTableGrid(table).colCount, 3);
+});
+
+test("mergeCellDown rejects a THEAD-to-TBODY merge without changing either section", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th id="head">H</th></tr></thead><tbody><tr><td id="body">B</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("head"));
+  assert.equal(editor.mergeCellDown(), false);
+  assert.equal(doc.getElementById("head").rowSpan, 1);
+  assert.ok(doc.getElementById("body"));
+});
+
+test("splitCell keeps three-column fragments in logical DOM order", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td id="left">L</td><td id="merged" colspan="3">M</td><td id="right">R</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("merged"));
+  assert.equal(editor.splitCell(), true);
+  assert.deepEqual([...doc.querySelector("tr").cells].map((cell) => cell.id || cell.textContent), ["left", "merged", "", "", "right"]);
+  assert.equal(buildTableGrid(doc.querySelector("table")).colCount, 5);
+});
+
+test("moveTableColumn rejects a rowspan column without altering the table", async () => {
+  const { editor } = setupEditorEnvironment();
+  const html = `<table><tbody><tr><td id="span" rowspan="2">A</td><td id="b">B</td></tr><tr><td id="c">C</td></tr></tbody></table>`;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const table = doc.querySelector("table");
+  editor.select(doc.getElementById("b"));
+
+  assert.equal(editor.moveTableColumn("left"), false);
+  assert.equal(doc.getElementById("span").parentElement, table.rows[0]);
+  assert.deepEqual([...table.rows[0].cells].map((cell) => cell.id), ["span", "b"]);
+  assert.deepEqual([...table.rows[1].cells].map((cell) => cell.id), ["c"]);
+});
+
+test("moveTableColumn rejects a colspan group without altering the table", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th colspan="2">GROUP</th><th>LAST</th></tr></thead><tbody><tr><td id="a">A</td><td id="b">B</td><td>C</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  const table = doc.querySelector("table");
+  editor.select(doc.getElementById("b"));
+  assert.equal(editor.moveTableColumn("right"), false);
+  assert.equal(table.tHead.rows[0].cells[0].colSpan, 2);
+  assert.deepEqual([...table.tBodies[0].rows[0].cells].map((cell) => cell.textContent), ["A", "B", "C"]);
+});
+
+test("toggleFirstColumnHeader leaves horizontally merged headings unchanged", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><th id="group" colspan="2">分類</th></tr><tr><td id="item">項目</td><td>値</td></tr></tbody></table>`, true);
+
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("item"));
+  assert.equal(editor.toggleFirstColumnHeader(), true);
+  assert.equal(doc.getElementById("group").tagName, "TH");
+  assert.equal(doc.getElementById("item").tagName, "TH");
+});

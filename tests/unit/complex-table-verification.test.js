@@ -55,14 +55,14 @@ test("Complex table: initial structure integrity", async () => {
   assert.ok(table, "Table must exist");
 
   const { rowCount, colCount, grid } = buildTableGrid(table);
-  // thead 2行 + 共通基盤 1行 + データ変換 2行 + 基本モデリング 4行 + 専門機能 11行 = 20行
+  // Two header rows and eighteen neutral data rows.
   assert.equal(rowCount, 20, "Table should have exactly 20 rows");
   // 1列目(大分類) + 2列目(小項目) + 11列(プラン名) = 13列
   assert.equal(colCount, 13, "Table should have exactly 13 logical columns");
 
-  // 「専門機能」大分類セルの rowspan 検証
+  // Section cell rowspan verification
   const specialCell = grid[9][0].cell;
-  assert.equal(specialCell.textContent.trim(), "専門機能");
+  assert.equal(specialCell.textContent.trim(), "SEC_R09-19");
   assert.equal(specialCell.rowSpan, 11, "Special category cell must have rowSpan 11");
 });
 
@@ -73,9 +73,9 @@ test("Complex table: column addition highlights entire column and updates merged
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 4列目（「Plan Standard Premium」）を選択して右に列を追加
+  // Select COL_04 and add a column on its right.
   const targetHeader = table.rows[1].cells[2];
-  assert.match(targetHeader.textContent, /Plan Standard Premium/);
+  assert.equal(targetHeader.textContent, "COL_04");
   editor.select(targetHeader);
 
   const added = editor.addTableColumn({ position: "after" });
@@ -88,10 +88,10 @@ test("Complex table: column addition highlights entire column and updates merged
   assert.ok(Array.isArray(change.addedCellIds));
   assert.equal(change.addedCellIds.length, 19, "New cell added in 19 rows (excluding the group header row)");
 
-  // 親ヘッダー「基本プラン」の colSpan が 5 から 6 に自動拡張されていること
+  // The containing group expands from five logical columns to six.
   const basicGroupHeader = table.rows[0].cells[1];
-  assert.equal(basicGroupHeader.textContent.trim(), "基本プラン");
-  assert.equal(basicGroupHeader.colSpan, 6, "Group header '基本プラン' colSpan should expand from 5 to 6");
+  assert.equal(basicGroupHeader.textContent.trim(), "GRP_H0_C2-6");
+  assert.equal(basicGroupHeader.colSpan, 6, "Group header colSpan should expand from 5 to 6");
 
   // 赤入れレポートの妥当性検証
   const redlineHtml = createRedlineReport(doc.body.innerHTML, [change], "matrix.html");
@@ -113,7 +113,7 @@ test("Complex table: column deletion preserves alignment across all rows includi
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 4列目（「Plan Standard Premium」、index 4）を選択して列削除
+  // Select COL_04 and delete its column.
   const targetHeader = table.rows[1].cells[2];
   editor.select(targetHeader);
 
@@ -125,62 +125,59 @@ test("Complex table: column deletion preserves alignment across all rows includi
   assert.match(change.action, /列削除（5列目/);
   assert.equal(change.deletedColIndex, 4);
 
-  // 親ヘッダー「基本プラン」の colSpan が 5 から 4 に縮小していること
+  // The containing group shrinks from five logical columns to four.
   const basicGroupHeader = table.rows[0].cells[1];
-  assert.equal(basicGroupHeader.colSpan, 4, "Group header '基本プラン' colSpan should shrink from 5 to 4");
+  assert.equal(basicGroupHeader.colSpan, 4, "Group header colSpan should shrink from 5 to 4");
 
   // 赤入れレポートの妥当性検証
   const redlineHtml = createRedlineReport(doc.body.innerHTML, [change], "matrix.html");
   const rDom = new JSDOM(redlineHtml);
   const rTable = rDom.window.document.getElementById("product-matrix-table");
 
-  // 基本プランヘッダーが元の colSpan 5 に復元され、列数が整合していること
+  // The redline preserves the final table and lists the deletion separately.
   const rBasicHeader = rTable.rows[0].cells[1];
-  assert.equal(rBasicHeader.colSpan, 5, "Redline report should restore group header colSpan to 5");
+  assert.equal(rBasicHeader.colSpan, 4, "Redline report must keep the final colSpan 4");
+  const deletionPanel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.match(deletionPanel.textContent, /5列目を削除/);
 
-  // 最下行（シミュレーション検証機能）にも削除セルが復元されていること
-  const lastRow = rTable.rows[rTable.rows.length - 1];
-  const lastRowDeletedCell = lastRow.querySelector(".wr-redline-deleted-cell");
-  assert.ok(lastRowDeletedCell, "Last row must contain restored deleted cell");
-
-  // 全行の論理列数が13列に完全に揃っていること（列ズレが一切ないこと）
+  // 全行の論理列数が修正後の12列に揃っていること
   const rGrid = buildTableGrid(rTable);
-  assert.equal(rGrid.colCount, 13, "Redline table colCount must be perfectly 13");
+  assert.equal(rGrid.colCount, 12, "Redline table must retain the final 12 columns");
   for (let r = 0; r < rGrid.rowCount; r++) {
-    assert.equal(rGrid.grid[r].length, 13, `Row ${r} must have exactly 13 grid columns`);
+    assert.equal(rGrid.grid[r].length, 12, `Row ${r} must have exactly 12 grid columns`);
   }
 });
 
-test("Complex table: moving rows within shared rowspan cell (Special features category)", async () => {
+test("Complex table: moving rows within a shared rowspan section", async () => {
   const { editor, recordedChanges } = setupEditorWithHtml(sampleHtml);
   await editor.load(sampleHtml, true);
 
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 専門機能配下の「旋盤加工制御」（行12）を選択
+  // Select ROW_ITEM_12 (row 12).
   const latheRow = table.rows[12];
   const latheCell = latheRow.querySelector(".subitem-cell");
-  assert.equal(latheCell.textContent.trim(), "旋盤加工制御");
+  assert.equal(latheCell.textContent.trim(), "ROW_ITEM_12");
   editor.select(latheCell);
 
-  // 「旋盤加工制御」を下（「2.5軸ミル加工制御」、行13）へ移動
+  // Move it below ROW_ITEM_13.
   const movedDown = editor.moveTableRow("down");
   assert.equal(movedDown, true, "Should successfully move row down inside shared rowspan");
 
-  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "2.5軸ミル加工制御");
-  assert.equal(table.rows[13].querySelector(".subitem-cell").textContent.trim(), "旋盤加工制御");
+  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "ROW_ITEM_13");
+  assert.equal(table.rows[13].querySelector(".subitem-cell").textContent.trim(), "ROW_ITEM_12");
 
-  // 「専門機能」の rowspan が 11 のまま保たれていること
+  // The section rowspan remains unchanged.
   const specialCell = table.rows[9].cells[0];
-  assert.equal(specialCell.textContent.trim(), "専門機能");
+  assert.equal(specialCell.textContent.trim(), "SEC_R09-19");
   assert.equal(specialCell.rowSpan, 11, "Special features category rowSpan must remain 11");
 
   // 再度上へ移動して元に戻す
   editor.select(table.rows[13].querySelector(".subitem-cell"));
   const movedUp = editor.moveTableRow("up");
   assert.equal(movedUp, true, "Should successfully move row up inside shared rowspan");
-  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "旋盤加工制御");
+  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "ROW_ITEM_12");
 });
 
 test("Complex table: moving column left and right across matrix", async () => {
@@ -190,19 +187,19 @@ test("Complex table: moving column left and right across matrix", async () => {
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 3列目（「Plan Standard Entry」、index 2）を選択して右へ移動
+  // Select COL_02 and move it right.
   const stdHeader = table.rows[1].cells[0];
-  assert.match(stdHeader.textContent, /Plan Standard Entry/);
+  assert.equal(stdHeader.textContent, "COL_02");
   editor.select(stdHeader);
 
   const movedRight = editor.moveTableColumn("right");
   assert.equal(movedRight, true, "Column move right should succeed");
 
   // 1行目のヘッダーで 1番目と2番目が入れ替わっていること
-  assert.match(table.rows[1].cells[0].textContent, /Plan Standard Advanced/);
-  assert.match(table.rows[1].cells[1].textContent, /Plan Standard Entry/);
+  assert.equal(table.rows[1].cells[0].textContent, "COL_03");
+  assert.equal(table.rows[1].cells[1].textContent, "COL_02");
 
-  // データ行（共通基盤行）でも 3列目と4列目が入れ替わっていること
+  // The matching data row also exchanges the same two columns.
   const baseRow = table.rows[2];
   assert.ok(baseRow.cells[2] && baseRow.cells[3]);
 
@@ -210,8 +207,8 @@ test("Complex table: moving column left and right across matrix", async () => {
   editor.select(table.rows[1].cells[1]);
   const movedLeft = editor.moveTableColumn("left");
   assert.equal(movedLeft, true, "Column move left should succeed");
-  assert.match(table.rows[1].cells[0].textContent, /Plan Standard Entry/);
-  assert.match(table.rows[1].cells[1].textContent, /Plan Standard Advanced/);
+  assert.equal(table.rows[1].cells[0].textContent, "COL_02");
+  assert.equal(table.rows[1].cells[1].textContent, "COL_03");
 });
 
 test("Complex table: combined row delete and column delete redline report validity", async () => {
@@ -221,13 +218,13 @@ test("Complex table: combined row delete and column delete redline report validi
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 1. 「2D図面・製図作成機能」の行（行8）を削除
+  // 1. Delete ROW_ITEM_08 (row 8).
   const draftingCell = table.rows[8].querySelector(".subitem-cell");
-  assert.equal(draftingCell.textContent.trim(), "2D図面・製図作成機能");
+  assert.equal(draftingCell.textContent.trim(), "ROW_ITEM_08");
   editor.select(draftingCell);
   editor.deleteTableRow();
 
-  // 2. 5列目（「Plan Professional」）を削除
+  // 2. Delete COL_05.
   const industrialHeader = table.rows[1].cells[3];
   editor.select(industrialHeader);
   editor.deleteTableColumn();
@@ -239,21 +236,15 @@ test("Complex table: combined row delete and column delete redline report validi
   const rDom = new JSDOM(redlineHtml);
   const rTable = rDom.window.document.getElementById("product-matrix-table");
 
-  // 行削除の仮想行が挿入されていること
-  const deletedRow = rTable.querySelector(".wr-redline-deleted-row");
-  assert.ok(deletedRow, "Deleted row must exist in redline table");
-  assert.match(deletedRow.textContent, /2D図面・製図作成機能/);
-  assert.match(deletedRow.textContent, /削除行/);
+  const deletionPanel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(deletionPanel.querySelectorAll("article").length, 2);
+  assert.match(deletionPanel.textContent, /ROW_ITEM_08/);
+  assert.match(deletionPanel.textContent, /列目を削除/);
 
-  // 列削除のセルが最下行まで漏れなく挿入されていること
-  const lastRow = rTable.rows[rTable.rows.length - 1];
-  const lastRowDeletedCell = lastRow.querySelector(".wr-redline-deleted-cell");
-  assert.ok(lastRowDeletedCell, "Last row must have deleted column cell restored");
-
-  // 全行のグリッド構造が完全一致すること
+  // 表本体は修正後の構造を維持すること
   const rGrid = buildTableGrid(rTable);
-  assert.equal(rGrid.colCount, 13, "Col count must be preserved at 13");
-  assert.equal(rGrid.rowCount, 20, "Row count must be preserved at 20 (including restored row)");
+  assert.equal(rGrid.colCount, 12);
+  assert.equal(rGrid.rowCount, 19);
 });
 
 test("Complex table: 4-way combined operations (row delete + col delete + col add + row add) redline report integrity", async () => {
@@ -267,7 +258,7 @@ test("Complex table: 4-way combined operations (row delete + col delete + col ad
   editor.select(table.rows[3].cells[1]);
   editor.deleteTableRow();
 
-  // 2. 列削除（5列目: Plan Standard Premium）
+  // 2. Delete COL_04.
   editor.select(table.rows[1].cells[2]);
   editor.deleteTableColumn();
 
@@ -276,7 +267,7 @@ test("Complex table: 4-way combined operations (row delete + col delete + col ad
   editor.select(targetHeader);
   editor.addTableColumn({ position: "before" });
 
-  // 4. 行追加（下）（途中の行10: 専門機能の先頭行）
+  // 4. Add a row after the first row in SEC_R09-19.
   const targetRow = table.rows[9];
   editor.select(targetRow.cells[targetRow.cells.length - 1]);
   editor.addTableRow({ position: "after" });
@@ -289,10 +280,9 @@ test("Complex table: 4-way combined operations (row delete + col delete + col ad
   const rTable = rDom.window.document.getElementById("product-matrix-table");
   const rGrid = buildTableGrid(rTable);
 
-  // 期待グリッド: 元13列 - 1列削除 + 1列追加 = 13列 + 削除列復元(1) + 追加列(1) = 14列
-  // 元20行 - 1行削除 + 1行追加 = 20行 + 削除行復元(1) = 21行
-  assert.equal(rGrid.colCount, 14, "Grid must have exactly 14 columns across all rows");
-  assert.equal(rGrid.rowCount, 21, "Grid must have exactly 21 rows");
+  // 元13列 - 1列削除 + 1列追加、元20行 - 1行削除 + 1行追加。
+  assert.equal(rGrid.colCount, 13, "Grid must preserve the final 13 columns");
+  assert.equal(rGrid.rowCount, 20, "Grid must preserve the final 20 rows");
 
   for (let r = 0; r < rGrid.rowCount; r++) {
     assert.equal(
@@ -302,11 +292,7 @@ test("Complex table: 4-way combined operations (row delete + col delete + col ad
     );
   }
 
-  // 最下行にも正しく削除列セルと追加列セルが含まれ、ズレていないこと
-  const lastRow = rTable.rows[rTable.rows.length - 1];
-  const lastRowDeletedCell = lastRow.querySelector(".wr-redline-deleted-cell");
-  const lastRowAddedCell = lastRow.querySelector(".wr-redline-added-cell");
-  assert.ok(lastRowDeletedCell, "Last row must have restored deleted-column cell");
-  assert.ok(lastRowAddedCell, "Last row must have added-column cell");
+  const deletionPanel = rDom.window.document.querySelector(".wr-table-deletions");
+  assert.equal(deletionPanel.querySelectorAll("article").length, 2);
+  assert.ok(rTable.querySelectorAll(".wr-redline-added-cell").length > 0, "Added cells must remain highlighted");
 });
-

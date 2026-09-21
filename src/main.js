@@ -442,7 +442,6 @@ function changesFromOriginal() {
     );
     state.changes.forEach((candidate, candidateIndex) => {
       if (candidateIndex === index || candidateIndex < index) return;
-      if (candidate.type === "table-change") return;
       if (addedIds.has(candidate.elementId) || addedIds.has(candidate.parentId)) absorbedIndexes.add(candidateIndex);
     });
     const parent = addedElement.parentElement;
@@ -2534,10 +2533,10 @@ ui.deleteTableColumn.addEventListener("click", () => {
   if (!editor.deleteTableColumn()) setStatus("列を削除できませんでした（列数が1列のみの場合は削除できません）。", "info");
 });
 ui.moveTableColumnLeft.addEventListener("click", () => {
-  if (!editor.moveTableColumn("left")) setStatus("列を左へ移動できませんでした（最左列です）。", "info");
+  if (!editor.moveTableColumn("left")) setStatus("列を左へ移動できませんでした（最左列、または結合セルがあります）。", "info");
 });
 ui.moveTableColumnRight.addEventListener("click", () => {
-  if (!editor.moveTableColumn("right")) setStatus("列を右へ移動できませんでした（最右列です）。", "info");
+  if (!editor.moveTableColumn("right")) setStatus("列を右へ移動できませんでした（最右列、または結合セルがあります）。", "info");
 });
 
 ui.toggleCellType.addEventListener("click", () => editor.toggleCellType());
