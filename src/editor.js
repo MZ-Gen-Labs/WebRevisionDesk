@@ -714,7 +714,22 @@ export class PageEditor {
         .join(" / ");
       const rowSnippet = rowTextSummary ? `：「${rowTextSummary.slice(0, 15)}」` : "";
       const actionName = `行削除（${targetRowIndex + 1}行目${rowSnippet}）`;
-      const deletedRowHtml = this.#cleanOuterHtml(targetRow);
+
+      // 削除行の完全なスナップショット（跨がれている rowspan セルも独立セルとして補完）
+      const doc = current.table.ownerDocument;
+      const snapshotTr = doc.createElement("tr");
+      const visitedCells = new Set();
+      for (let c = 0; c < colCount; c++) {
+        const entry = grid[targetRowIndex]?.[c];
+        if (!entry) continue;
+        if (visitedCells.has(entry.cell)) continue;
+        visitedCells.add(entry.cell);
+
+        const clonedCell = entry.cell.cloneNode(true);
+        clonedCell.rowSpan = 1;
+        snapshotTr.append(clonedCell);
+      }
+      const deletedRowHtml = this.#cleanOuterHtml(snapshotTr);
 
       setDetails?.({
         action: actionName,
