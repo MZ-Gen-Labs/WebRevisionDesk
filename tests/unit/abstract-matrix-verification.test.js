@@ -193,3 +193,92 @@ test("Abstract matrix table: complex 4-way multi-add multi-delete and text edit 
   const addedCells = rTable.querySelectorAll(".wr-redline-added-cell");
   assert.ok(addedCells.length > 0, "Must contain added cells");
 });
+
+test("2-row merged cell: deleting the first row (where rowspan=2 starts) keeps structure and redlines correctly", async () => {
+  const testHtml = `<table>
+    <thead><tr><th>H1</th><th>H2</th><th>H3</th></tr></thead>
+    <tbody>
+      <tr id="r0"><td rowspan="2" id="cat">MERGED_CAT</td><td>SUB_1</td><td>DATA_1</td></tr>
+      <tr id="r1"><td>SUB_2</td><td>DATA_2</td></tr>
+      <tr id="r2"><td>OTHER_CAT</td><td>SUB_3</td><td>DATA_3</td></tr>
+    </tbody>
+  </table>`;
+
+  const { editor, recordedChanges } = setupEditor(testHtml);
+  await editor.load(testHtml, true);
+  const doc = editor.getDocument();
+  const table = doc.querySelector("table");
+
+  // Select row 1 (the first row with rowspan=2)
+  editor.select(table.rows[1].cells[1]);
+  editor.deleteTableRow();
+
+  // Verify editor grid integrity
+  const gEditor = buildTableGrid(table);
+  assert.equal(gEditor.rowCount, 3);
+  assert.equal(gEditor.colCount, 3);
+  for (let r = 0; r < gEditor.rowCount; r++) {
+    assert.equal(gEditor.grid[r].length, 3, `Editor Row ${r} must have 3 columns`);
+  }
+  assert.equal(table.rows[1].cells[0].textContent.trim(), "MERGED_CAT");
+  assert.equal(table.rows[1].cells[0].rowSpan, 1);
+
+  // Redline report verification
+  const redlineHtml = createRedlineReport(doc.body.innerHTML, recordedChanges, "report.html");
+  const rDom = new JSDOM(redlineHtml);
+  const rTable = rDom.window.document.querySelector("table");
+  const rg = buildTableGrid(rTable);
+  assert.equal(rg.rowCount, 4);
+  assert.equal(rg.colCount, 3);
+  for (let r = 0; r < rg.rowCount; r++) {
+    assert.equal(rg.grid[r].length, 3, `Redline Row ${r} must have 3 columns`);
+  }
+  assert.ok(rTable.rows[1].classList.contains("wr-redline-deleted-row"));
+  assert.ok(rTable.rows[1].cells[0].textContent.includes("MERGED_CAT"));
+  assert.equal(rTable.rows[2].cells[0].textContent.trim(), "MERGED_CAT");
+});
+
+test("2-row merged cell: deleting the second row (spanned by rowspan=2) keeps structure and redlines correctly", async () => {
+  const testHtml = `<table>
+    <thead><tr><th>H1</th><th>H2</th><th>H3</th></tr></thead>
+    <tbody>
+      <tr id="r0"><td rowspan="2" id="cat">MERGED_CAT</td><td>SUB_1</td><td>DATA_1</td></tr>
+      <tr id="r1"><td>SUB_2</td><td>DATA_2</td></tr>
+      <tr id="r2"><td>OTHER_CAT</td><td>SUB_3</td><td>DATA_3</td></tr>
+    </tbody>
+  </table>`;
+
+  const { editor, recordedChanges } = setupEditor(testHtml);
+  await editor.load(testHtml, true);
+  const doc = editor.getDocument();
+  const table = doc.querySelector("table");
+
+  // Select row 2 (the spanned row)
+  editor.select(table.rows[2].cells[0]);
+  editor.deleteTableRow();
+
+  // Verify editor grid integrity
+  const gEditor = buildTableGrid(table);
+  assert.equal(gEditor.rowCount, 3);
+  assert.equal(gEditor.colCount, 3);
+  for (let r = 0; r < gEditor.rowCount; r++) {
+    assert.equal(gEditor.grid[r].length, 3, `Editor Row ${r} must have 3 columns`);
+  }
+  assert.equal(table.rows[1].cells[0].textContent.trim(), "MERGED_CAT");
+  assert.equal(table.rows[1].cells[0].rowSpan, 1);
+
+  // Redline report verification
+  const redlineHtml = createRedlineReport(doc.body.innerHTML, recordedChanges, "report.html");
+  const rDom = new JSDOM(redlineHtml);
+  const rTable = rDom.window.document.querySelector("table");
+  const rg = buildTableGrid(rTable);
+  assert.equal(rg.rowCount, 4);
+  assert.equal(rg.colCount, 3);
+  for (let r = 0; r < rg.rowCount; r++) {
+    assert.equal(rg.grid[r].length, 3, `Redline Row ${r} must have 3 columns`);
+  }
+  assert.equal(rTable.rows[1].cells[0].rowSpan, 2);
+  assert.ok(rTable.rows[2].classList.contains("wr-redline-deleted-row"));
+  assert.equal(rTable.rows[2].cells.length, 2);
+});
+
