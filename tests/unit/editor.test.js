@@ -163,6 +163,20 @@ test("normal table row operations and undo function correctly", async () => {
   assert.equal(restoredTable.rows.length, 3, "Table should restore to 3 rows after undo");
 });
 
+test("insertTable places a table after a selected list instead of inside it", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
+  await editor.load(`<main><ul id="list"><li id="item"><span id="label">項目</span></li></ul><p>後続</p></main>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("label"));
+  assert.equal(editor.insertTable(2, 2), true);
+  const table = doc.querySelector("table");
+  assert.equal(table.parentElement.tagName, "MAIN");
+  assert.equal(table.previousElementSibling.id, "list");
+  assert.equal(table.tHead.rows.length, 1);
+  assert.equal(table.tBodies[0].rows.length, 1);
+  assert.equal(recordedChanges.at(-1).type, "element-add");
+});
+
 test("table column add and delete updates structure and records deletion details", async () => {
   const { editor, recordedChanges } = setupEditorEnvironment();
   const html = `
@@ -573,6 +587,27 @@ test("addTableRow after a rowspan cell inserts below its covered rows", async ()
   assert.equal(table.rows[1].textContent, "B2", "the covered row must remain directly below the span origin");
   assert.equal(table.rows[2].cells.length, 2, "the new row belongs below the rowspan range");
   assert.equal(buildTableGrid(table).colCount, 2);
+});
+
+test("addTableRow after the final THEAD row inserts into TBODY", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th id="head">H</th></tr></thead><tbody><tr><td>B</td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("head"));
+  assert.equal(editor.addTableRow({ position: "after" }), true);
+  assert.equal(doc.querySelector("thead").rows.length, 1);
+  assert.equal(doc.querySelector("tbody").rows.length, 2);
+  assert.equal(doc.querySelector("tbody").rows[0].cells[0].tagName, "TD");
+});
+
+test("table editing rejects nested tables", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td><table><tbody><tr><td id="nested">N</td></tr></tbody></table></td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("nested"));
+  assert.equal(editor.getTableContext(), null);
+  assert.equal(editor.addTableRow({ position: "after" }), false);
+  assert.equal(recordedChanges.length, 0);
 });
 
 test("moveTableRow preserves a shared non-first-column rowspan cell position", async () => {

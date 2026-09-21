@@ -404,6 +404,27 @@ test("redline report disables active content restored for deleted elements", () 
   assert.equal(restored.querySelector("a").hasAttribute("href"), false);
 });
 
+test("redline report omits a text change that was manually restored", () => {
+  const html = `<html><body><p data-web-revision-id="text">元の文章</p></body></html>`;
+  const changes = [
+    { type: "text-change", elementId: "text", before: "元の文章", after: "途中の文章" },
+    { type: "text-change", elementId: "text", before: "途中の文章", after: "元の文章" },
+  ];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  assert.equal(parsed.querySelector(".wr-redline-text"), null);
+  assert.equal(parsed.querySelector("ins, del"), null);
+});
+
+test("redline report restores successive deleted siblings in their original order", () => {
+  const html = `<html><body><main data-web-revision-id="parent"><p>A</p><p>D</p></main></body></html>`;
+  const changes = [
+    { type: "element-delete", elementId: "b", parentId: "parent", index: 1, before: `<p data-web-revision-id="b">B</p>` },
+    { type: "element-delete", elementId: "c", parentId: "parent", index: 1, before: `<p data-web-revision-id="c">C</p>` },
+  ];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  assert.deepEqual([...parsed.querySelector("main").children].map((element) => element.textContent.trim()), ["A", "削除B", "削除C", "D"]);
+});
+
 test("redline report includes both text and images from deleted table cells", () => {
   const html = `<html><body><table data-web-revision-id="table"><tr><td>A</td></tr></table></body></html>`;
   const changes = [{

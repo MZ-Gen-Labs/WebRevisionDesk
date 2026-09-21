@@ -12,6 +12,8 @@ const TEXT_BLOCKLIST = new Set([
   "HTML", "HEAD", "BODY", "SCRIPT", "STYLE", "LINK", "META", "IMG", "VIDEO", "AUDIO", "IFRAME", "CANVAS", "SVG",
 ]);
 const STRUCTURE_ELEMENTS = new Set(["HTML", "HEAD", "BODY"]);
+const MAX_TABLE_ROWS = 50;
+const MAX_TABLE_COLUMNS = 20;
 const SEARCH_HIGHLIGHTS = {
   all: "web-revision-search-all",
   excluded: "web-revision-search-excluded",
@@ -543,6 +545,8 @@ export class PageEditor {
   getTableContext() {
     const table = this.selected?.closest?.("table");
     if (!table) return null;
+    // Nested tables are deliberately outside the supported editing model.
+    if (table.parentElement?.closest?.("table") || table.querySelector("table")) return null;
     const { grid, rowCount, colCount, rows } = buildTableGrid(table);
     const selectedCell = this.selected?.closest?.("th, td");
     const row = selectedCell?.closest("tr") || this.selected?.closest?.("tr") || rows[0] || null;
@@ -609,7 +613,12 @@ export class PageEditor {
     }
     this.#assignNewIds(table);
     const selectedTable = this.selected?.closest?.("table");
-    const target = selectedTable || (this.selected && !STRUCTURE_ELEMENTS.has(this.selected.tagName) ? this.selected : null);
+    let target = selectedTable || (this.selected && !STRUCTURE_ELEMENTS.has(this.selected.tagName)
+      ? (this.selected.closest?.("p, li, dt, dd, div, section, article, main, aside, header, footer, nav, blockquote, figure, figcaption") || this.selected)
+      : null);
+    if (["LI", "DT", "DD"].includes(target?.tagName) && ["UL", "OL", "DL"].includes(target.parentElement?.tagName)) {
+      target = target.parentElement;
+    }
     const parent = target?.parentElement || doc.querySelector("main") || doc.body;
     if (!parent) return false;
     if (target) target.after(table);
@@ -631,6 +640,8 @@ export class PageEditor {
   }
 
   addTableRow({ position = "after" } = {}) {
+    const initialContext = this.getTableContext();
+    if (!initialContext || initialContext.rowCount >= MAX_TABLE_ROWS) return false;
     const actionLabel = position === "before" ? "行追加（上）" : "行追加（下）";
     return this.#changeTable(actionLabel, (context, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
@@ -646,7 +657,14 @@ export class PageEditor {
         : (rows[insertAtRow - 1] || rows.at(-1));
       // Keep a new row in the same table section as the selected row.  Moving
       // a THEAD row into TBODY changes both the semantics and logical position.
-      const section = refRow?.parentElement || context.table.tBodies[0] || context.table.createTBody();
+      const firstBodyRow = context.table.tBodies[0]?.rows[0];
+      const crossesFromHeadToBody = position === "after"
+        && refRow?.parentElement?.tagName === "THEAD"
+        && firstBodyRow
+        && insertAtRow >= rows.indexOf(firstBodyRow);
+      const section = crossesFromHeadToBody
+        ? (context.table.tBodies[0] || context.table.createTBody())
+        : (refRow?.parentElement || context.table.tBodies[0] || context.table.createTBody());
 
       const newRow = doc.createElement("tr");
       const modifiedSpans = new Set();
@@ -667,7 +685,7 @@ export class PageEditor {
 
         const refEntry = (position === "before" ? bottomEntry || topEntry : topEntry || bottomEntry) || null;
         const refCell = refEntry?.cell || null;
-        const isHeader = refCell?.tagName === "TH";
+        const isHeader = !crossesFromHeadToBody && refCell?.tagName === "TH";
         const newCell = doc.createElement(isHeader ? "th" : "td");
         newCell.textContent = isHeader ? "見出し" : "セル";
         newCell.style.padding = ".45em";
@@ -687,6 +705,8 @@ export class PageEditor {
       if (position === "before") {
         if (refRow && refRow.parentElement === section) refRow.before(newRow);
         else section.prepend(newRow);
+      } else if (crossesFromHeadToBody) {
+        section.prepend(newRow);
       } else {
         if (refRow && refRow.parentElement === section) refRow.after(newRow);
         else section.append(newRow);
@@ -788,7 +808,11 @@ export class PageEditor {
       const fallbackEntry = grid[replacementRow === nextRow ? targetRowIndex + 1 : targetRowIndex - 1]?.[current.columnIndex];
       const selected = fallbackEntry?.cell || replacementRow?.cells[0] || current.table;
 
+      const targetSection = targetRow.parentElement;
       targetRow.remove();
+      if (targetSection?.tagName === "TBODY" && targetSection.rows.length === 0) {
+        targetSection.remove();
+      }
       return selected;
     });
   }
@@ -916,6 +940,8 @@ export class PageEditor {
   }
 
   addTableColumn({ position = "after" } = {}) {
+    const initialContext = this.getTableContext();
+    if (!initialContext || initialContext.columnCount >= MAX_TABLE_COLUMNS) return false;
     const actionLabel = position === "before" ? "列追加（左）" : "列追加（右）";
     return this.#changeTable(actionLabel, (context, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);

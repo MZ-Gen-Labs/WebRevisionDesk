@@ -167,6 +167,9 @@ function addLabel(element, label, kind = "change") {
   }
   const target = element;
   target.classList.add("wr-redline-target", `wr-redline-${kind}`);
+  if (["A", "SPAN", "STRONG", "EM", "B", "I", "SMALL", "MARK", "CODE", "S", "U"].includes(target.tagName)) {
+    target.classList.add("wr-redline-inline");
+  }
   const labels = target.getAttribute("data-wr-label");
   const combinedLabel = labels ? `${labels} / ${label}` : label;
   target.setAttribute("data-wr-label", combinedLabel);
@@ -536,6 +539,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     });
   });
   textChanges.forEach((change, id) => {
+    if (change.before === change.after) return;
     const element = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(id)}"]`);
     if (element) createTextRedline(doc, element, change.before, change.after);
   });
@@ -598,8 +602,13 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
 
   changes
     .filter((change) => change.type !== "text-change" && !metadataTypes.has(change.type) && !handledImageChanges.has(change))
-    .slice()
-    .sort((left, right) => Number(left.type === "image-change") - Number(right.type === "image-change"))
+    .map((change, order) => ({ change, order }))
+    .sort((left, right) => {
+      if (left.change.type === "element-delete" && right.change.type === "element-delete"
+        && left.change.parentId === right.change.parentId) return right.order - left.order;
+      return Number(left.change.type === "image-change") - Number(right.change.type === "image-change");
+    })
+    .map(({ change }) => change)
     .forEach((change) => {
     let element = change.elementId
       ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.elementId)}"]`)
@@ -649,7 +658,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
         });
         if (firstCell) {
           const badge = doc.createElement("span");
-          badge.className = "wr-redline-label";
+          badge.className = "wr-redline-label wr-table-cell-redline-label";
           badge.style.background = "#08733f";
           badge.textContent = change.addedColIndex !== undefined
             ? `追加列（${change.addedColIndex + 1}列目）`
@@ -679,6 +688,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:-3px!important}
     .imgTxt .imgTxt_body-around:has(.wr-redline-target){display:flow-root!important;overflow:visible!important}
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:inline-block!important}
+    .wr-redline-inline>.wr-redline-label,.wr-table-cell-redline-label{position:absolute!important;top:0!important;left:0!important;transform:translateY(-100%)!important;margin:0!important;white-space:nowrap!important;pointer-events:none!important}
     .wr-redline-text-diff-box{position:relative!important;z-index:2147483646!important;display:block!important;margin:6px 0!important;padding:8px 12px!important;border:2px solid #a65a20!important;border-radius:6px!important;background:#fff8ec!important;font:13px/1.5 system-ui,sans-serif!important;color:#24242d!important}.wr-redline-text-diff-box>strong{color:#8d4918!important;margin-right:6px!important}
     .wr-page-info-changes{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px!important;padding:14px!important;border:3px solid #a65a20!important;border-radius:8px!important;color:#24242d!important;background:#fff8ec!important;font:14px/1.5 system-ui,sans-serif!important}.wr-page-info-changes>strong{color:#8d4918!important}.wr-page-info-changes>div{display:grid!important;grid-template-columns:minmax(130px,auto) 1fr!important;gap:10px!important}.wr-page-info-changes span{overflow-wrap:anywhere!important}
     .wr-table-deletions{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px 0!important;padding:12px 14px!important;border:2px solid #cc3434!important;border-radius:8px!important;color:#5f1717!important;background:#fff1f1!important;font:13px/1.5 system-ui,sans-serif!important}.wr-table-deletions>strong{font-size:14px!important}.wr-table-deletions>article{display:grid!important;gap:4px!important;padding-top:8px!important;border-top:1px solid #efb1b1!important}.wr-table-deletions>article:first-of-type{padding-top:0!important;border-top:0!important}.wr-table-deletions ul{margin:0!important;padding-left:1.4em!important}.wr-table-deletions li{overflow-wrap:anywhere!important}.wr-table-deletions-remainder{color:#8d4b4b!important;font-weight:700!important}

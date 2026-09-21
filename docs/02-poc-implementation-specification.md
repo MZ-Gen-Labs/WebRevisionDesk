@@ -298,7 +298,7 @@ Electronのpreloadは、用途別にCommonJS（`.cjs`）で分離する。画面
 
 | 区分 | 主な対象 | 現在の件数 |
 |---|---|---:|
-| 単体テスト | URL階層、案件保存、Electron IPC、検索条件、文字差分、表編集の安全制御 | 79件 |
+| 単体テスト | URL階層、案件保存、Electron IPC、検索条件、文字差分、表編集の安全制御 | 95件 |
 | Electronスモークテスト | Windows ZIPの生成、起動、preload・IPC・連続取得・終了処理 | CIで実行 |
 | ビルド検証 | バージョン整合性、Vite本番ビルド | 各1件 |
 
