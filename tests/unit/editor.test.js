@@ -298,6 +298,84 @@ test("moveTableRow moves row up and down correctly", async () => {
   assert.deepEqual(rowsAfterUp, ["行1", "行2", "行3"]);
 });
 
+test("moveTableRow safely moves rows within shared rowspan cell (large category)", async () => {
+  const { editor } = setupEditorEnvironment();
+  const html = `
+    <table id="tbl">
+      <tbody>
+        <tr><td rowspan="3" id="cat">大分類</td><td id="sub1">項目1</td></tr>
+        <tr><td id="sub2">項目2</td></tr>
+        <tr><td id="sub3">項目3</td></tr>
+      </tbody>
+    </table>
+  `;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const sub2 = doc.getElementById("sub2");
+  editor.select(sub2);
+
+  // Move sub2 (項目2) down past sub3 (項目3)
+  const movedDown = editor.moveTableRow("down");
+  assert.equal(movedDown, true, "Should move row down within shared rowspan cell");
+  const table = doc.getElementById("tbl");
+  assert.equal(table.rows[1].cells[0].textContent, "項目3");
+  assert.equal(table.rows[2].cells[0].textContent, "項目2");
+
+  // Move sub2 back up
+  const movedUp = editor.moveTableRow("up");
+  assert.equal(movedUp, true, "Should move row up within shared rowspan cell");
+  assert.equal(table.rows[1].cells[0].textContent, "項目2");
+  assert.equal(table.rows[2].cells[0].textContent, "項目3");
+
+  // Move origin row (sub1) down past sub2
+  editor.select(doc.getElementById("sub1"));
+  const originMovedDown = editor.moveTableRow("down");
+  assert.equal(originMovedDown, true, "Should move origin row down while preserving rowspan cell");
+  const catCell = doc.getElementById("cat");
+  assert.ok(catCell, "cat cell should be preserved");
+  assert.equal(table.rows[0].cells[0].id, "cat", "cat cell should remain at row 0");
+  assert.equal(table.rows[0].cells[1].textContent, "項目2");
+  assert.equal(table.rows[1].cells[0].textContent, "項目1");
+});
+
+test("moveTableColumn moves column left and right correctly", async () => {
+  const { editor } = setupEditorEnvironment();
+  const html = `
+    <table id="tbl">
+      <thead>
+        <tr><th>列A</th><th id="h-b">列B</th><th>列C</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A1</td><td id="c-b">B1</td><td>C1</td></tr>
+        <tr><td>A2</td><td>B2</td><td>C2</td></tr>
+      </tbody>
+    </table>
+  `;
+  await editor.load(html, true);
+
+  const doc = editor.getDocument();
+  const colB = doc.getElementById("c-b");
+  editor.select(colB);
+
+  // Move column B to the left (swap with A)
+  const movedLeft = editor.moveTableColumn("left");
+  assert.equal(movedLeft, true);
+  const table = doc.getElementById("tbl");
+  const headerTextsAfterLeft = [...table.rows[0].cells].map((c) => c.textContent);
+  assert.deepEqual(headerTextsAfterLeft, ["列B", "列A", "列C"]);
+  const row1TextsAfterLeft = [...table.rows[1].cells].map((c) => c.textContent);
+  assert.deepEqual(row1TextsAfterLeft, ["B1", "A1", "C1"]);
+
+  // Move column B back to the right
+  editor.select(doc.getElementById("c-b"));
+  const movedRight = editor.moveTableColumn("right");
+  assert.equal(movedRight, true);
+  const headerTextsAfterRight = [...table.rows[0].cells].map((c) => c.textContent);
+  assert.deepEqual(headerTextsAfterRight, ["列A", "列B", "列C"]);
+});
+
+
 test("toggleCellType, setCellAlign, and toggleFirstColumnHeader work correctly", async () => {
   const { editor } = setupEditorEnvironment();
   const html = `

@@ -776,16 +776,87 @@ export class PageEditor {
     if (direction === "down" && r === rowCount - 1) return false;
 
     const otherR = direction === "up" ? r - 1 : r + 1;
+    const currentRow = rows[r];
+    const targetRow = rows[otherR];
+    if (!currentRow || !targetRow) return false;
+    if (currentRow.parentElement !== targetRow.parentElement) return false;
+
+    const topR = Math.min(r, otherR);
+    const bottomR = Math.max(r, otherR);
+    const originCellsToMove = [];
+
     for (let c = 0; c < colCount; c++) {
-      if (grid[r]?.[c]?.cell === grid[otherR]?.[c]?.cell) return false;
+      const topEntry = grid[topR]?.[c];
+      const bottomEntry = grid[bottomR]?.[c];
+      if (!topEntry || !bottomEntry) continue;
+
+      if (topEntry.cell === bottomEntry.cell) {
+        if (topEntry.isOrigin && !originCellsToMove.includes(topEntry.cell)) {
+          originCellsToMove.push(topEntry.cell);
+        }
+      } else {
+        if (topEntry.rowSpan > 1 && topEntry.row < topR) return false;
+        if (bottomEntry.rowSpan > 1 && bottomEntry.row + bottomEntry.rowSpan - 1 > bottomR) return false;
+      }
     }
 
-    return this.#changeTable(direction === "up" ? "行を上へ移動" : "行を下へ移動", (current) => {
-      const row = current.row;
-      const targetRow = rows[otherR];
-      if (direction === "up") targetRow.before(row);
-      else targetRow.after(row);
-      return row.cells[Math.min(current.columnIndex, Math.max(0, row.cells.length - 1))] || row;
+    const actionName = direction === "up" ? "行を上へ移動" : "行を下へ移動";
+    return this.#changeTable(actionName, (current, setDetails) => {
+      const topRow = rows[topR];
+      const bottomRow = rows[bottomR];
+
+      originCellsToMove.forEach((cell) => {
+        bottomRow.prepend(cell);
+      });
+
+      bottomRow.after(topRow);
+
+      setDetails?.({
+        action: `${actionName}（${r + 1}行目 → ${otherR + 1}行目）`,
+        cellId: null,
+      });
+
+      const selectedCell = current.cell && current.row.contains(current.cell)
+        ? current.cell
+        : current.row.cells[Math.min(current.columnIndex, Math.max(0, current.row.cells.length - 1))] || current.row;
+      return selectedCell;
+    });
+  }
+
+  moveTableColumn(direction) {
+    const context = this.getTableContext();
+    if (!context || context.columnCount <= 1) return false;
+    const { grid, rowCount, colCount } = buildTableGrid(context.table);
+    const c = context.columnIndex;
+    if (direction === "left" && c === 0) return false;
+    if (direction === "right" && c >= colCount - 1) return false;
+
+    const otherC = direction === "left" ? c - 1 : c + (context.cellInfo?.colSpan || 1);
+    if (otherC < 0 || otherC >= colCount) return false;
+
+    const leftC = Math.min(c, otherC);
+    const rightC = Math.max(c, otherC);
+
+    const actionName = direction === "left" ? "列を左へ移動" : "列を右へ移動";
+    return this.#changeTable(actionName, (current, setDetails) => {
+      for (let r = 0; r < rowCount; r++) {
+        const entryLeft = grid[r]?.[leftC];
+        const entryRight = grid[r]?.[rightC];
+        if (!entryLeft || !entryRight) continue;
+        if (entryLeft.cell === entryRight.cell) continue;
+
+        const cellLeft = entryLeft.cell;
+        const cellRight = entryRight.cell;
+
+        cellLeft.before(cellRight);
+      }
+
+      setDetails?.({
+        action: `${actionName}（${c + 1}列目 → ${otherC + 1}列目）`,
+        cellId: null,
+      });
+
+      return context.cell?.isConnected ? context.cell : current.table;
     });
   }
 

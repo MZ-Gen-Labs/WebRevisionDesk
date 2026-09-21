@@ -60,6 +60,7 @@ const ui = {
   moveTableRowUp: $("#move-table-row-up"), moveTableRowDown: $("#move-table-row-down"),
   deleteTableRow: $("#delete-table-row"),
   addTableColumnBefore: $("#add-table-column-before"), addTableColumn: $("#add-table-column"),
+  moveTableColumnLeft: $("#move-table-column-left"), moveTableColumnRight: $("#move-table-column-right"),
   deleteTableColumn: $("#delete-table-column"),
   toggleCellType: $("#toggle-cell-type"), toggleFirstColumnHeader: $("#toggle-first-column-header"),
   tableAlignLeft: $("#table-align-left"), tableAlignCenter: $("#table-align-center"), tableAlignRight: $("#table-align-right"),
@@ -751,6 +752,8 @@ function showSelection(element, selectedElements = element ? [element] : []) {
     ui.deleteTableColumn.disabled = tableContext.columnCount <= 1;
     ui.moveTableRowUp.disabled = tableContext.rowIndex <= 0;
     ui.moveTableRowDown.disabled = tableContext.rowIndex >= tableContext.rowCount - 1;
+    ui.moveTableColumnLeft.disabled = tableContext.columnIndex <= 0;
+    ui.moveTableColumnRight.disabled = tableContext.columnIndex >= tableContext.columnCount - 1;
     const canSplit = Boolean(tableContext.cell && ((tableContext.cell.colSpan || 1) > 1 || (tableContext.cell.rowSpan || 1) > 1));
     ui.splitCell.disabled = !canSplit;
     ui.toggleCellType.disabled = !tableContext.cell;
@@ -2529,6 +2532,12 @@ ui.addTableColumnBefore.addEventListener("click", () => editor.addTableColumn({ 
 ui.addTableColumn.addEventListener("click", () => editor.addTableColumn({ position: "after" }));
 ui.deleteTableColumn.addEventListener("click", () => {
   if (!editor.deleteTableColumn()) setStatus("列を削除できませんでした（列数が1列のみの場合は削除できません）。", "info");
+});
+ui.moveTableColumnLeft.addEventListener("click", () => {
+  if (!editor.moveTableColumn("left")) setStatus("列を左へ移動できませんでした（最左列です）。", "info");
+});
+ui.moveTableColumnRight.addEventListener("click", () => {
+  if (!editor.moveTableColumn("right")) setStatus("列を右へ移動できませんでした（最右列です）。", "info");
 });
 
 ui.toggleCellType.addEventListener("click", () => editor.toggleCellType());
