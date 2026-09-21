@@ -910,12 +910,18 @@ export class PageEditor {
         newCell.style.padding = ".45em";
         if (refCell) copyCellStyle(refCell, newCell);
 
-        if (insertAtCol === 0) {
-          row.prepend(newCell);
-        } else if (leftEntry) {
-          leftEntry.cell.after(newCell);
-        } else if (rightEntry) {
-          rightEntry.cell.before(newCell);
+        // 現在の行 row に属するセルのうち、insertAtCol 以降にある最初のセルを探す
+        let insertBeforeCell = null;
+        for (let c = insertAtCol; c < colCount; c++) {
+          const entry = grid[r]?.[c];
+          if (entry && entry.cell.parentElement === row) {
+            insertBeforeCell = entry.cell;
+            break;
+          }
+        }
+
+        if (insertBeforeCell) {
+          insertBeforeCell.before(newCell);
         } else {
           row.append(newCell);
         }
@@ -942,22 +948,26 @@ export class PageEditor {
     const context = this.getTableContext();
     if (!context || context.columnCount <= 1) return false;
     return this.#changeTable("列削除", (current, setDetails) => {
-      const { grid, rowCount } = buildTableGrid(current.table);
+      const { grid, rowCount, rows } = buildTableGrid(current.table);
       const targetCol = current.columnIndex;
       let selected = null;
       const deletedCellsInfo = [];
       const colTexts = [];
 
       for (let r = 0; r < rowCount; r++) {
+        const row = rows[r];
+        const rowId = row ? this.#ensureElementId(row) : null;
         const entry = grid[r]?.[targetCol];
         if (!entry) {
-          deletedCellsInfo.push({ action: "none" });
+          deletedCellsInfo.push({ action: "none", rowId, rowIndex: r });
           continue;
         }
 
         if (entry.colSpan > 1) {
           deletedCellsInfo.push({
             action: "shrink",
+            rowId,
+            rowIndex: r,
             cellId: entry.cell.getAttribute(EDITOR_ID_ATTR) || entry.cell.id,
             originalColSpan: entry.colSpan,
             isOrigin: entry.isOrigin,
@@ -968,10 +978,14 @@ export class PageEditor {
         } else if (entry.rowSpan > 1 && !entry.isOrigin) {
           deletedCellsInfo.push({
             action: "spanned",
+            rowId,
+            rowIndex: r,
           });
         } else {
           deletedCellsInfo.push({
             action: "deleted",
+            rowId,
+            rowIndex: r,
             cellHtml: this.#cleanOuterHtml(entry.cell),
             text: entry.cell.textContent?.trim() || "",
           });

@@ -255,3 +255,58 @@ test("Complex table: combined row delete and column delete redline report validi
   assert.equal(rGrid.colCount, 13, "Col count must be preserved at 13");
   assert.equal(rGrid.rowCount, 20, "Row count must be preserved at 20 (including restored row)");
 });
+
+test("Complex table: 4-way combined operations (row delete + col delete + col add + row add) redline report integrity", async () => {
+  const { editor, recordedChanges } = setupEditorWithHtml(sampleHtml);
+  await editor.load(sampleHtml, true);
+
+  const doc = editor.getDocument();
+  const table = doc.getElementById("product-matrix-table");
+
+  // 1. 行削除（4行目: データ変換）
+  editor.select(table.rows[3].cells[1]);
+  editor.deleteTableRow();
+
+  // 2. 列削除（5列目: Plan Standard Premium）
+  editor.select(table.rows[1].cells[2]);
+  editor.deleteTableColumn();
+
+  // 3. 列追加（左）（11列目）
+  const targetHeader = table.rows[1].cells[9];
+  editor.select(targetHeader);
+  editor.addTableColumn({ position: "before" });
+
+  // 4. 行追加（下）（途中の行10: 専門機能の先頭行）
+  const targetRow = table.rows[9];
+  editor.select(targetRow.cells[targetRow.cells.length - 1]);
+  editor.addTableRow({ position: "after" });
+
+  assert.equal(recordedChanges.length, 4);
+
+  // 赤入れレポート生成
+  const redlineHtml = createRedlineReport(doc.body.innerHTML, recordedChanges, "matrix.html");
+  const rDom = new JSDOM(redlineHtml);
+  const rTable = rDom.window.document.getElementById("product-matrix-table");
+  const rGrid = buildTableGrid(rTable);
+
+  // 期待グリッド: 元13列 - 1列削除 + 1列追加 = 13列 + 削除列復元(1) + 追加列(1) = 14列
+  // 元20行 - 1行削除 + 1行追加 = 20行 + 削除行復元(1) = 21行
+  assert.equal(rGrid.colCount, 14, "Grid must have exactly 14 columns across all rows");
+  assert.equal(rGrid.rowCount, 21, "Grid must have exactly 21 rows");
+
+  for (let r = 0; r < rGrid.rowCount; r++) {
+    assert.equal(
+      rGrid.grid[r].length,
+      rGrid.colCount,
+      `Row ${r} (${rGrid.rows[r].cells[0]?.textContent.trim().slice(0, 15)}) must have exactly ${rGrid.colCount} columns`
+    );
+  }
+
+  // 最下行にも正しく削除列セルと追加列セルが含まれ、ズレていないこと
+  const lastRow = rTable.rows[rTable.rows.length - 1];
+  const lastRowDeletedCell = lastRow.querySelector(".wr-redline-deleted-cell");
+  const lastRowAddedCell = lastRow.querySelector(".wr-redline-added-cell");
+  assert.ok(lastRowDeletedCell, "Last row must have restored deleted-column cell");
+  assert.ok(lastRowAddedCell, "Last row must have added-column cell");
+});
+

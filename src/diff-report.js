@@ -479,7 +479,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
           const actualRows = [...(element.rows || [])].filter((row) => !row.classList.contains("wr-redline-deleted-row"));
           for (let r = 0; r < change.deletedCellsInfo.length; r++) {
             const info = change.deletedCellsInfo[r];
-            const row = actualRows[r];
+            const row = (info.rowId ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(info.rowId)}"]`) : null)
+              || actualRows[r];
             if (!row) continue;
 
             if (info.action === "shrink") {
@@ -491,7 +492,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
             } else if (info.action === "deleted") {
               const template = doc.createElement("template");
               template.innerHTML = info.cellHtml || "<td></td>";
-              const restoredCell = template.content.firstElementChild || doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
+              const isHeader = row.parentElement?.tagName === "THEAD";
+              const restoredCell = template.content.firstElementChild || doc.createElement(isHeader ? "th" : "td");
               restoredCell.classList.add("wr-redline-deleted-cell", "wr-redline-delete");
               restoredCell.style.textDecoration = "line-through";
               restoredCell.style.backgroundColor = "#ffecec";
@@ -605,7 +607,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
   // --- 複合操作後のテーブルグリッド整合性の後処理 ---
   // 複数の table-change（行削除＋列削除＋列追加＋行追加 等）が同一テーブルに対して
   // 適用された場合、削除行のプレースホルダーや追加行に列削除/列追加のセルが反映されず
-  // 列数が不足する行が発生する。ここで全テーブルのグリッドを検証し、不足セルを補完する。
+  // 列数が不足する行が発生する。ここで全テーブルのグリッドを検証し、不足セルを適切な列位置に補完する。
   const tableChanges = changes.filter((c) => c.type === "table-change");
   const processedTables = new Set();
   tableChanges.forEach((change) => {
@@ -618,37 +620,81 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     const grid = buildTableGrid(element);
     if (!grid || grid.rowCount === 0 || grid.colCount === 0) return;
 
+    const addedColIndices = tableChanges
+      .filter((c) => c.addedColIndex !== undefined)
+      .map((c) => c.addedColIndex)
+      .sort((a, b) => a - b);
+    const deletedColIndices = tableChanges
+      .filter((c) => c.deletedColIndex !== undefined)
+      .map((c) => c.deletedColIndex)
+      .sort((a, b) => a - b);
+
     for (let r = 0; r < grid.rowCount; r++) {
       const row = grid.rows[r];
       if (!row) continue;
-      const rowGridCols = grid.grid[r]?.length || 0;
-      if (rowGridCols >= grid.colCount) continue;
 
-      // この行のcolspan合計で実際の列数を計算
-      let actualCols = 0;
-      for (const cell of row.cells) {
-        actualCols += cell.colSpan || 1;
-      }
-
-      const deficit = grid.colCount - actualCols;
+      // grid.grid[r] は rowspan も考慮した正確な列数を持つ
+      const actualCols = grid.grid[r]?.length || 0;
+      let deficit = grid.colCount - actualCols;
       if (deficit <= 0) continue;
 
       const isDeletedRow = row.classList.contains("wr-redline-deleted-row");
       const isAddedRow = [...row.cells].some((c) => c.classList.contains("wr-redline-added-cell"));
 
-      for (let i = 0; i < deficit; i++) {
-        const isHeader = row.parentElement?.tagName === "THEAD";
-        const filler = doc.createElement(isHeader ? "th" : "td");
-        if (isDeletedRow) {
-          // 削除行に追加列用のプレースホルダーセル
+      if (isDeletedRow && addedColIndices.length > 0) {
+        for (const colIdx of addedColIndices) {
+          if (deficit <= 0) break;
+          const isHeader = row.parentElement?.tagName === "THEAD";
+          const filler = doc.createElement(isHeader ? "th" : "td");
           filler.classList.add("wr-redline-delete");
           filler.style.textDecoration = "line-through";
           filler.style.backgroundColor = "#ffecec";
           filler.style.color = "#a52020";
           filler.style.opacity = "0.85";
           filler.style.border = "2px dashed #cc3434";
-        } else if (isAddedRow) {
-          // 追加行に削除列用の復元セル
+
+          const refCell = row.cells[colIdx] || null;
+          if (refCell) {
+            refCell.before(filler);
+          } else {
+            row.append(filler);
+          }
+          deficit--;
+        }
+      } else if (isAddedRow && deletedColIndices.length > 0) {
+        for (const colIdx of deletedColIndices) {
+          if (deficit <= 0) break;
+          const isHeader = row.parentElement?.tagName === "THEAD";
+          const filler = doc.createElement(isHeader ? "th" : "td");
+          filler.classList.add("wr-redline-deleted-cell", "wr-redline-delete");
+          filler.style.textDecoration = "line-through";
+          filler.style.backgroundColor = "#ffecec";
+          filler.style.color = "#a52020";
+          filler.style.opacity = "0.85";
+          filler.style.border = "2px dashed #cc3434";
+
+          const refCell = row.cells[colIdx] || null;
+          if (refCell) {
+            refCell.before(filler);
+          } else {
+            row.append(filler);
+          }
+          deficit--;
+        }
+      }
+
+      // まだ不足がある場合は末尾にフォールバック追加
+      for (let i = 0; i < deficit; i++) {
+        const isHeader = row.parentElement?.tagName === "THEAD";
+        const filler = doc.createElement(isHeader ? "th" : "td");
+        if (isDeletedRow) {
+          filler.classList.add("wr-redline-delete");
+          filler.style.textDecoration = "line-through";
+          filler.style.backgroundColor = "#ffecec";
+          filler.style.color = "#a52020";
+          filler.style.opacity = "0.85";
+          filler.style.border = "2px dashed #cc3434";
+        } else {
           filler.classList.add("wr-redline-deleted-cell", "wr-redline-delete");
           filler.style.textDecoration = "line-through";
           filler.style.backgroundColor = "#ffecec";
