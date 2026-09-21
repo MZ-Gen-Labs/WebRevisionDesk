@@ -68,3 +68,24 @@ test("redline report displays specific table action in table-change label", () =
   const redlineHtml = createRedlineReport(html, changes, "test.html");
   assert.match(redlineHtml, /表の構成変更（行追加（下））/);
 });
+
+test("redline report highlights specific merged cell when cellId is provided", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><table data-web-revision-id="tbl-1"><tbody><tr><td data-web-revision-id="c-merged" colspan="2">Merged</td></tr></tbody></table></body></html>`;
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-1",
+    cellId: "c-merged",
+    action: "セル結合（右）",
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  assert.match(redlineHtml, /表の構成変更（セル結合（右））/);
+  assert.match(redlineHtml, /セル: セル結合（右）/);
+});

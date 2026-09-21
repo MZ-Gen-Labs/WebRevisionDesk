@@ -377,16 +377,6 @@ function recordChange(change) {
     }
   }
   if (change.type !== "element-move") {
-    if (change.type === "table-change") {
-      const previousIndex = state.changes.findLastIndex((item) => item.type === "table-change" && item.elementId === change.elementId);
-      if (previousIndex >= 0) {
-        const previous = state.changes.splice(previousIndex, 1)[0];
-        const merged = { ...previous, after: change.after, afterHtml: change.afterHtml, timestamp: change.timestamp };
-        if (merged.before === merged.after) return "cancelled-table-change";
-        state.changes.push(merged);
-        return "merged";
-      }
-    }
     state.changes.push(change);
     return "added";
   }
@@ -451,6 +441,7 @@ function changesFromOriginal() {
     );
     state.changes.forEach((candidate, candidateIndex) => {
       if (candidateIndex === index || candidateIndex < index) return;
+      if (candidate.type === "table-change") return;
       if (addedIds.has(candidate.elementId) || addedIds.has(candidate.parentId)) absorbedIndexes.add(candidateIndex);
     });
     const parent = addedElement.parentElement;
@@ -620,7 +611,8 @@ function renderHistory() {
     const item = document.createElement("li");
     const type = document.createElement("strong");
     const target = document.createElement("span");
-    type.textContent = `${index + 1}. ${changeLabel(change.type)}`;
+    const labelText = change.action ? `${changeLabel(change.type)}（${change.action}）` : changeLabel(change.type);
+    type.textContent = `${index + 1}. ${labelText}`;
     target.textContent = change.target;
     item.append(type, target);
     return item;

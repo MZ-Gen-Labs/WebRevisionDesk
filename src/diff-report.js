@@ -61,7 +61,7 @@ export function createDiffReport(fileName, changes) {
   const items = changes.map((change, index) => `
     <article class="change">
       <div class="change-number">変更 ${index + 1}</div>
-      <h2>${escapeHtml(changeLabel(change.type))}</h2>
+      <h2>${escapeHtml(change.action ? `${changeLabel(change.type)}（${change.action}）` : changeLabel(change.type))}</h2>
       <p class="target">対象: <code>${escapeHtml(change.target)}</code></p>
       ${changeContent(change)}
     </article>`).join("");
@@ -439,6 +439,12 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       "class-change": [`class変更: ${change.before || "（なし）"} → ${change.after || "（なし）"}`, "attribute"],
       "table-change": [change.action ? `表の構成変更（${change.action}）` : "表の構成変更", "change"],
     };
+    if (change.type === "table-change" && change.cellId) {
+      const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.cellId)}"]`);
+      if (cell) {
+        addLabel(cell, change.action ? `セル: ${change.action}` : "セル変更", "change");
+      }
+    }
     const [label, kind] = labels[change.type] ?? [changeLabel(change.type), "change"];
     addLabel(element, label, kind);
   });

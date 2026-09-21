@@ -1180,8 +1180,11 @@ export class PageEditor {
     this.#assignNewIdsToMissing(context.table);
     const after = this.#cleanOuterHtml(context.table);
     if (before === after) return false;
+    const cellElement = selection?.closest?.("th, td") || (selection?.tagName === "TH" || selection?.tagName === "TD" ? selection : null) || context.cell?.closest?.("th, td") || null;
+    const cellId = cellElement && context.table.contains(cellElement) ? this.#ensureElementId(cellElement) : null;
     this.#emitChange("table-change", context.table, before, after, {
       action,
+      cellId,
       beforeHtml: before,
       afterHtml: after,
     });

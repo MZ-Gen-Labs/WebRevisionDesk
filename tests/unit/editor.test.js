@@ -444,6 +444,7 @@ test("table operations emit table-change with descriptive action string", async 
   editor.mergeCellRight();
   change = recordedChanges.at(-1);
   assert.equal(change.action, "セル結合（右）");
+  assert.ok(change.cellId, "cellId should be captured on cell merge");
 });
 
 
