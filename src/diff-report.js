@@ -567,6 +567,27 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
           });
         }
       }
+      if (Array.isArray(change.addedCellIds) && change.addedCellIds.length > 0) {
+        let firstCell = null;
+        change.addedCellIds.forEach((id) => {
+          const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(id)}"]`);
+          if (cell) {
+            cell.classList.add("wr-redline-target", "wr-redline-add", "wr-redline-added-cell");
+            cell.style.backgroundColor = "#f0faf4";
+            cell.style.border = "2px dashed #15975a";
+            if (!firstCell) firstCell = cell;
+          }
+        });
+        if (firstCell) {
+          const badge = doc.createElement("span");
+          badge.className = "wr-redline-label";
+          badge.style.background = "#08733f";
+          badge.textContent = change.addedColIndex !== undefined
+            ? `追加列（${change.addedColIndex + 1}列目）`
+            : `追加行（${change.addedRowIndex !== undefined ? change.addedRowIndex + 1 : 1}行目）`;
+          firstCell.prepend(badge);
+        }
+      }
       if (change.cellId) {
         const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.cellId)}"]`);
         if (cell) {
@@ -600,6 +621,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-image-comparison{display:grid!important;grid-template-columns:1fr 1fr!important;gap:12px!important;padding:8px!important;margin:0!important;border:1px solid #e1e2ea!important;border-radius:6px!important;background:#f8f9fc!important}
     .wr-image-comparison>span{display:grid!important;gap:6px!important;align-content:start!important}.wr-image-comparison img{display:block!important;max-width:100%!important;max-height:220px!important;width:auto!important;height:auto!important;margin:auto!important;object-fit:contain!important}.wr-image-before{opacity:.75!important}.wr-image-before img{filter:grayscale(.35)!important}
     .wr-redline-deleted-row td, .wr-redline-deleted-row th, .wr-redline-deleted-cell{background-color:#ffecec!important;color:#a52020!important;border:2px dashed #cc3434!important;text-decoration:line-through!important;opacity:.85!important}
+    .wr-redline-added-cell{background-color:#f0faf4!important;border:2px dashed #15975a!important;outline:2px solid #15975a!important}
     .wr-image-download{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:max-content!important;max-width:100%!important;margin:4px auto 0!important;padding:7px 11px!important;border:1px solid #278055!important;border-radius:6px!important;color:#075f38!important;background:#effaf4!important;font:700 12px/1.4 system-ui,sans-serif!important;text-decoration:none!important;overflow-wrap:anywhere!important}.wr-image-download:hover{background:#ddf4e8!important}
   `;
   doc.head.append(style);

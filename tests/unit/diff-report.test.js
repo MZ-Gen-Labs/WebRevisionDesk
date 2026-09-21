@@ -258,5 +258,45 @@ test("redline report applies column deletion to all rows including the very last
   );
 });
 
+test("redline report highlights all cells in added column across all rows", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body>
+    <table data-web-revision-id="tbl-add-col">
+      <thead>
+        <tr><th>見出し1</th><th data-web-revision-id="new-h">新見出し</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>データ1</td><td data-web-revision-id="new-c1">新セル1</td></tr>
+        <tr><td>データ2</td><td data-web-revision-id="new-c2">新セル2</td></tr>
+      </tbody>
+    </table>
+  </body></html>`;
+
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-add-col",
+    action: "列追加（右）（2列目）",
+    addedColIndex: 1,
+    addedCellIds: ["new-h", "new-c1", "new-c2"],
+    cellId: null,
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  const parsedDom = new JSDOM(redlineHtml);
+  const table = parsedDom.window.document.querySelector("table");
+
+  const addedCells = table.querySelectorAll(".wr-redline-added-cell");
+  assert.equal(addedCells.length, 3, "All 3 cells in the added column should have added cell class");
+  assert.match(table.querySelector("thead th:last-child").textContent, /追加列（2列目）/, "Header should display badge");
+});
+
+
 
 

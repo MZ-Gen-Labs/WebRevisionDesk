@@ -183,6 +183,13 @@ test("table column add and delete updates structure and records deletion details
   assert.equal(table.rows[0].cells.length, 2);
   assert.equal(table.rows[1].cells.length, 2);
 
+  const addColChange = recordedChanges.at(-1);
+  assert.equal(addColChange.type, "table-change");
+  assert.equal(addColChange.addedColIndex, 1);
+  assert.equal(addColChange.cellId, null);
+  assert.equal(addColChange.addedCellIds.length, 2);
+  assert.match(addColChange.action, /列追加（右）（2列目）/);
+
   editor.select(cell);
   const colDeleted = editor.deleteTableColumn();
   assert.equal(colDeleted, true);
@@ -449,7 +456,7 @@ test("table operations emit table-change with descriptive action string", async 
   editor.addTableRow({ position: "after" });
   let change = recordedChanges.at(-1);
   assert.equal(change.type, "table-change");
-  assert.equal(change.action, "行追加（下）");
+  assert.match(change.action, /^行追加（下）/);
 
   editor.select(doc.getElementById("c1"));
   editor.mergeCellRight();

@@ -631,7 +631,8 @@ export class PageEditor {
   }
 
   addTableRow({ position = "after" } = {}) {
-    return this.#changeTable(position === "before" ? "行追加（上）" : "行追加（下）", (context) => {
+    const actionLabel = position === "before" ? "行追加（上）" : "行追加（下）";
+    return this.#changeTable(actionLabel, (context, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
       const doc = this.getDocument();
       const insertAtRow = position === "before"
@@ -644,7 +645,7 @@ export class PageEditor {
 
       const newRow = doc.createElement("tr");
       const modifiedSpans = new Set();
-      let firstCell = null;
+      const addedCells = [];
 
       for (let c = 0; c < colCount; c++) {
         const topEntry = insertAtRow > 0 ? grid[insertAtRow - 1]?.[c] : null;
@@ -667,7 +668,8 @@ export class PageEditor {
         newCell.style.padding = ".45em";
         if (refCell) copyCellStyle(refCell, newCell);
         newRow.append(newCell);
-        if (!firstCell) firstCell = newCell;
+        this.#ensureElementId(newCell);
+        addedCells.push(newCell);
 
         if (refEntry && refEntry.colSpan > 1) {
           c += (refEntry.colSpan - 1);
@@ -682,7 +684,16 @@ export class PageEditor {
         else section.append(newRow);
       }
 
-      return firstCell || newRow;
+      const actionName = `${actionLabel}（${insertAtRow + 1}行目）`;
+      setDetails?.({
+        action: actionName,
+        addedRowIndex: insertAtRow,
+        addedRowId: this.#ensureElementId(newRow),
+        addedCellIds: addedCells.map((c) => this.#ensureElementId(c)),
+        cellId: null,
+      });
+
+      return addedCells[0] || newRow;
     });
   }
 
@@ -779,7 +790,8 @@ export class PageEditor {
   }
 
   addTableColumn({ position = "after" } = {}) {
-    return this.#changeTable(position === "before" ? "列追加（左）" : "列追加（右）", (context) => {
+    const actionLabel = position === "before" ? "列追加（左）" : "列追加（右）";
+    return this.#changeTable(actionLabel, (context, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
       const doc = this.getDocument();
       const insertAtCol = position === "before"
@@ -788,6 +800,7 @@ export class PageEditor {
 
       let selected = null;
       const modifiedSpans = new Set();
+      const addedCells = [];
 
       for (let r = 0; r < rowCount; r++) {
         const row = rows[r];
@@ -821,8 +834,19 @@ export class PageEditor {
           row.append(newCell);
         }
 
+        this.#ensureElementId(newCell);
+        addedCells.push(newCell);
+
         if (r === context.rowIndex) selected = newCell;
       }
+
+      const actionName = `${actionLabel}（${insertAtCol + 1}列目）`;
+      setDetails?.({
+        action: actionName,
+        addedColIndex: insertAtCol,
+        addedCellIds: addedCells.map((c) => this.#ensureElementId(c)),
+        cellId: null,
+      });
 
       return selected || context.table;
     });
