@@ -1,4 +1,5 @@
 import { IMAGE_ASSET_NAME_ATTR } from "./html.js";
+import { buildTableGrid } from "./editor.js";
 
 const TYPE_LABELS = {
   "text-change": "テキスト変更",
@@ -469,33 +470,100 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
           }
         }
       }
-      if (change.deletedColIndex !== undefined && Array.isArray(change.deletedColTexts)) {
-        const rows = [...(element.rows || [])];
-        rows.forEach((row, r) => {
-          if (row.classList.contains("wr-redline-deleted-row")) return;
-          const text = change.deletedColTexts[r] || "（削除）";
-          const cell = doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
-          cell.className = "wr-redline-deleted-cell wr-redline-delete";
-          cell.style.textDecoration = "line-through";
-          cell.style.backgroundColor = "#ffecec";
-          cell.style.color = "#a52020";
-          cell.style.opacity = "0.85";
-          cell.style.border = "2px dashed #cc3434";
-          cell.textContent = text;
-          if (r === 0) {
-            const badge = doc.createElement("span");
-            badge.className = "wr-redline-label";
-            badge.style.background = "#a52020";
-            badge.textContent = `削除列（${change.deletedColIndex + 1}列目）`;
-            cell.prepend(badge);
+      if (change.deletedColIndex !== undefined) {
+        const afterGrid = buildTableGrid(element);
+        const targetCol = change.deletedColIndex;
+
+        if (Array.isArray(change.deletedCellsInfo)) {
+          let badgeAdded = false;
+          for (let r = 0; r < change.deletedCellsInfo.length; r++) {
+            const info = change.deletedCellsInfo[r];
+            const row = element.rows[r];
+            if (!row || row.classList.contains("wr-redline-deleted-row")) continue;
+
+            if (info.action === "shrink") {
+              const cell = (info.cellId ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(info.cellId)}"], #${CSS.escape(info.cellId)}`) : null)
+                || (info.isOrigin ? row.cells[0] : null);
+              if (cell && info.originalColSpan) {
+                cell.colSpan = info.originalColSpan;
+              }
+            } else if (info.action === "deleted") {
+              const template = doc.createElement("template");
+              template.innerHTML = info.cellHtml || "<td></td>";
+              const restoredCell = template.content.firstElementChild || doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
+              restoredCell.classList.add("wr-redline-deleted-cell", "wr-redline-delete");
+              restoredCell.style.textDecoration = "line-through";
+              restoredCell.style.backgroundColor = "#ffecec";
+              restoredCell.style.color = "#a52020";
+              restoredCell.style.opacity = "0.85";
+              restoredCell.style.border = "2px dashed #cc3434";
+
+              if (!badgeAdded) {
+                const badge = doc.createElement("span");
+                badge.className = "wr-redline-label";
+                badge.style.background = "#a52020";
+                badge.textContent = `削除列（${targetCol + 1}列目）`;
+                restoredCell.prepend(badge);
+                badgeAdded = true;
+              }
+
+              let refCell = null;
+              if (afterGrid.grid[r]) {
+                for (let c = targetCol; c < afterGrid.colCount; c++) {
+                  const afterEntry = afterGrid.grid[r]?.[c];
+                  if (afterEntry && afterEntry.cell.parentElement === row) {
+                    refCell = afterEntry.cell;
+                    break;
+                  }
+                }
+              }
+
+              if (refCell) {
+                refCell.before(restoredCell);
+              } else {
+                row.append(restoredCell);
+              }
+            }
           }
-          const refCell = row.cells[change.deletedColIndex] || null;
-          if (refCell) {
-            refCell.before(cell);
-          } else {
-            row.append(cell);
-          }
-        });
+        } else if (Array.isArray(change.deletedColTexts)) {
+          const rows = [...(element.rows || [])];
+          rows.forEach((row, r) => {
+            if (row.classList.contains("wr-redline-deleted-row")) return;
+            const text = change.deletedColTexts[r] || "（削除）";
+            const cell = doc.createElement(r === 0 && row.parentElement?.tagName === "THEAD" ? "th" : "td");
+            cell.className = "wr-redline-deleted-cell wr-redline-delete";
+            cell.style.textDecoration = "line-through";
+            cell.style.backgroundColor = "#ffecec";
+            cell.style.color = "#a52020";
+            cell.style.opacity = "0.85";
+            cell.style.border = "2px dashed #cc3434";
+            cell.textContent = text;
+            if (r === 0) {
+              const badge = doc.createElement("span");
+              badge.className = "wr-redline-label";
+              badge.style.background = "#a52020";
+              badge.textContent = `削除列（${targetCol + 1}列目）`;
+              cell.prepend(badge);
+            }
+
+            let refCell = null;
+            if (afterGrid.grid[r]) {
+              for (let c = targetCol; c < afterGrid.colCount; c++) {
+                const afterEntry = afterGrid.grid[r]?.[c];
+                if (afterEntry && afterEntry.cell.parentElement === row) {
+                  refCell = afterEntry.cell;
+                  break;
+                }
+              }
+            }
+
+            if (refCell) {
+              refCell.before(cell);
+            } else {
+              row.append(cell);
+            }
+          });
+        }
       }
       if (change.cellId) {
         const cell = doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.cellId)}"]`);
@@ -529,6 +597,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-redline-text{outline-color:#a65a20!important}.wr-redline-text>.wr-redline-label{background:#8d4918!important}
     .wr-image-comparison{display:grid!important;grid-template-columns:1fr 1fr!important;gap:12px!important;padding:8px!important;margin:0!important;border:1px solid #e1e2ea!important;border-radius:6px!important;background:#f8f9fc!important}
     .wr-image-comparison>span{display:grid!important;gap:6px!important;align-content:start!important}.wr-image-comparison img{display:block!important;max-width:100%!important;max-height:220px!important;width:auto!important;height:auto!important;margin:auto!important;object-fit:contain!important}.wr-image-before{opacity:.75!important}.wr-image-before img{filter:grayscale(.35)!important}
+    .wr-redline-deleted-row td, .wr-redline-deleted-row th, .wr-redline-deleted-cell{background-color:#ffecec!important;color:#a52020!important;border:2px dashed #cc3434!important;text-decoration:line-through!important;opacity:.85!important}
     .wr-image-download{display:inline-flex!important;align-items:center!important;justify-content:center!important;width:max-content!important;max-width:100%!important;margin:4px auto 0!important;padding:7px 11px!important;border:1px solid #278055!important;border-radius:6px!important;color:#075f38!important;background:#effaf4!important;font:700 12px/1.4 system-ui,sans-serif!important;text-decoration:none!important;overflow-wrap:anywhere!important}.wr-image-download:hover{background:#ddf4e8!important}
   `;
   doc.head.append(style);

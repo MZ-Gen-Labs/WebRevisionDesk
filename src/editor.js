@@ -42,7 +42,7 @@ function safeImageAssetName(value, source = "") {
   return name || "replacement-image.img";
 }
 
-function buildTableGrid(table) {
+export function buildTableGrid(table) {
   const rows = [...table.rows];
   const rowCount = rows.length;
   const grid = [];
@@ -709,6 +709,7 @@ export class PageEditor {
         action: actionName,
         deletedRowIndex: targetRowIndex,
         deletedRowHtml,
+        cellId: null,
       });
 
       const modifiedSpans = new Set();
@@ -834,13 +835,40 @@ export class PageEditor {
       const { grid, rowCount } = buildTableGrid(current.table);
       const targetCol = current.columnIndex;
       let selected = null;
-      const modifiedCells = new Set();
+      const deletedCellsInfo = [];
       const colTexts = [];
 
       for (let r = 0; r < rowCount; r++) {
         const entry = grid[r]?.[targetCol];
-        colTexts.push(entry?.cell?.textContent?.trim() || "");
+        if (!entry) {
+          deletedCellsInfo.push({ action: "none" });
+          continue;
+        }
+
+        if (entry.colSpan > 1) {
+          deletedCellsInfo.push({
+            action: "shrink",
+            cellId: entry.cell.getAttribute(EDITOR_ID_ATTR) || entry.cell.id,
+            originalColSpan: entry.colSpan,
+            isOrigin: entry.isOrigin,
+          });
+          if (entry.isOrigin) {
+            colTexts.push(entry.cell.textContent?.trim() || "");
+          }
+        } else if (entry.rowSpan > 1 && !entry.isOrigin) {
+          deletedCellsInfo.push({
+            action: "spanned",
+          });
+        } else {
+          deletedCellsInfo.push({
+            action: "deleted",
+            cellHtml: this.#cleanOuterHtml(entry.cell),
+            text: entry.cell.textContent?.trim() || "",
+          });
+          colTexts.push(entry.cell.textContent?.trim() || "");
+        }
       }
+
       const colTextSummary = colTexts.filter(Boolean).slice(0, 3).join(" / ");
       const colSnippet = colTextSummary ? `：「${colTextSummary.slice(0, 15)}」` : "";
       const actionName = `列削除（${targetCol + 1}列目${colSnippet}）`;
@@ -849,8 +877,11 @@ export class PageEditor {
         action: actionName,
         deletedColIndex: targetCol,
         deletedColTexts: colTexts,
+        deletedCellsInfo,
+        cellId: null,
       });
 
+      const modifiedCells = new Set();
       for (let r = 0; r < rowCount; r++) {
         const entry = grid[r]?.[targetCol];
         if (!entry) continue;
@@ -1214,10 +1245,12 @@ export class PageEditor {
     const after = this.#cleanOuterHtml(context.table);
     if (before === after) return false;
     const cellElement = selection?.closest?.("th, td") || (selection?.tagName === "TH" || selection?.tagName === "TD" ? selection : null) || context.cell?.closest?.("th, td") || null;
-    const cellId = cellElement && context.table.contains(cellElement) ? this.#ensureElementId(cellElement) : null;
+    const resolvedCellId = detailsOverride.cellId !== undefined
+      ? detailsOverride.cellId
+      : (cellElement && context.table.contains(cellElement) ? this.#ensureElementId(cellElement) : null);
     this.#emitChange("table-change", context.table, before, after, {
       action: detailsOverride.action || action,
-      cellId,
+      cellId: resolvedCellId,
       beforeHtml: before,
       afterHtml: after,
       ...detailsOverride,

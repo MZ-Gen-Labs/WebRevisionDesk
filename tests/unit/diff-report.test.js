@@ -137,3 +137,58 @@ test("redline report visualizes deleted table column at original column position
   assert.match(redlineHtml, /削除セルデータ/, "Should preserve deleted cell content");
 });
 
+test("redline report accurately restores merged cell colspan and inserts deleted cells without shifting columns", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  // 1列目を削除した後のテーブル（見出しは colspan=1 に縮んでいる）
+  const html = `<html><body>
+    <table data-web-revision-id="tbl-merged-col">
+      <thead>
+        <tr><th colspan="1" id="h-merge">マージ見出し</th><th id="h-sub">見出し2</th></tr>
+      </thead>
+      <tbody>
+        <tr><td id="c2">1-2</td><td id="c3">1-3</td></tr>
+      </tbody>
+    </table>
+  </body></html>`;
+
+  const changes = [{
+    type: "table-change",
+    elementId: "tbl-merged-col",
+    action: "列削除（1列目：「1-1」）",
+    deletedColIndex: 0,
+    cellId: null,
+    deletedCellsInfo: [
+      { action: "shrink", cellId: "h-merge", originalColSpan: 2, isOrigin: true },
+      { action: "deleted", cellHtml: `<td id="c1">1-1</td>`, text: "1-1" },
+    ],
+    before: "<table>...</table>",
+    after: "<table>...</table>",
+  }];
+
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  const parsedDom = new JSDOM(redlineHtml);
+  const table = parsedDom.window.document.querySelector("table");
+
+  // 見出し行の確認
+  const headerThs = table.querySelectorAll("thead th");
+  assert.equal(headerThs.length, 2, "Header row should not have extra cells inserted");
+  assert.equal(headerThs[0].colSpan, 2, "Merged header should be restored to original colSpan 2");
+
+  // データ行の確認
+  const bodyTds = table.querySelectorAll("tbody td");
+  assert.equal(bodyTds.length, 3, "Body row should have restored cell + existing 2 cells (3 total)");
+  assert.equal(bodyTds[0].id, "c1", "Deleted cell c1 should be restored at column index 0");
+  assert.ok(bodyTds[0].classList.contains("wr-redline-deleted-cell"), "Restored cell should have wr-redline-deleted-cell class");
+  assert.match(bodyTds[0].textContent, /削除列（1列目）/, "Restored cell should display badge");
+  assert.match(bodyTds[0].textContent, /1-1/, "Restored cell text should be preserved");
+
+  // 残ったセルに誤ってセルバッジが付いていないことを確認
+  assert.equal(table.querySelectorAll("[data-wr-label*='セル: 列削除']").length, 0, "Non-deleted cells should not have cell deletion label");
+});
+
+

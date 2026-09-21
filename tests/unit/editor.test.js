@@ -191,6 +191,9 @@ test("table column add and delete updates structure and records deletion details
   const deleteColChange = recordedChanges.at(-1);
   assert.equal(deleteColChange.type, "table-change");
   assert.equal(deleteColChange.deletedColIndex, 0);
+  assert.equal(deleteColChange.cellId, null, "cellId should be null for column deletion");
+  assert.ok(Array.isArray(deleteColChange.deletedCellsInfo), "deletedCellsInfo should be an array");
+  assert.equal(deleteColChange.deletedCellsInfo[0].action, "deleted");
   assert.deepEqual(deleteColChange.deletedColTexts, ["セル1", "セル2"]);
   assert.match(deleteColChange.action, /列削除（1列目/);
 });
