@@ -602,6 +602,65 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     addLabel(element, label, kind);
   });
 
+  // --- 複合操作後のテーブルグリッド整合性の後処理 ---
+  // 複数の table-change（行削除＋列削除＋列追加＋行追加 等）が同一テーブルに対して
+  // 適用された場合、削除行のプレースホルダーや追加行に列削除/列追加のセルが反映されず
+  // 列数が不足する行が発生する。ここで全テーブルのグリッドを検証し、不足セルを補完する。
+  const tableChanges = changes.filter((c) => c.type === "table-change");
+  const processedTables = new Set();
+  tableChanges.forEach((change) => {
+    const element = change.elementId
+      ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.elementId)}"]`)
+      : null;
+    if (!element || element.tagName !== "TABLE" || processedTables.has(element)) return;
+    processedTables.add(element);
+
+    const grid = buildTableGrid(element);
+    if (!grid || grid.rowCount === 0 || grid.colCount === 0) return;
+
+    for (let r = 0; r < grid.rowCount; r++) {
+      const row = grid.rows[r];
+      if (!row) continue;
+      const rowGridCols = grid.grid[r]?.length || 0;
+      if (rowGridCols >= grid.colCount) continue;
+
+      // この行のcolspan合計で実際の列数を計算
+      let actualCols = 0;
+      for (const cell of row.cells) {
+        actualCols += cell.colSpan || 1;
+      }
+
+      const deficit = grid.colCount - actualCols;
+      if (deficit <= 0) continue;
+
+      const isDeletedRow = row.classList.contains("wr-redline-deleted-row");
+      const isAddedRow = [...row.cells].some((c) => c.classList.contains("wr-redline-added-cell"));
+
+      for (let i = 0; i < deficit; i++) {
+        const isHeader = row.parentElement?.tagName === "THEAD";
+        const filler = doc.createElement(isHeader ? "th" : "td");
+        if (isDeletedRow) {
+          // 削除行に追加列用のプレースホルダーセル
+          filler.classList.add("wr-redline-delete");
+          filler.style.textDecoration = "line-through";
+          filler.style.backgroundColor = "#ffecec";
+          filler.style.color = "#a52020";
+          filler.style.opacity = "0.85";
+          filler.style.border = "2px dashed #cc3434";
+        } else if (isAddedRow) {
+          // 追加行に削除列用の復元セル
+          filler.classList.add("wr-redline-deleted-cell", "wr-redline-delete");
+          filler.style.textDecoration = "line-through";
+          filler.style.backgroundColor = "#ffecec";
+          filler.style.color = "#a52020";
+          filler.style.opacity = "0.85";
+          filler.style.border = "2px dashed #cc3434";
+        }
+        row.append(filler);
+      }
+    }
+  });
+
   const style = doc.createElement("style");
   style.textContent = `
     del{color:#a52020;background:#ffe4e4;text-decoration-thickness:2px}
