@@ -599,8 +599,34 @@ test("mergeCellDown rejects a THEAD-to-TBODY merge without changing either secti
   assert.ok(doc.getElementById("body"));
 });
 
-test("splitCell keeps three-column fragments in logical DOM order", async () => {
+test("cell merges preserve element-only contents", async () => {
   const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td id="left">L</td><td id="right"><img src="right.png" alt="right"></td></tr></tbody></table>`, true);
+  let doc = editor.getDocument();
+  editor.select(doc.getElementById("left"));
+  assert.equal(editor.mergeCellRight(), true);
+  assert.equal(doc.querySelector('img[alt="right"]')?.closest("td")?.id, "left");
+
+  await editor.load(`<table><tbody><tr><td id="top">T</td></tr><tr><td id="bottom"><a href="/more"><img src="down.png" alt="down"></a></td></tr></tbody></table>`, true);
+  doc = editor.getDocument();
+  editor.select(doc.getElementById("top"));
+  assert.equal(editor.mergeCellDown(), true);
+  assert.equal(doc.querySelector('img[alt="down"]')?.closest("td")?.id, "top");
+  assert.equal(doc.querySelector('img[alt="down"]')?.closest("a")?.getAttribute("href"), "/more");
+});
+
+test("toggleFirstColumnHeader preserves the header-row corner cell", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th id="corner">項目</th><th>値</th></tr></thead><tbody><tr><th id="row-head">A</th><td>1</td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("row-head"));
+  assert.equal(editor.toggleFirstColumnHeader(), true);
+  assert.equal(doc.getElementById("corner").tagName, "TH");
+  assert.equal(doc.getElementById("row-head").tagName, "TD");
+});
+
+test("splitCell keeps three-column fragments in logical DOM order", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
   await editor.load(`<table><tbody><tr><td id="left">L</td><td id="merged" colspan="3">M</td><td id="right">R</td></tr></tbody></table>`, true);
 
   const doc = editor.getDocument();
@@ -608,6 +634,41 @@ test("splitCell keeps three-column fragments in logical DOM order", async () => 
   assert.equal(editor.splitCell(), true);
   assert.deepEqual([...doc.querySelector("tr").cells].map((cell) => cell.id || cell.textContent), ["left", "merged", "", "", "right"]);
   assert.equal(buildTableGrid(doc.querySelector("table")).colCount, 5);
+  const change = recordedChanges.at(-1);
+  assert.equal(change.addedCellIds.length, 2);
+  assert.equal(change.originalColSpan, 3);
+  assert.equal(change.originalRowSpan, 1);
+});
+
+test("deleteTableRow keeps moved rowspan origins in logical column order", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td rowspan="2">A</td><td id="moved" rowspan="2">B</td><td>C1</td></tr><tr><td id="c2">C2</td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("moved"));
+  assert.equal(editor.deleteTableRow(), true);
+  assert.deepEqual([...doc.querySelector("tr").cells].map((cell) => cell.textContent), ["A", "B", "C2"]);
+});
+
+test("deleteTableRow rejects moving a rowspan origin across table sections", async () => {
+  const { editor, recordedChanges } = setupEditorEnvironment();
+  await editor.load(`<table><thead><tr><th id="head" rowspan="2">H</th><th>X</th></tr></thead><tbody><tr><td>Y</td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("head"));
+  assert.equal(editor.deleteTableRow(), false);
+  assert.ok(doc.querySelector("thead #head"));
+  assert.equal(recordedChanges.length, 0);
+});
+
+test("deleteTableColumn preserves a physically empty row covered by rowspan", async () => {
+  const { editor } = setupEditorEnvironment();
+  await editor.load(`<table><tbody><tr><td rowspan="2">A</td><td id="delete">B</td></tr><tr><td id="only">C</td></tr></tbody></table>`, true);
+  const doc = editor.getDocument();
+  editor.select(doc.getElementById("only"));
+  assert.equal(editor.deleteTableColumn(), true);
+  const table = doc.querySelector("table");
+  assert.equal(table.rows.length, 2, "the covered logical row must remain present");
+  assert.equal(table.rows[1].cells.length, 0);
+  assert.equal(buildTableGrid(table).rowCount, 2);
 });
 
 test("moveTableColumn rejects a rowspan column without altering the table", async () => {

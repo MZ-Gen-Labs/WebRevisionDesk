@@ -116,6 +116,13 @@ function disableActiveContent(doc) {
   });
 }
 
+function sanitizedElementFromHtml(doc, html) {
+  const template = doc.createElement("template");
+  template.innerHTML = html;
+  disableActiveContent(template.content);
+  return template.content.firstElementChild;
+}
+
 function addLabel(element, label, kind = "change") {
   if (element.tagName === "IMG") {
     element.classList.add("wr-redline-target", `wr-redline-${kind}`);
@@ -136,8 +143,15 @@ function addLabel(element, label, kind = "change") {
     element.classList.add("wr-redline-target", `wr-redline-${kind}`);
     const host = element.parentElement;
     if (!host) return element;
-    const labels = element.getAttribute("data-wr-label");
-    const combinedLabel = labels ? `${labels} / ${label}` : label;
+    let tableLabels = [];
+    try {
+      tableLabels = JSON.parse(element.getAttribute("data-wr-table-labels") || "[]");
+    } catch {}
+    tableLabels.push(label);
+    element.setAttribute("data-wr-table-labels", JSON.stringify(tableLabels));
+    const combinedLabel = tableLabels.length === 1
+      ? label
+      : summarizeTableLabels(tableLabels);
     element.setAttribute("data-wr-label", combinedLabel);
     const markerId = element.getAttribute(EDITOR_ID_ATTR) || `table-${Math.random().toString(36).slice(2)}`;
     if (!element.getAttribute(EDITOR_ID_ATTR)) element.setAttribute(EDITOR_ID_ATTR, markerId);
@@ -164,6 +178,16 @@ function addLabel(element, label, kind = "change") {
   }
   badge.textContent = combinedLabel;
   return target;
+}
+
+function summarizeTableLabels(labels) {
+  const counts = new Map();
+  labels.forEach((label) => {
+    const action = String(label).match(/^表の構成変更（([^（]+)(?:（|）)/)?.[1] || "その他";
+    counts.set(action, (counts.get(action) || 0) + 1);
+  });
+  const summary = [...counts].map(([action, count]) => `${action}${count}件`).join("、");
+  return `表の構成変更（${summary}）`;
 }
 
 function mergeRuns(runs) {
@@ -221,6 +245,72 @@ export function diffCharacters(before = "", after = "") {
   return mergeRuns(runs);
 }
 
+function applyInlineTextDiff(doc, element, before, after) {
+  const runs = diffCharacters(before, after);
+  const textNodes = [];
+  const walker = doc.createTreeWalker(element, 4); // NodeFilter.SHOW_TEXT
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+  if (textNodes.map((node) => node.data).join("") !== String(after)) return false;
+
+  const insertions = [];
+  const deletions = [];
+  let afterOffset = 0;
+  runs.forEach((run) => {
+    if (run.type === "equal") {
+      afterOffset += [...run.text].length;
+    } else if (run.type === "insert") {
+      const length = [...run.text].length;
+      insertions.push({ start: afterOffset, end: afterOffset + length });
+      afterOffset += length;
+    } else if (run.type === "delete") {
+      deletions.push({ offset: afterOffset, text: run.text });
+    }
+  });
+  if (!insertions.length && !deletions.length) return true;
+
+  let globalStart = 0;
+  textNodes.forEach((node, nodeIndex) => {
+    const characters = [...node.data];
+    const globalEnd = globalStart + characters.length;
+    const isLast = nodeIndex === textNodes.length - 1;
+    const nodeDeletions = deletions.filter(({ offset }) => (
+      offset >= globalStart && (offset < globalEnd || (isLast && offset === globalEnd))
+    ));
+    const boundaries = new Set([0, characters.length]);
+    insertions.forEach(({ start, end }) => {
+      if (start > globalStart && start < globalEnd) boundaries.add(start - globalStart);
+      if (end > globalStart && end < globalEnd) boundaries.add(end - globalStart);
+    });
+    nodeDeletions.forEach(({ offset }) => boundaries.add(offset - globalStart));
+    const points = [...boundaries].sort((left, right) => left - right);
+    const fragment = doc.createDocumentFragment();
+
+    for (let index = 0; index < points.length; index++) {
+      const point = points[index];
+      nodeDeletions.filter(({ offset }) => offset - globalStart === point).forEach(({ text }) => {
+        const marker = doc.createElement("del");
+        marker.textContent = text;
+        fragment.append(marker);
+      });
+      const next = points[index + 1];
+      if (next === undefined || next <= point) continue;
+      const text = characters.slice(point, next).join("");
+      const absolutePoint = globalStart + point;
+      const inserted = insertions.some(({ start, end }) => absolutePoint >= start && absolutePoint < end);
+      if (inserted) {
+        const marker = doc.createElement("ins");
+        marker.textContent = text;
+        fragment.append(marker);
+      } else {
+        fragment.append(doc.createTextNode(text));
+      }
+    }
+    node.replaceWith(fragment);
+    globalStart = globalEnd;
+  });
+  return true;
+}
+
 function createTextRedline(doc, element, before, after) {
   if (element.children.length === 0) {
     element.replaceChildren();
@@ -233,7 +323,7 @@ function createTextRedline(doc, element, before, after) {
       marker.textContent = run.text;
       element.append(marker);
     });
-  } else {
+  } else if (!applyInlineTextDiff(doc, element, before, after)) {
     const diffPanel = doc.createElement("div");
     diffPanel.className = "wr-redline-text-diff-box";
     const title = doc.createElement("strong");
@@ -283,11 +373,25 @@ function deletedCellTexts(doc, change) {
       if (!info.cellHtml) return [];
       const template = doc.createElement("template");
       template.innerHTML = info.cellHtml;
-      const text = template.content.firstElementChild?.textContent?.trim();
-      return text ? [text] : [];
+      const cell = template.content.firstElementChild;
+      const text = cell?.textContent?.trim();
+      return [...(text ? [text] : []), ...describeImages(cell)];
     });
   }
   return Array.isArray(change.deletedColTexts) ? change.deletedColTexts.filter(Boolean) : [];
+}
+
+function describeImages(container) {
+  if (!container) return [];
+  return [...container.querySelectorAll("img")].map((image) => {
+    const alt = image.getAttribute("alt")?.trim();
+    const assetName = image.getAttribute(IMAGE_ASSET_NAME_ATTR)?.trim();
+    const source = image.getAttribute("src")?.trim();
+    const sourceName = source && !source.startsWith("data:")
+      ? source.split(/[?#]/, 1)[0].split("/").pop()
+      : "";
+    return `画像: ${alt || assetName || sourceName || "名称なし"}`;
+  });
 }
 
 function appendTableDeletionSummary(doc, table, change) {
@@ -307,8 +411,10 @@ function appendTableDeletionSummary(doc, table, change) {
     const template = doc.createElement("template");
     template.innerHTML = change.deletedRowHtml;
     texts = [...(template.content.firstElementChild?.cells || [])]
-      .map((cell) => cell.textContent.trim())
-      .filter(Boolean);
+      .flatMap((cell) => {
+        const text = cell.textContent.trim();
+        return [...(text ? [text] : []), ...describeImages(cell)];
+      });
   } else if (isColumn) {
     texts = deletedCellTexts(doc, change);
   }
@@ -328,7 +434,7 @@ function appendTableDeletionSummary(doc, table, change) {
     }
   } else {
     const empty = doc.createElement("span");
-    empty.textContent = "（内容を取得できませんでした）";
+    empty.textContent = "（空のセル）";
     item.append(empty);
   }
   panel.append(item);
@@ -503,9 +609,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
         ? doc.querySelector(`[${EDITOR_ID_ATTR}="${CSS.escape(change.parentId)}"]`)
         : doc.body;
       if (!parent || !change.before) return;
-      const template = doc.createElement("template");
-      template.innerHTML = change.before;
-      element = template.content.firstElementChild;
+      element = sanitizedElementFromHtml(doc, change.before);
       if (!element) return;
       element.removeAttribute(EDITOR_ID_ATTR);
       if (element.tagName === "IMG") {
@@ -572,7 +676,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     del{color:#a52020;background:#ffe4e4;text-decoration-thickness:2px}
     ins{display:inline;color:#08733f;background:#dff7e9;text-decoration:none;border-bottom:2px solid #19a260}
     del+ins{margin-left:.35em}
-    .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:3px!important}
+    .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:-3px!important}
+    .imgTxt .imgTxt_body-around:has(.wr-redline-target){display:flow-root!important;overflow:visible!important}
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:inline-block!important}
     .wr-redline-text-diff-box{position:relative!important;z-index:2147483646!important;display:block!important;margin:6px 0!important;padding:8px 12px!important;border:2px solid #a65a20!important;border-radius:6px!important;background:#fff8ec!important;font:13px/1.5 system-ui,sans-serif!important;color:#24242d!important}.wr-redline-text-diff-box>strong{color:#8d4918!important;margin-right:6px!important}
     .wr-page-info-changes{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px!important;padding:14px!important;border:3px solid #a65a20!important;border-radius:8px!important;color:#24242d!important;background:#fff8ec!important;font:14px/1.5 system-ui,sans-serif!important}.wr-page-info-changes>strong{color:#8d4918!important}.wr-page-info-changes>div{display:grid!important;grid-template-columns:minmax(130px,auto) 1fr!important;gap:10px!important}.wr-page-info-changes span{overflow-wrap:anywhere!important}

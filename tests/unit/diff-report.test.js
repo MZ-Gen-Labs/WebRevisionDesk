@@ -52,10 +52,13 @@ test("redline report preserves child elements in elements with children on text-
     after: "前文 リンクテキスト 後文",
   }];
   const redlineHtml = createRedlineReport(html, changes, "test.html");
+  const parsed = new JSDOM(redlineHtml).window.document;
+  const paragraph = parsed.querySelector("p");
   assert.match(redlineHtml, /href="https:\/\/example\.com"/, "Links and other child elements must not be stripped");
   assert.match(redlineHtml, /wr-redline-text/, "Redline highlight class must be added");
-  assert.match(redlineHtml, /wr-redline-text-diff-box/, "Diff box with del/ins should be rendered for elements with children");
-  assert.match(redlineHtml, /<ins> 後文<\/ins>/, "Inserted text should be highlighted in diff box");
+  assert.equal(paragraph.querySelector("a").textContent, "リンクテキスト");
+  assert.equal(paragraph.querySelector("ins").textContent, " 後文", "Inserted text should be highlighted in place");
+  assert.equal(parsed.querySelector(".wr-redline-text-diff-box"), null, "A separate diff box is unnecessary when inline mapping succeeds");
 });
 
 test("redline report displays specific table action in table-change label", () => {
@@ -323,19 +326,94 @@ test("redline report highlights all cells in added column across all rows", () =
   assert.match(table.querySelector("thead th:last-child").textContent, /追加列（2列目）/, "Header should display badge");
 });
 
-test("redline report keeps text diff panels inside table cells", () => {
+test("redline report applies inline text diffs inside table-cell child elements", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
   globalThis.DOMParser = dom.window.DOMParser;
   globalThis.CSS = dom.window.CSS || { escape: (s) => s };
 
-  const html = `<html><body><table><tbody><tr><td data-web-revision-id="cell"><a href="/old">旧</a></td></tr></tbody></table></body></html>`;
+  const html = `<html><body><table><tbody><tr><td data-web-revision-id="cell"><a href="/old">新</a></td></tr></tbody></table></body></html>`;
   const report = createRedlineReport(html, [{ type: "text-change", elementId: "cell", before: "旧", after: "新" }], "test.html");
   const parsed = new JSDOM(report).window.document;
   const row = parsed.querySelector("tr");
   assert.equal([...row.children].every((child) => child.tagName === "TD" || child.tagName === "TH"), true);
-  assert.ok(row.querySelector("td > .wr-redline-text-diff-box"));
+  assert.equal(row.querySelector("a del").textContent, "旧");
+  assert.equal(row.querySelector("a ins").textContent, "新");
+  assert.equal(row.querySelector(".wr-redline-text-diff-box"), null);
+});
+
+test("redline report highlights repeated replacements across preserved line breaks", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><p data-web-revision-id="text">Designcenter、<br>Designcenter Solid Edge</p></body></html>`;
+  const report = createRedlineReport(html, [{
+    type: "text-change",
+    elementId: "text",
+    before: "NX、Solid Edge",
+    after: "Designcenter、Designcenter Solid Edge",
+  }], "test.html");
+  const parsed = new JSDOM(report).window.document;
+  const paragraph = parsed.querySelector("p");
+  assert.equal(paragraph.querySelectorAll("ins").length, 2);
+  assert.deepEqual([...paragraph.querySelectorAll("ins")].map((marker) => marker.textContent), ["Designcenter", "Designcenter "]);
+  assert.equal(paragraph.querySelector("del").textContent, "NX");
+  assert.ok(paragraph.querySelector("br"), "Line breaks must be preserved");
+});
+
+test("redline report summarizes repeated table operations in a compact badge", () => {
+  const html = `<html><body><table data-web-revision-id="table"><tr><td>A</td></tr></table></body></html>`;
+  const changes = [
+    { type: "table-change", elementId: "table", action: "行追加（下）（2行目）" },
+    { type: "table-change", elementId: "table", action: "列追加（右）（2列目）" },
+    { type: "table-change", elementId: "table", action: "行追加（下）（3行目）" },
+    { type: "table-change", elementId: "table", action: "セル結合（右）" },
+  ];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  const badge = parsed.querySelector(".wr-table-redline-label");
+  assert.equal(badge.textContent, "表の構成変更（行追加2件、列追加1件、セル結合1件）");
+  assert.ok(badge.textContent.length < 40);
+});
+
+test("redline report describes images in deleted table cells", () => {
+  const html = `<html><body><table data-web-revision-id="table"><tr><td>A</td></tr></table></body></html>`;
+  const changes = [{
+    type: "table-change", elementId: "table", action: "列削除（1列目）", deletedColIndex: 0,
+    deletedCellsInfo: [{ action: "deleted", cellHtml: `<td><img src="banner.png" alt="キャンペーンバナー"></td>`, text: "" }],
+  }];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  assert.match(parsed.querySelector(".wr-table-deletions").textContent, /画像: キャンペーンバナー/);
+});
+
+test("redline report disables active content restored for deleted elements", () => {
+  const html = `<html><body><main data-web-revision-id="parent"></main></body></html>`;
+  const changes = [{
+    type: "element-delete", elementId: "deleted", parentId: "parent", index: 0,
+    before: `<section data-web-revision-id="deleted" onclick="alert(1)"><script>alert(2)</script><img src="x" onerror="alert(3)"><a href="javascript:alert(4)">link</a></section>`,
+  }];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  const restored = parsed.querySelector(".wr-redline-delete");
+  assert.ok(restored);
+  assert.equal(restored.querySelector("script"), null);
+  assert.equal(restored.hasAttribute("onclick"), false);
+  assert.equal(restored.querySelector("img").hasAttribute("onerror"), false);
+  assert.equal(restored.querySelector("a").hasAttribute("href"), false);
+});
+
+test("redline report includes both text and images from deleted table cells", () => {
+  const html = `<html><body><table data-web-revision-id="table"><tr><td>A</td></tr></table></body></html>`;
+  const changes = [{
+    type: "table-change", elementId: "table", action: "行削除（1行目）", deletedRowIndex: 0,
+    deletedRowHtml: `<tr><td>説明<img src="icon.png" alt="アイコン"></td></tr>`,
+  }];
+  const text = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document
+    .querySelector(".wr-table-deletions").textContent;
+  assert.match(text, /説明/);
+  assert.match(text, /画像: アイコン/);
 });
 
 test("redline report lists successive row deletions without restoring them", () => {

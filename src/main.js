@@ -413,9 +413,9 @@ function recordChange(change) {
   return "merged";
 }
 
-function changesFromOriginal() {
-  if (!state.changes.length || !state.modifiedHtml) return structuredClone(state.changes);
-  const doc = new DOMParser().parseFromString(state.modifiedHtml, "text/html");
+function normalizedChangesFromOriginal(changes, modifiedHtml) {
+  if (!changes.length || !modifiedHtml) return structuredClone(changes);
+  const doc = new DOMParser().parseFromString(modifiedHtml, "text/html");
   const elementsById = new Map(
     [...doc.querySelectorAll(`[${EDITOR_ID_ATTR}]`)]
       .map((element) => [element.getAttribute(EDITOR_ID_ATTR), element]),
@@ -423,7 +423,25 @@ function changesFromOriginal() {
   const absorbedIndexes = new Set();
   const normalized = [];
 
-  state.changes.forEach((change, index) => {
+  changes.forEach((change, index) => {
+    if (change.type !== "element-delete") return;
+    const removedIds = new Set(change.removedElementIds || [change.elementId]);
+    if (change.before) {
+      const deletedDoc = new DOMParser().parseFromString(change.before, "text/html");
+      deletedDoc.querySelectorAll(`[${EDITOR_ID_ATTR}]`).forEach((element) => {
+        removedIds.add(element.getAttribute(EDITOR_ID_ATTR));
+      });
+    }
+    changes.forEach((candidate, candidateIndex) => {
+      if (candidateIndex >= index) return;
+      if (candidate.type !== "element-delete"
+        && (removedIds.has(candidate.elementId) || removedIds.has(candidate.parentId))) {
+        absorbedIndexes.add(candidateIndex);
+      }
+    });
+  });
+
+  changes.forEach((change, index) => {
     if (absorbedIndexes.has(index)) return;
     if (change.type !== "element-add" || !change.elementId) {
       normalized.push(structuredClone(change));
@@ -440,7 +458,7 @@ function changesFromOriginal() {
         .map((element) => element.getAttribute(EDITOR_ID_ATTR))
         .filter(Boolean),
     );
-    state.changes.forEach((candidate, candidateIndex) => {
+    changes.forEach((candidate, candidateIndex) => {
       if (candidateIndex === index || candidateIndex < index) return;
       if (addedIds.has(candidate.elementId) || addedIds.has(candidate.parentId)) absorbedIndexes.add(candidateIndex);
     });
@@ -453,6 +471,10 @@ function changesFromOriginal() {
     });
   });
   return normalized;
+}
+
+function changesFromOriginal() {
+  return normalizedChangesFromOriginal(state.changes, state.modifiedHtml);
 }
 
 const editor = new PageEditor(ui.frame, {
@@ -756,8 +778,18 @@ function showSelection(element, selectedElements = element ? [element] : []) {
     const canSplit = Boolean(tableContext.cell && ((tableContext.cell.colSpan || 1) > 1 || (tableContext.cell.rowSpan || 1) > 1));
     ui.splitCell.disabled = !canSplit;
     ui.toggleCellType.disabled = !tableContext.cell;
-    ui.mergeCellRight.disabled = !tableContext.cell;
-    ui.mergeCellDown.disabled = !tableContext.cell;
+    const currentEntry = tableContext.grid[tableContext.rowIndex]?.[tableContext.columnIndex];
+    const rightEntry = currentEntry
+      ? tableContext.grid[tableContext.rowIndex]?.[currentEntry.col + currentEntry.colSpan]
+      : null;
+    const downEntry = currentEntry
+      ? tableContext.grid[currentEntry.row + currentEntry.rowSpan]?.[tableContext.columnIndex]
+      : null;
+    ui.mergeCellRight.disabled = !currentEntry || !rightEntry?.isOrigin
+      || rightEntry.rowSpan !== currentEntry.rowSpan;
+    ui.mergeCellDown.disabled = !currentEntry || !downEntry?.isOrigin
+      || downEntry.colSpan !== currentEntry.colSpan
+      || currentEntry.cell.parentElement?.parentElement !== downEntry.cell.parentElement?.parentElement;
     ui.tableAlignLeft.disabled = !tableContext.cell;
     ui.tableAlignCenter.disabled = !tableContext.cell;
     ui.tableAlignRight.disabled = !tableContext.cell;
@@ -2364,7 +2396,7 @@ async function packagePagesForDownload() {
       ...saved.page,
       originalHtml: saved.originalHtml,
       modifiedHtml: saved.workingHtml,
-        changes: saved.changes,
+        changes: normalizedChangesFromOriginal(saved.changes, saved.workingHtml),
         resourceFailures: saved.page.resourceFailures,
       sourceUrl: saved.page.url,
     };

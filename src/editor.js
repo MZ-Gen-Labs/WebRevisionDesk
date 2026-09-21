@@ -708,6 +708,12 @@ export class PageEditor {
   deleteTableRow() {
     const context = this.getTableContext();
     if (!context?.row || context.rowCount <= 1) return false;
+    const initialGrid = buildTableGrid(context.table);
+    const initialNextRow = initialGrid.rows[context.rowIndex + 1];
+    const crossesRowGroup = initialNextRow && initialGrid.grid[context.rowIndex]?.some((entry) => (
+      entry?.isOrigin && entry.rowSpan > 1 && entry.cell.parentElement?.parentElement !== initialNextRow.parentElement
+    ));
+    if (crossesRowGroup) return false;
     return this.#changeTable("行削除", (current, setDetails) => {
       const { grid, rowCount, colCount, rows } = buildTableGrid(current.table);
       const targetRowIndex = current.rowIndex;
@@ -750,18 +756,12 @@ export class PageEditor {
               // この行から始まって下へ伸びているセルは nextRow へ移動して rowSpan を減らす
               if (nextRow) {
                 entry.cell.rowSpan -= 1;
-                let inserted = false;
-                for (let prevC = c - 1; prevC >= 0; prevC--) {
-                  const prevEntry = grid[targetRowIndex + 1]?.[prevC];
-                  if (prevEntry && prevEntry.cell.parentElement === nextRow) {
-                    prevEntry.cell.after(entry.cell);
-                    inserted = true;
-                    break;
-                  }
-                }
-                if (!inserted) {
-                  nextRow.prepend(entry.cell);
-                }
+                const nextRowEntries = grid[targetRowIndex + 1] || [];
+                const followingCell = [...nextRow.cells].find((cell) => {
+                  const logicalColumn = nextRowEntries.findIndex((candidate) => candidate?.cell === cell && candidate.isOrigin);
+                  return logicalColumn > c;
+                });
+                nextRow.insertBefore(entry.cell, followingCell || null);
               }
             } else {
               // 上の行から始まってこの行をまたぐセルは単に rowSpan を減らす
@@ -1105,7 +1105,9 @@ export class PageEditor {
         const entry = grid[r]?.[0];
         // A full-width/category heading starts in column zero too, but is not a
         // first-column header.  Leave horizontally merged headings untouched.
-        if (entry?.isOrigin && entry.colSpan === 1 && !firstColCells.includes(entry.cell)) {
+        if (entry?.isOrigin && entry.colSpan === 1
+          && entry.cell.closest("thead") === null
+          && !firstColCells.includes(entry.cell)) {
           firstColCells.push(entry.cell);
         }
       }
@@ -1142,8 +1144,9 @@ export class PageEditor {
       const leftCell = currentEntry.cell;
       const rightCell = rightEntry.cell;
       leftCell.colSpan = currentEntry.colSpan + rightEntry.colSpan;
-      if (rightCell.textContent.trim()) {
-        leftCell.append(leftCell.ownerDocument.createTextNode(" "), ...rightCell.childNodes);
+      if (rightCell.childNodes.length) {
+        if (leftCell.childNodes.length) leftCell.append(leftCell.ownerDocument.createTextNode(" "));
+        leftCell.append(...rightCell.childNodes);
       }
       rightCell.remove();
       return leftCell;
@@ -1170,8 +1173,9 @@ export class PageEditor {
       const topCell = currentEntry.cell;
       const bottomCell = downEntry.cell;
       topCell.rowSpan = currentEntry.rowSpan + downEntry.rowSpan;
-      if (bottomCell.textContent.trim()) {
-        topCell.append(topCell.ownerDocument.createTextNode(" "), ...bottomCell.childNodes);
+      if (bottomCell.childNodes.length) {
+        if (topCell.childNodes.length) topCell.append(topCell.ownerDocument.createTextNode(" "));
+        topCell.append(...bottomCell.childNodes);
       }
       bottomCell.remove();
       return topCell;
@@ -1186,12 +1190,13 @@ export class PageEditor {
     const rowSpan = cell.rowSpan || 1;
     if (colSpan <= 1 && rowSpan <= 1) return false;
 
-    return this.#changeTable("セル分割", (current) => {
+    return this.#changeTable("セル分割", (current, setDetails) => {
       const { grid } = buildTableGrid(current.table);
       const startR = current.rowIndex;
       const startC = current.columnIndex;
       const targetCell = current.cell;
       const doc = targetCell.ownerDocument;
+      const addedCells = [];
 
       targetCell.colSpan = 1;
       targetCell.rowSpan = 1;
@@ -1222,8 +1227,17 @@ export class PageEditor {
           if (insertionAnchor) insertionAnchor.after(newCell);
           else row.prepend(newCell);
           insertionAnchor = newCell;
+          addedCells.push(newCell);
         }
       }
+
+      setDetails?.({
+        action: "セル分割",
+        cellId: this.#ensureElementId(targetCell),
+        addedCellIds: addedCells.map((addedCell) => this.#ensureElementId(addedCell)),
+        originalColSpan: colSpan,
+        originalRowSpan: rowSpan,
+      });
 
       return targetCell;
     });
