@@ -55,15 +55,15 @@ test("Complex table: initial structure integrity", async () => {
   assert.ok(table, "Table must exist");
 
   const { rowCount, colCount, grid } = buildTableGrid(table);
-  // thead 2行 + PDM 1行 + トランスレータ 2行 + CAD 4行 + CAM 11行 = 20行
+  // thead 2行 + 共通基盤 1行 + データ変換 2行 + 基本モデリング 4行 + 専門機能 11行 = 20行
   assert.equal(rowCount, 20, "Table should have exactly 20 rows");
-  // 1列目(大分類) + 2列目(小項目) + 11列(製品名) = 13列
+  // 1列目(大分類) + 2列目(小項目) + 11列(プラン名) = 13列
   assert.equal(colCount, 13, "Table should have exactly 13 logical columns");
 
-  // CAM セルの rowspan 検証
-  const camCell = grid[9][0].cell;
-  assert.equal(camCell.textContent.trim(), "CAM");
-  assert.equal(camCell.rowSpan, 11, "CAM cell must have rowSpan 11");
+  // 「専門機能」大分類セルの rowspan 検証
+  const specialCell = grid[9][0].cell;
+  assert.equal(specialCell.textContent.trim(), "専門機能");
+  assert.equal(specialCell.rowSpan, 11, "Special category cell must have rowSpan 11");
 });
 
 test("Complex table: column addition highlights entire column and updates merged headers", async () => {
@@ -73,9 +73,9 @@ test("Complex table: column addition highlights entire column and updates merged
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 4列目（「NX Design Premium」）を選択して右に列を追加
+  // 4列目（「Plan Standard Premium」）を選択して右に列を追加
   const targetHeader = table.rows[1].cells[2];
-  assert.match(targetHeader.textContent, /NX Design Premium/);
+  assert.match(targetHeader.textContent, /Plan Standard Premium/);
   editor.select(targetHeader);
 
   const added = editor.addTableColumn({ position: "after" });
@@ -88,10 +88,10 @@ test("Complex table: column addition highlights entire column and updates merged
   assert.ok(Array.isArray(change.addedCellIds));
   assert.equal(change.addedCellIds.length, 19, "New cell added in 19 rows (excluding the group header row)");
 
-  // 親ヘッダー「設計」の colSpan が 5 から 6 に自動拡張されていること
-  const designGroupHeader = table.rows[0].cells[1];
-  assert.equal(designGroupHeader.textContent.trim(), "設計");
-  assert.equal(designGroupHeader.colSpan, 6, "Group header '設計' colSpan should expand from 5 to 6");
+  // 親ヘッダー「基本プラン」の colSpan が 5 から 6 に自動拡張されていること
+  const basicGroupHeader = table.rows[0].cells[1];
+  assert.equal(basicGroupHeader.textContent.trim(), "基本プラン");
+  assert.equal(basicGroupHeader.colSpan, 6, "Group header '基本プラン' colSpan should expand from 5 to 6");
 
   // 赤入れレポートの妥当性検証
   const redlineHtml = createRedlineReport(doc.body.innerHTML, [change], "matrix.html");
@@ -113,7 +113,7 @@ test("Complex table: column deletion preserves alignment across all rows includi
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 4列目（「NX Design Premium」、index 4）を選択して列削除
+  // 4列目（「Plan Standard Premium」、index 4）を選択して列削除
   const targetHeader = table.rows[1].cells[2];
   editor.select(targetHeader);
 
@@ -125,20 +125,20 @@ test("Complex table: column deletion preserves alignment across all rows includi
   assert.match(change.action, /列削除（5列目/);
   assert.equal(change.deletedColIndex, 4);
 
-  // 親ヘッダー「設計」の colSpan が 5 から 4 に縮小していること
-  const designGroupHeader = table.rows[0].cells[1];
-  assert.equal(designGroupHeader.colSpan, 4, "Group header '設計' colSpan should shrink from 5 to 4");
+  // 親ヘッダー「基本プラン」の colSpan が 5 から 4 に縮小していること
+  const basicGroupHeader = table.rows[0].cells[1];
+  assert.equal(basicGroupHeader.colSpan, 4, "Group header '基本プラン' colSpan should shrink from 5 to 4");
 
   // 赤入れレポートの妥当性検証
   const redlineHtml = createRedlineReport(doc.body.innerHTML, [change], "matrix.html");
   const rDom = new JSDOM(redlineHtml);
   const rTable = rDom.window.document.getElementById("product-matrix-table");
 
-  // 設計ヘッダーが元の colSpan 5 に復元され、列数が整合していること
-  const rDesignHeader = rTable.rows[0].cells[1];
-  assert.equal(rDesignHeader.colSpan, 5, "Redline report should restore group header colSpan to 5");
+  // 基本プランヘッダーが元の colSpan 5 に復元され、列数が整合していること
+  const rBasicHeader = rTable.rows[0].cells[1];
+  assert.equal(rBasicHeader.colSpan, 5, "Redline report should restore group header colSpan to 5");
 
-  // 最下行（マシンツールシミュレーション）にも削除セルが復元されていること
+  // 最下行（シミュレーション検証機能）にも削除セルが復元されていること
   const lastRow = rTable.rows[rTable.rows.length - 1];
   const lastRowDeletedCell = lastRow.querySelector(".wr-redline-deleted-cell");
   assert.ok(lastRowDeletedCell, "Last row must contain restored deleted cell");
@@ -151,36 +151,36 @@ test("Complex table: column deletion preserves alignment across all rows includi
   }
 });
 
-test("Complex table: moving rows within shared rowspan cell (CAM category)", async () => {
+test("Complex table: moving rows within shared rowspan cell (Special features category)", async () => {
   const { editor, recordedChanges } = setupEditorWithHtml(sampleHtml);
   await editor.load(sampleHtml, true);
 
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // CAM配下の「旋盤加工」（行12）を選択
+  // 専門機能配下の「旋盤加工制御」（行12）を選択
   const latheRow = table.rows[12];
   const latheCell = latheRow.querySelector(".subitem-cell");
-  assert.equal(latheCell.textContent.trim(), "旋盤加工");
+  assert.equal(latheCell.textContent.trim(), "旋盤加工制御");
   editor.select(latheCell);
 
-  // 「旋盤加工」を下（「2.5軸ミル加工」、行13）へ移動
+  // 「旋盤加工制御」を下（「2.5軸ミル加工制御」、行13）へ移動
   const movedDown = editor.moveTableRow("down");
-  assert.equal(movedDown, true, "Should successfully move row down inside CAM rowspan");
+  assert.equal(movedDown, true, "Should successfully move row down inside shared rowspan");
 
-  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "2.5軸ミル加工");
-  assert.equal(table.rows[13].querySelector(".subitem-cell").textContent.trim(), "旋盤加工");
+  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "2.5軸ミル加工制御");
+  assert.equal(table.rows[13].querySelector(".subitem-cell").textContent.trim(), "旋盤加工制御");
 
-  // CAM の rowspan が 11 のまま保たれていること
-  const camCell = table.rows[9].cells[0];
-  assert.equal(camCell.textContent.trim(), "CAM");
-  assert.equal(camCell.rowSpan, 11, "CAM rowSpan must remain 11");
+  // 「専門機能」の rowspan が 11 のまま保たれていること
+  const specialCell = table.rows[9].cells[0];
+  assert.equal(specialCell.textContent.trim(), "専門機能");
+  assert.equal(specialCell.rowSpan, 11, "Special features category rowSpan must remain 11");
 
   // 再度上へ移動して元に戻す
   editor.select(table.rows[13].querySelector(".subitem-cell"));
   const movedUp = editor.moveTableRow("up");
-  assert.equal(movedUp, true, "Should successfully move row up inside CAM rowspan");
-  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "旋盤加工");
+  assert.equal(movedUp, true, "Should successfully move row up inside shared rowspan");
+  assert.equal(table.rows[12].querySelector(".subitem-cell").textContent.trim(), "旋盤加工制御");
 });
 
 test("Complex table: moving column left and right across matrix", async () => {
@@ -190,29 +190,28 @@ test("Complex table: moving column left and right across matrix", async () => {
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 3列目（「NX Design Standard Floating」、index 2）を選択して右へ移動
+  // 3列目（「Plan Standard Entry」、index 2）を選択して右へ移動
   const stdHeader = table.rows[1].cells[0];
-  assert.match(stdHeader.textContent, /NX Design Standard Floating/);
+  assert.match(stdHeader.textContent, /Plan Standard Entry/);
   editor.select(stdHeader);
 
   const movedRight = editor.moveTableColumn("right");
   assert.equal(movedRight, true, "Column move right should succeed");
 
   // 1行目のヘッダーで 1番目と2番目が入れ替わっていること
-  assert.match(table.rows[1].cells[0].textContent, /NX Design Advanced/);
-  assert.match(table.rows[1].cells[1].textContent, /NX Design Standard Floating/);
+  assert.match(table.rows[1].cells[0].textContent, /Plan Standard Advanced/);
+  assert.match(table.rows[1].cells[1].textContent, /Plan Standard Entry/);
 
-  // データ行（PDM行）でも 3列目と4列目が入れ替わっていること
-  const pdmRow = table.rows[2];
-  // pdmRow.cells[0]: PDM, cells[1]: NX Embedded Client, cells[2]: mark, cells[3]: mark
-  assert.ok(pdmRow.cells[2] && pdmRow.cells[3]);
+  // データ行（共通基盤行）でも 3列目と4列目が入れ替わっていること
+  const baseRow = table.rows[2];
+  assert.ok(baseRow.cells[2] && baseRow.cells[3]);
 
   // 元に戻す（左へ移動）
   editor.select(table.rows[1].cells[1]);
   const movedLeft = editor.moveTableColumn("left");
   assert.equal(movedLeft, true, "Column move left should succeed");
-  assert.match(table.rows[1].cells[0].textContent, /NX Design Standard Floating/);
-  assert.match(table.rows[1].cells[1].textContent, /NX Design Advanced/);
+  assert.match(table.rows[1].cells[0].textContent, /Plan Standard Entry/);
+  assert.match(table.rows[1].cells[1].textContent, /Plan Standard Advanced/);
 });
 
 test("Complex table: combined row delete and column delete redline report validity", async () => {
@@ -222,13 +221,13 @@ test("Complex table: combined row delete and column delete redline report validi
   const doc = editor.getDocument();
   const table = doc.getElementById("product-matrix-table");
 
-  // 1. 製図機能の行（行8）を削除
+  // 1. 「2D図面・製図作成機能」の行（行8）を削除
   const draftingCell = table.rows[8].querySelector(".subitem-cell");
-  assert.equal(draftingCell.textContent.trim(), "製図機能");
+  assert.equal(draftingCell.textContent.trim(), "2D図面・製図作成機能");
   editor.select(draftingCell);
   editor.deleteTableRow();
 
-  // 2. 5列目（「NX Design for Industrial Design」）を削除
+  // 2. 5列目（「Plan Professional」）を削除
   const industrialHeader = table.rows[1].cells[3];
   editor.select(industrialHeader);
   editor.deleteTableColumn();
@@ -243,7 +242,7 @@ test("Complex table: combined row delete and column delete redline report validi
   // 行削除の仮想行が挿入されていること
   const deletedRow = rTable.querySelector(".wr-redline-deleted-row");
   assert.ok(deletedRow, "Deleted row must exist in redline table");
-  assert.match(deletedRow.textContent, /製図機能/);
+  assert.match(deletedRow.textContent, /2D図面・製図作成機能/);
   assert.match(deletedRow.textContent, /削除行/);
 
   // 列削除のセルが最下行まで漏れなく挿入されていること

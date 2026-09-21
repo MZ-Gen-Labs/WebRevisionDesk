@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NXバンドル製品構成 サンプル表</title>
+    <title>製品プラン・機能構成マトリクス サンプル表</title>
     <style>
       body {
         margin: 0;
@@ -20,7 +20,7 @@
         font-size: 24px;
         font-weight: 700;
         margin: 0 0 8px 0;
-        border-bottom: 3px solid #cc1414;
+        border-bottom: 3px solid #0052cc;
         padding-bottom: 8px;
         display: inline-block;
       }
@@ -34,7 +34,7 @@
         border-collapse: collapse;
         font-size: 13px;
         background: #fff;
-        border: 2px solid #dfa528;
+        border: 2px solid #3b82f6;
       }
       table.matrix-table th,
       table.matrix-table td {
@@ -46,15 +46,15 @@
       table.matrix-table thead th {
         font-weight: 600;
       }
-      .group-design {
+      .group-basic {
         background-color: #eaffea;
         color: #1f6f1f;
       }
-      .group-cae {
+      .group-advanced {
         background-color: #e1f5fe;
         color: #0277bd;
       }
-      .group-cam {
+      .group-special {
         background-color: #fff3e0;
         color: #e65100;
       }
@@ -62,7 +62,7 @@
         writing-mode: vertical-rl;
         transform: rotate(180deg);
         white-space: nowrap;
-        height: 220px;
+        height: 200px;
         padding: 12px 6px;
         font-size: 12px;
         text-align: left;
@@ -81,7 +81,7 @@
       }
       .subitem-cell {
         text-align: left !important;
-        width: 240px;
+        width: 260px;
         padding-left: 12px !important;
       }
       .mark-dot {
@@ -109,36 +109,36 @@
   </head>
   <body>
     <div class="container">
-      <h1>NXバンドル製品構成</h1>
+      <h1>製品プラン・機能構成一覧</h1>
       <p class="desc">colspan および rowspan を豊富に含む製品構成マトリクス表の検証用サンプルです。</p>
 
       <table class="matrix-table" id="product-matrix-table">
         <thead>
           <tr>
-            <th colspan="2" rowspan="2" class="product-title-cell">製品名</th>
-            <th colspan="5" class="group-design">設計</th>
-            <th colspan="2" class="group-cae">解析</th>
-            <th colspan="4" class="group-cam">加工</th>
+            <th colspan="2" rowspan="2" class="product-title-cell">機能分類 / プラン</th>
+            <th colspan="5" class="group-basic">基本プラン</th>
+            <th colspan="2" class="group-advanced">拡張プラン</th>
+            <th colspan="4" class="group-special">専門機能プラン</th>
           </tr>
           <tr>
-            <th class="vertical-header">NX Design Standard Floating</th>
-            <th class="vertical-header">NX Design Advanced</th>
-            <th class="vertical-header">NX Design Premium</th>
-            <th class="vertical-header">NX Design for Industrial Design</th>
-            <th class="vertical-header">NX Cool Shape Design Bundle</th>
-            <th class="vertical-header">Simcenter Engineering Desktop</th>
-            <th class="vertical-header">Simcenter Structures</th>
-            <th class="vertical-header">NX CAD/CAM Turning Foundation</th>
-            <th class="vertical-header">NX CAD/CAM 3 Axis Milling Foundation</th>
-            <th class="vertical-header">NX Advanced 5 Axis Machining</th>
-            <th class="vertical-header">NX Total Machining</th>
+            <th class="vertical-header">Plan Standard Entry</th>
+            <th class="vertical-header">Plan Standard Advanced</th>
+            <th class="vertical-header">Plan Standard Premium</th>
+            <th class="vertical-header">Plan Professional</th>
+            <th class="vertical-header">Plan Enterprise</th>
+            <th class="vertical-header">Analytics Desktop</th>
+            <th class="vertical-header">Analytics Structures</th>
+            <th class="vertical-header">Operations Basic</th>
+            <th class="vertical-header">Operations Advanced</th>
+            <th class="vertical-header">Operations Multi-Axis</th>
+            <th class="vertical-header">Operations Total Suite</th>
           </tr>
         </thead>
         <tbody>
-          <!-- PDMグループ -->
+          <!-- 共通基盤グループ -->
           <tr>
-            <td class="category-cell">PDM</td>
-            <td class="subitem-cell">NX Embedded Client (Teamcenter Integration for NX)</td>
+            <td class="category-cell">共通基盤</td>
+            <td class="subitem-cell">システム連携クライアント（共通データ連携）</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
@@ -152,15 +152,15 @@
             <td></td>
           </tr>
 
-          <!-- トランスレータグループ -->
+          <!-- データ変換グループ -->
           <tr>
-            <td rowspan="2" class="category-cell">トランスレータ</td>
-            <td class="subitem-cell">データ変換機能（IGES、DXF/DWG、STEP203/214、JTなど）</td>
+            <td rowspan="2" class="category-cell">データ変換</td>
+            <td class="subitem-cell">標準フォーマット変換機能（2D/3D汎用フォーマット）</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-orange"></span></td>
@@ -169,12 +169,12 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">2D/3Dトランスレータ拡張機能</td>
+            <td class="subitem-cell">拡張フォーマット変換オプション</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-orange"></span></td>
@@ -183,15 +183,15 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
 
-          <!-- CAD基本機能グループ -->
+          <!-- 基本モデリンググループ -->
           <tr>
-            <td rowspan="4" class="category-cell">CAD基本機能</td>
-            <td class="subitem-cell">ソリッド/フィーチャ作成機能</td>
+            <td rowspan="4" class="category-cell">基本モデリング</td>
+            <td class="subitem-cell">基本形状・フィーチャ作成機能</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-orange"></span></td>
@@ -200,26 +200,12 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">シンクロナステクノロジ</td>
-            <td><span class="mark-dot"></span></td>
+            <td class="subitem-cell">ダイレクト編集モデリング機能</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot-blue"></span></td>
-            <td><span class="mark-dot-blue"></span></td>
-            <td><span class="mark-dot-orange"></span></td>
-            <td><span class="mark-dot-orange"></span></td>
-            <td><span class="mark-dot-orange"></span></td>
-            <td><span class="mark-dot-orange"></span></td>
-          </tr>
-          <tr>
-            <td class="subitem-cell">コンバージェントモデリング（基本機能）</td>
-            <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
-            <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-blue"></span></td>
             <td><span class="mark-dot-orange"></span></td>
@@ -228,7 +214,21 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">製図機能</td>
+            <td class="subitem-cell">ハイブリッドモデリング機能</td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-blue"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+            <td><span class="mark-dot-orange"></span></td>
+          </tr>
+          <tr>
+            <td class="subitem-cell">2D図面・製図作成機能</td>
             <td><span class="mark-dot"></span></td>
             <td><span class="mark-dot"></span></td>
             <td>-</td>
@@ -242,10 +242,10 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
 
-          <!-- CAMグループ -->
+          <!-- 専門機能グループ -->
           <tr>
-            <td rowspan="11" class="category-cell">CAM</td>
-            <td class="subitem-cell">作業指示書作成</td>
+            <td rowspan="11" class="category-cell">専門機能</td>
+            <td class="subitem-cell">工程作業指示書作成</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -259,7 +259,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">加工指示書作成</td>
+            <td class="subitem-cell">加工指示ドキュメント出力</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -273,7 +273,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">ポスト作成/実行</td>
+            <td class="subitem-cell">出力ポストジェネレータ</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -287,7 +287,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">旋盤加工</td>
+            <td class="subitem-cell">旋盤加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -301,7 +301,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">2.5軸ミル加工</td>
+            <td class="subitem-cell">2.5軸ミル加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -315,7 +315,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">3軸ミル加工</td>
+            <td class="subitem-cell">3軸ミル加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -329,7 +329,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">5軸ミル加工</td>
+            <td class="subitem-cell">多軸ミル加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -343,7 +343,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">ロータリー加工</td>
+            <td class="subitem-cell">旋回軸加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -357,7 +357,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">ターボマシナリミリング（インペラ加工）</td>
+            <td class="subitem-cell">特殊曲面加工制御</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -371,7 +371,7 @@
             <td></td>
           </tr>
           <tr>
-            <td class="subitem-cell">フィーチャベース加工</td>
+            <td class="subitem-cell">フィーチャ自動認識加工</td>
             <td></td>
             <td></td>
             <td>-</td>
@@ -385,7 +385,7 @@
             <td><span class="mark-dot-orange"></span></td>
           </tr>
           <tr>
-            <td class="subitem-cell">マシンツールシミュレーション</td>
+            <td class="subitem-cell">シミュレーション検証機能</td>
             <td></td>
             <td></td>
             <td></td>
