@@ -210,16 +210,18 @@ export function diffCharacters(before = "", after = "") {
 }
 
 function createTextRedline(doc, element, before, after) {
-  element.replaceChildren();
-  diffCharacters(before, after).forEach((run) => {
-    if (run.type === "equal") {
-      element.append(doc.createTextNode(run.text));
-      return;
-    }
-    const marker = doc.createElement(run.type === "delete" ? "del" : "ins");
-    marker.textContent = run.text;
-    element.append(marker);
-  });
+  if (element.children.length === 0) {
+    element.replaceChildren();
+    diffCharacters(before, after).forEach((run) => {
+      if (run.type === "equal") {
+        element.append(doc.createTextNode(run.text));
+        return;
+      }
+      const marker = doc.createElement(run.type === "delete" ? "del" : "ins");
+      marker.textContent = run.text;
+      element.append(marker);
+    });
+  }
   addLabel(element, "文章変更", "text");
 }
 

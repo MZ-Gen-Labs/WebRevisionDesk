@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { changeLabel, createDiffReport, diffCharacters } from "../../src/diff-report.js";
+import { JSDOM } from "jsdom";
+import { changeLabel, createDiffReport, createRedlineReport, diffCharacters } from "../../src/diff-report.js";
 
 test("character diff keeps unchanged, removed, and inserted runs distinct", () => {
   assert.deepEqual(diffCharacters("旧名称", "新名称"), [
@@ -26,4 +27,23 @@ test("diff report escapes page and change content", () => {
   assert.match(report, /&lt;table&gt;/);
   assert.match(report, /表の構成変更/);
   assert.equal(changeLabel("unknown"), "変更");
+});
+
+test("redline report preserves child elements in elements with children on text-change", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><p data-editor-id="wr-1">前文 <a href="https://example.com">リンクテキスト</a> 後文</p></body></html>`;
+  const changes = [{
+    type: "text-change",
+    elementId: "wr-1",
+    before: "前文 リンクテキスト",
+    after: "前文 リンクテキスト 後文",
+  }];
+  const redlineHtml = createRedlineReport(html, changes, "test.html");
+  assert.match(redlineHtml, /href="https:\/\/example\.com"/, "Links and other child elements must not be stripped");
+  assert.match(redlineHtml, /wr-redline-text/, "Redline highlight class must be added");
 });

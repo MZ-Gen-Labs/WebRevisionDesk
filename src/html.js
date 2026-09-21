@@ -39,15 +39,19 @@ export function normalizeClasses(value) {
   return [...new Set(value.trim().split(/\s+/).filter(Boolean))];
 }
 
-export function downloadHtml(html, originalName) {
-  const baseName = originalName.replace(/\.(html?|HTML?)$/, "") || "page";
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${baseName}-modified.html`;
+  link.download = filename;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export function downloadHtml(html, originalName) {
+  const baseName = originalName.replace(/\.(html?|HTML?)$/, "") || "page";
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  downloadBlob(blob, `${baseName}-modified.html`);
 }
 
 export function cleanHtmlString(html) {

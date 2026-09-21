@@ -533,6 +533,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   }
   if (method === "POST" && (url === "/api/capture/cancel" || url === "/api/login/finish")) {
     if (body.sessionId && activeCaptureSessionId && body.sessionId !== activeCaptureSessionId) throw new Error("取得セッションが一致しません。");
+    activeCaptureSessionId = "";
     closePageWindow();
     return jsonResponse({ ok: true });
   }

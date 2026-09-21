@@ -1,5 +1,5 @@
 import { PageEditor } from "./editor.js";
-import { cleanHtmlString, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
+import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { createProjectPackages, downloadProjectPackage } from "./project-package.js";
 import { desktopFileSystemAvailable, saveDesktopOutput } from "./desktop-file-system.js";
@@ -52,12 +52,19 @@ const ui = {
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
   pageStructurePanel: $("#page-structure-panel"), pageTitle: $("#page-title-value"),
   pageDescription: $("#page-description-value"), pageH1: $("#page-h1-value"),
-  tableTools: $("#table-tools"), tableRowCount: $("#table-row-count"),
+  tableCreateTools: $("#table-create-tools"), tableRowCount: $("#table-row-count"),
   tableColumnCount: $("#table-column-count"), tableHeaderRow: $("#table-header-row"),
   insertTable: $("#insert-table"), tableEditTools: $("#table-edit-tools"),
-  tableSelectionState: $("#table-selection-state"), addTableRow: $("#add-table-row"),
-  deleteTableRow: $("#delete-table-row"), addTableColumn: $("#add-table-column"),
-  deleteTableColumn: $("#delete-table-column"), deleteTable: $("#delete-table"),
+  tableSelectionState: $("#table-selection-state"),
+  addTableRowBefore: $("#add-table-row-before"), addTableRow: $("#add-table-row"),
+  moveTableRowUp: $("#move-table-row-up"), moveTableRowDown: $("#move-table-row-down"),
+  deleteTableRow: $("#delete-table-row"),
+  addTableColumnBefore: $("#add-table-column-before"), addTableColumn: $("#add-table-column"),
+  deleteTableColumn: $("#delete-table-column"),
+  toggleCellType: $("#toggle-cell-type"), toggleFirstColumnHeader: $("#toggle-first-column-header"),
+  tableAlignLeft: $("#table-align-left"), tableAlignCenter: $("#table-align-center"), tableAlignRight: $("#table-align-right"),
+  mergeCellRight: $("#merge-cell-right"), mergeCellDown: $("#merge-cell-down"), splitCell: $("#split-cell"),
+  deleteTable: $("#delete-table"),
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   resourceFailures: $("#resource-failures"), resourceFailureList: $("#resource-failure-list"),
@@ -560,8 +567,8 @@ function setControls(enabled) {
 function syncTableToolsVisibility(tableContext = editor.getTableContext()) {
   const available = Boolean(state.originalHtml) && !state.previewOnly;
   const tableSelected = state.mode === "modified" && Boolean(tableContext);
-  ui.tableTools.hidden = !available || (!ui.advancedMode.checked && !tableSelected);
-  if (tableSelected) ui.tableTools.open = true;
+  ui.tableCreateTools.hidden = !available || !ui.advancedMode.checked;
+  ui.tableEditTools.hidden = !available || !tableSelected;
 }
 
 function syncProjectControls() {
@@ -750,6 +757,16 @@ function showSelection(element, selectedElements = element ? [element] : []) {
     ui.tableSelectionState.textContent = `表（${tableContext.rowCount}行 × ${tableContext.columnCount}列）を選択中`;
     ui.deleteTableRow.disabled = tableContext.rowCount <= 1;
     ui.deleteTableColumn.disabled = tableContext.columnCount <= 1;
+    ui.moveTableRowUp.disabled = tableContext.rowIndex <= 0;
+    ui.moveTableRowDown.disabled = tableContext.rowIndex >= tableContext.rowCount - 1;
+    const canSplit = Boolean(tableContext.cell && ((tableContext.cell.colSpan || 1) > 1 || (tableContext.cell.rowSpan || 1) > 1));
+    ui.splitCell.disabled = !canSplit;
+    ui.toggleCellType.disabled = !tableContext.cell;
+    ui.mergeCellRight.disabled = !tableContext.cell;
+    ui.mergeCellDown.disabled = !tableContext.cell;
+    ui.tableAlignLeft.disabled = !tableContext.cell;
+    ui.tableAlignCenter.disabled = !tableContext.cell;
+    ui.tableAlignRight.disabled = !tableContext.cell;
   }
   ui.label.textContent = selectionCount > 1 ? `${selectionCount}個の要素を選択` : element ? describeElement(element) : "未選択";
   const fieldVisibility = {
@@ -1781,7 +1798,10 @@ ui.reset.addEventListener("click", async () => {
   setStatus("読み込み時点へ戻しました。", "success");
 });
 async function saveOutput(blob, suggestedName, filters) {
-  if (!desktopFileSystemAvailable()) return false;
+  if (!desktopFileSystemAvailable()) {
+    downloadBlob(blob, suggestedName);
+    return true;
+  }
   const saved = await saveDesktopOutput(blob, { suggestedName, filters });
   return Boolean(saved);
 }
@@ -1791,7 +1811,6 @@ ui.download.addEventListener("click", async () => {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
   const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-modified.html`;
   const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
-  if (!desktopFileSystemAvailable()) downloadHtml(html, state.fileName);
   setStatus(saved ? "修正後HTMLを保存しました。" : "修正後HTMLの保存をキャンセルしました。", saved ? "success" : "info");
 });
 ui.downloadRedline.addEventListener("click", async () => {
@@ -1799,7 +1818,6 @@ ui.downloadRedline.addEventListener("click", async () => {
   const html = createRedlineReport(state.modifiedHtml, changesFromOriginal(), state.fileName);
   const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-redline.html`;
   const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
-  if (!desktopFileSystemAvailable()) downloadRedlineReport(state.fileName, state.modifiedHtml, changesFromOriginal());
   setStatus(saved ? "変更箇所ページを保存しました。" : "変更箇所ページの保存をキャンセルしました。", saved ? "success" : "info");
 });
 ui.downloadDiff.addEventListener("click", async () => {
@@ -1807,7 +1825,6 @@ ui.downloadDiff.addEventListener("click", async () => {
   const html = createDiffReport(state.fileName, changesFromOriginal());
   const name = `${state.fileName.replace(/\.(html?|HTML?)$/, "") || "page"}-diff.html`;
   const saved = await saveOutput(new Blob([html], { type: "text/html;charset=utf-8" }), name, [{ name: "HTML", extensions: ["html"] }]);
-  if (!desktopFileSystemAvailable()) downloadDiffReport(state.fileName, changesFromOriginal());
   setStatus(saved ? "修正内容一覧を保存しました。" : "修正内容一覧の保存をキャンセルしました。", saved ? "success" : "info");
 });
 function selectedSavedPackagePages() {
@@ -2378,7 +2395,6 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
       ? `${packageInput.packageName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
       : pages.length > 1 ? "selected-pages-revision-package.zip" : "page-revision-package.zip";
     const saved = await saveOutput(createProjectPackages(packageInput), packageName, [{ name: "ZIP", extensions: ["zip"] }]);
-    if (!desktopFileSystemAvailable()) downloadProjectPackage(packageInput);
     ui.packageDialog.close();
     setStatus(saved ? `${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。` : "共有用ZIPの保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
@@ -2503,13 +2519,38 @@ ui.insertTable.addEventListener("click", () => {
   const created = editor.insertTable(ui.tableRowCount.value, ui.tableColumnCount.value, { headerRow: ui.tableHeaderRow.checked });
   if (created) setStatus("表を追加しました。セルを選択して文章や行・列を編集できます。", "success");
 });
-ui.addTableRow.addEventListener("click", () => editor.addTableRow());
-ui.deleteTableRow.addEventListener("click", () => editor.deleteTableRow());
-ui.addTableColumn.addEventListener("click", () => {
-  if (!editor.addTableColumn()) setStatus("結合セルや行ごとの列数が異なる表では、列の追加は行いません。セル編集・行操作をご利用ください。", "info");
+ui.addTableRowBefore.addEventListener("click", () => editor.addTableRow({ position: "before" }));
+ui.addTableRow.addEventListener("click", () => editor.addTableRow({ position: "after" }));
+ui.moveTableRowUp.addEventListener("click", () => {
+  if (!editor.moveTableRow("up")) setStatus("行を上へ移動できませんでした（最上行、または行をまたぐ結合セルがあります）。", "info");
 });
+ui.moveTableRowDown.addEventListener("click", () => {
+  if (!editor.moveTableRow("down")) setStatus("行を下へ移動できませんでした（最下行、または行をまたぐ結合セルがあります）。", "info");
+});
+ui.deleteTableRow.addEventListener("click", () => {
+  if (!editor.deleteTableRow()) setStatus("行を削除できませんでした（これ以上行を削除できません）。", "info");
+});
+
+ui.addTableColumnBefore.addEventListener("click", () => editor.addTableColumn({ position: "before" }));
+ui.addTableColumn.addEventListener("click", () => editor.addTableColumn({ position: "after" }));
 ui.deleteTableColumn.addEventListener("click", () => {
-  if (!editor.deleteTableColumn()) setStatus("結合セルや行ごとの列数が異なる表では、列の削除は行いません。セル編集・行操作をご利用ください。", "info");
+  if (!editor.deleteTableColumn()) setStatus("列を削除できませんでした（列数が1列のみの場合は削除できません）。", "info");
+});
+
+ui.toggleCellType.addEventListener("click", () => editor.toggleCellType());
+ui.toggleFirstColumnHeader.addEventListener("click", () => editor.toggleFirstColumnHeader());
+ui.tableAlignLeft.addEventListener("click", () => editor.setCellAlign("left"));
+ui.tableAlignCenter.addEventListener("click", () => editor.setCellAlign("center"));
+ui.tableAlignRight.addEventListener("click", () => editor.setCellAlign("right"));
+
+ui.mergeCellRight.addEventListener("click", () => {
+  if (!editor.mergeCellRight()) setStatus("右のセルと結合できませんでした（右端であるか、行の高さが一致していません）。", "info");
+});
+ui.mergeCellDown.addEventListener("click", () => {
+  if (!editor.mergeCellDown()) setStatus("下のセルと結合できませんでした（下端であるか、列の幅が一致していません）。", "info");
+});
+ui.splitCell.addEventListener("click", () => {
+  if (!editor.splitCell()) setStatus("結合されていないセルです。", "info");
 });
 ui.deleteTable.addEventListener("click", () => {
   if (window.confirm("選択中の表全体を削除しますか？")) editor.deleteTable();

@@ -42,6 +42,62 @@ function safeImageAssetName(value, source = "") {
   return name || "replacement-image.img";
 }
 
+function buildTableGrid(table) {
+  const rows = [...table.rows];
+  const rowCount = rows.length;
+  const grid = [];
+  let maxCols = 0;
+
+  for (let r = 0; r < rowCount; r++) {
+    if (!grid[r]) grid[r] = [];
+    const row = rows[r];
+    let c = 0;
+    for (const cell of row.cells) {
+      while (grid[r][c]) c++;
+      const colSpan = Math.max(1, cell.colSpan || 1);
+      const rowSpan = Math.max(1, cell.rowSpan || 1);
+      for (let dr = 0; dr < rowSpan; dr++) {
+        for (let dc = 0; dc < colSpan; dc++) {
+          const targetR = r + dr;
+          const targetC = c + dc;
+          if (!grid[targetR]) grid[targetR] = [];
+          grid[targetR][targetC] = {
+            cell,
+            row: r,
+            col: c,
+            rowSpan,
+            colSpan,
+            isOrigin: dr === 0 && dc === 0,
+          };
+          if (targetC + 1 > maxCols) maxCols = targetC + 1;
+        }
+      }
+      c += colSpan;
+    }
+    if (c > maxCols) maxCols = c;
+  }
+  return { grid, rowCount, colCount: maxCols, rows };
+}
+
+function copyCellStyle(source, target) {
+  if (!source || !target) return;
+  if (source.className) {
+    const classes = [...source.classList].filter((c) => c !== EDITOR_CLASS);
+    if (classes.length) target.className = classes.join(" ");
+  }
+  const stylesToCopy = [
+    "backgroundColor", "color", "borderColor", "borderStyle", "borderWidth",
+    "borderTop", "borderRight", "borderBottom", "borderLeft",
+    "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+    "textAlign", "verticalAlign", "fontSize", "fontWeight", "fontFamily",
+  ];
+  for (const prop of stylesToCopy) {
+    if (source.style[prop]) {
+      target.style[prop] = source.style[prop];
+    }
+  }
+}
+
 export class PageEditor {
   constructor(frame, callbacks = {}) {
     this.frame = frame;
@@ -487,21 +543,38 @@ export class PageEditor {
   getTableContext() {
     const table = this.selected?.closest?.("table");
     if (!table) return null;
-    const rows = [...table.rows];
+    const { grid, rowCount, colCount, rows } = buildTableGrid(table);
     const selectedCell = this.selected?.closest?.("th, td");
     const row = selectedCell?.closest("tr") || this.selected?.closest?.("tr") || rows[0] || null;
     const cells = row ? [...row.cells] : [];
     const cell = selectedCell && cells.includes(selectedCell) ? selectedCell : cells[0] || null;
+
+    let logicalRow = row ? rows.indexOf(row) : 0;
+    let logicalCol = 0;
+    let cellInfo = null;
+
+    if (cell && grid[logicalRow]) {
+      for (let c = 0; c < colCount; c++) {
+        if (grid[logicalRow][c]?.cell === cell) {
+          logicalCol = c;
+          cellInfo = grid[logicalRow][c];
+          break;
+        }
+      }
+    }
+
     return {
       table,
       row,
       cell,
-      rowIndex: row ? rows.indexOf(row) : -1,
-      columnIndex: cell ? cells.indexOf(cell) : 0,
-      rowCount: rows.length,
-      columnCount: Math.max(0, ...rows.map((item) => item.cells.length)),
-      hasComplexStructure: rows.some((item) => [...item.cells].some((cell) => cell.colSpan !== 1 || cell.rowSpan !== 1))
+      cellInfo,
+      rowIndex: logicalRow,
+      columnIndex: logicalCol,
+      rowCount,
+      columnCount: colCount,
+      hasComplexStructure: rows.some((item) => [...item.cells].some((itemCell) => itemCell.colSpan !== 1 || itemCell.rowSpan !== 1))
         || new Set(rows.map((item) => item.cells.length)).size > 1,
+      grid,
     };
   }
 
@@ -557,23 +630,59 @@ export class PageEditor {
     return true;
   }
 
-  addTableRow() {
+  addTableRow({ position = "after" } = {}) {
     return this.#changeTable((context) => {
+      const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
       const doc = this.getDocument();
-      const reference = context.row;
-      let section = reference?.parentElement;
+      const insertAtRow = position === "before"
+        ? context.rowIndex
+        : context.rowIndex + (context.cellInfo?.rowSpan || 1);
+
+      const refRow = rows[context.rowIndex] || rows[0];
+      let section = refRow?.parentElement;
       if (!section || section.tagName === "THEAD") section = context.table.tBodies[0] || context.table.createTBody();
-      const row = doc.createElement("tr");
-      const columns = Math.max(1, context.columnCount);
-      for (let index = 0; index < columns; index += 1) {
-        const cell = doc.createElement("td");
-        cell.textContent = "セル";
-        cell.style.padding = ".45em";
-        row.append(cell);
+
+      const newRow = doc.createElement("tr");
+      const modifiedSpans = new Set();
+      let firstCell = null;
+
+      for (let c = 0; c < colCount; c++) {
+        const topEntry = insertAtRow > 0 ? grid[insertAtRow - 1]?.[c] : null;
+        const bottomEntry = insertAtRow < rowCount ? grid[insertAtRow]?.[c] : null;
+
+        if (topEntry && bottomEntry && topEntry.cell === bottomEntry.cell) {
+          if (!modifiedSpans.has(topEntry.cell)) {
+            topEntry.cell.rowSpan = (topEntry.cell.rowSpan || 1) + 1;
+            modifiedSpans.add(topEntry.cell);
+          }
+          c += (topEntry.colSpan - 1);
+          continue;
+        }
+
+        const refEntry = (position === "before" ? bottomEntry || topEntry : topEntry || bottomEntry) || null;
+        const refCell = refEntry?.cell || null;
+        const isHeader = refCell?.tagName === "TH";
+        const newCell = doc.createElement(isHeader ? "th" : "td");
+        newCell.textContent = isHeader ? "見出し" : "セル";
+        newCell.style.padding = ".45em";
+        if (refCell) copyCellStyle(refCell, newCell);
+        newRow.append(newCell);
+        if (!firstCell) firstCell = newCell;
+
+        if (refEntry && refEntry.colSpan > 1) {
+          c += (refEntry.colSpan - 1);
+        }
       }
-      if (reference && reference.parentElement === section) reference.after(row);
-      else section.prepend(row);
-      return row.cells[0] || row;
+
+      if (position === "before") {
+        if (refRow && refRow.parentElement === section) refRow.before(newRow);
+        else section.prepend(newRow);
+      } else {
+        if (refRow && refRow.parentElement === section) refRow.after(newRow);
+        else section.append(newRow);
+      }
+
+      return firstCell || newRow;
     });
   }
 
@@ -581,44 +690,309 @@ export class PageEditor {
     const context = this.getTableContext();
     if (!context?.row || context.rowCount <= 1) return false;
     return this.#changeTable((current) => {
-      const rows = [...current.table.rows];
-      const replacement = rows[current.rowIndex + 1] || rows[current.rowIndex - 1];
-      current.row.remove();
-      return replacement?.cells[Math.min(current.columnIndex, Math.max(0, replacement.cells.length - 1))] || replacement || current.table;
+      const { grid, rowCount, colCount, rows } = buildTableGrid(current.table);
+      const targetRowIndex = current.rowIndex;
+      const targetRow = current.row;
+      const nextRow = targetRowIndex + 1 < rowCount ? rows[targetRowIndex + 1] : null;
+      const prevRow = targetRowIndex > 0 ? rows[targetRowIndex - 1] : null;
+
+      const modifiedSpans = new Set();
+
+      for (let c = 0; c < colCount; c++) {
+        const entry = grid[targetRowIndex]?.[c];
+        if (!entry) continue;
+
+        if (entry.rowSpan > 1) {
+          if (!modifiedSpans.has(entry.cell)) {
+            modifiedSpans.add(entry.cell);
+
+            if (entry.row === targetRowIndex) {
+              // この行から始まって下へ伸びているセルは nextRow へ移動して rowSpan を減らす
+              if (nextRow) {
+                entry.cell.rowSpan -= 1;
+                let inserted = false;
+                for (let prevC = c - 1; prevC >= 0; prevC--) {
+                  const prevEntry = grid[targetRowIndex + 1]?.[prevC];
+                  if (prevEntry && prevEntry.cell.parentElement === nextRow) {
+                    prevEntry.cell.after(entry.cell);
+                    inserted = true;
+                    break;
+                  }
+                }
+                if (!inserted) {
+                  nextRow.prepend(entry.cell);
+                }
+              }
+            } else {
+              // 上の行から始まってこの行をまたぐセルは単に rowSpan を減らす
+              entry.cell.rowSpan -= 1;
+            }
+          }
+        }
+      }
+
+      const replacementRow = nextRow || prevRow;
+      const fallbackEntry = grid[replacementRow === nextRow ? targetRowIndex + 1 : targetRowIndex - 1]?.[current.columnIndex];
+      const selected = fallbackEntry?.cell || replacementRow?.cells[0] || current.table;
+
+      targetRow.remove();
+      return selected;
     });
   }
 
-  addTableColumn() {
-    if (this.getTableContext()?.hasComplexStructure) return false;
+  moveTableRow(direction) {
+    const context = this.getTableContext();
+    if (!context?.row || context.rowCount <= 1) return false;
+    const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
+    const r = context.rowIndex;
+    if (direction === "up" && r === 0) return false;
+    if (direction === "down" && r === rowCount - 1) return false;
+
+    const otherR = direction === "up" ? r - 1 : r + 1;
+    for (let c = 0; c < colCount; c++) {
+      if (grid[r]?.[c]?.cell === grid[otherR]?.[c]?.cell) return false;
+    }
+
+    return this.#changeTable((current) => {
+      const row = current.row;
+      const targetRow = rows[otherR];
+      if (direction === "up") targetRow.before(row);
+      else targetRow.after(row);
+      return row.cells[Math.min(current.columnIndex, Math.max(0, row.cells.length - 1))] || row;
+    });
+  }
+
+  addTableColumn({ position = "after" } = {}) {
     return this.#changeTable((context) => {
+      const { grid, rowCount, colCount, rows } = buildTableGrid(context.table);
+      const doc = this.getDocument();
+      const insertAtCol = position === "before"
+        ? context.columnIndex
+        : context.columnIndex + (context.cellInfo?.colSpan || 1);
+
       let selected = null;
-      [...context.table.rows].forEach((row, rowIndex) => {
-        const reference = row.cells[context.columnIndex] || row.cells[row.cells.length - 1] || null;
-        const tag = reference?.tagName === "TH" || row.parentElement?.tagName === "THEAD" ? "th" : "td";
-        const cell = row.ownerDocument.createElement(tag);
-        cell.textContent = tag === "th" ? "見出し" : "セル";
-        cell.style.padding = ".45em";
-        if (reference) reference.after(cell);
-        else row.append(cell);
-        if (rowIndex === context.rowIndex) selected = cell;
-      });
+      const modifiedSpans = new Set();
+
+      for (let r = 0; r < rowCount; r++) {
+        const row = rows[r];
+        const leftEntry = insertAtCol > 0 ? grid[r]?.[insertAtCol - 1] : null;
+        const rightEntry = insertAtCol < colCount ? grid[r]?.[insertAtCol] : null;
+
+        if (leftEntry && rightEntry && leftEntry.cell === rightEntry.cell) {
+          if (!modifiedSpans.has(leftEntry.cell)) {
+            leftEntry.cell.colSpan = (leftEntry.cell.colSpan || 1) + 1;
+            modifiedSpans.add(leftEntry.cell);
+          }
+          if (r === context.rowIndex) selected = leftEntry.cell;
+          continue;
+        }
+
+        const refEntry = (position === "before" ? rightEntry || leftEntry : leftEntry || rightEntry) || null;
+        const refCell = refEntry?.cell || row.cells[0] || null;
+        const isHeader = refCell?.tagName === "TH" || row.parentElement?.tagName === "THEAD";
+        const newCell = doc.createElement(isHeader ? "th" : "td");
+        newCell.textContent = isHeader ? "見出し" : "セル";
+        newCell.style.padding = ".45em";
+        if (refCell) copyCellStyle(refCell, newCell);
+
+        if (insertAtCol === 0) {
+          row.prepend(newCell);
+        } else if (leftEntry) {
+          leftEntry.cell.after(newCell);
+        } else if (rightEntry) {
+          rightEntry.cell.before(newCell);
+        } else {
+          row.append(newCell);
+        }
+
+        if (r === context.rowIndex) selected = newCell;
+      }
+
       return selected || context.table;
     });
   }
 
   deleteTableColumn() {
     const context = this.getTableContext();
-    if (!context || context.columnCount <= 1 || context.hasComplexStructure) return false;
+    if (!context || context.columnCount <= 1) return false;
     return this.#changeTable((current) => {
+      const { grid, rowCount } = buildTableGrid(current.table);
+      const targetCol = current.columnIndex;
       let selected = null;
-      [...current.table.rows].forEach((row, rowIndex) => {
-        const cell = row.cells[current.columnIndex];
-        if (cell) cell.remove();
-        if (rowIndex === current.rowIndex) {
-          selected = row.cells[Math.min(current.columnIndex, Math.max(0, row.cells.length - 1))] || row;
+      const modifiedCells = new Set();
+
+      for (let r = 0; r < rowCount; r++) {
+        const entry = grid[r]?.[targetCol];
+        if (!entry) continue;
+
+        if (entry.colSpan > 1) {
+          if (!modifiedCells.has(entry.cell)) {
+            entry.cell.colSpan -= 1;
+            modifiedCells.add(entry.cell);
+          }
+          if (r === current.rowIndex) selected = entry.cell;
+        } else {
+          const cell = entry.cell;
+          if (r === current.rowIndex) {
+            const fallbackEntry = (targetCol > 0 ? grid[r]?.[targetCol - 1] : grid[r]?.[targetCol + 1]) || null;
+            selected = fallbackEntry?.cell || current.table;
+          }
+          cell.remove();
         }
-      });
+      }
+
       return selected || current.table;
+    });
+  }
+
+  toggleCellType() {
+    const context = this.getTableContext();
+    if (!context?.cell) return false;
+    return this.#changeTable((current) => {
+      const oldCell = current.cell;
+      const newTag = oldCell.tagName === "TH" ? "td" : "th";
+      const newCell = oldCell.ownerDocument.createElement(newTag);
+      for (const attr of oldCell.attributes) {
+        newCell.setAttribute(attr.name, attr.value);
+      }
+      newCell.append(...oldCell.childNodes);
+      oldCell.replaceWith(newCell);
+      return newCell;
+    });
+  }
+
+  setCellAlign(align) {
+    const context = this.getTableContext();
+    if (!context?.cell) return false;
+    return this.#changeTable((current) => {
+      current.cell.style.textAlign = align;
+      return current.cell;
+    });
+  }
+
+  toggleFirstColumnHeader() {
+    const context = this.getTableContext();
+    if (!context?.table) return false;
+    return this.#changeTable((current) => {
+      const { grid, rowCount } = buildTableGrid(current.table);
+      const firstColCells = [];
+      for (let r = 0; r < rowCount; r++) {
+        const cell = grid[r]?.[0]?.cell;
+        if (cell && !firstColCells.includes(cell)) firstColCells.push(cell);
+      }
+      const allTh = firstColCells.every((c) => c.tagName === "TH");
+      const targetTag = allTh ? "td" : "th";
+      let primary = null;
+      for (const oldCell of firstColCells) {
+        if (oldCell.tagName.toLowerCase() === targetTag) continue;
+        const newCell = oldCell.ownerDocument.createElement(targetTag);
+        for (const attr of oldCell.attributes) newCell.setAttribute(attr.name, attr.value);
+        newCell.append(...oldCell.childNodes);
+        oldCell.replaceWith(newCell);
+        if (oldCell === current.cell) primary = newCell;
+      }
+      return primary || current.table;
+    });
+  }
+
+  mergeCellRight() {
+    const context = this.getTableContext();
+    if (!context?.cell) return false;
+    const { grid, colCount } = buildTableGrid(context.table);
+    const r = context.rowIndex;
+    const c = context.columnIndex;
+    const currentEntry = grid[r]?.[c];
+    if (!currentEntry) return false;
+    const rightCol = currentEntry.col + currentEntry.colSpan;
+    if (rightCol >= colCount) return false;
+    const rightEntry = grid[r]?.[rightCol];
+    if (!rightEntry || !rightEntry.isOrigin) return false;
+    if (rightEntry.rowSpan !== currentEntry.rowSpan) return false;
+
+    return this.#changeTable(() => {
+      const leftCell = currentEntry.cell;
+      const rightCell = rightEntry.cell;
+      leftCell.colSpan = currentEntry.colSpan + rightEntry.colSpan;
+      if (rightCell.textContent.trim()) {
+        leftCell.append(leftCell.ownerDocument.createTextNode(" "), ...rightCell.childNodes);
+      }
+      rightCell.remove();
+      return leftCell;
+    });
+  }
+
+  mergeCellDown() {
+    const context = this.getTableContext();
+    if (!context?.cell) return false;
+    const { grid, rowCount } = buildTableGrid(context.table);
+    const r = context.rowIndex;
+    const c = context.columnIndex;
+    const currentEntry = grid[r]?.[c];
+    if (!currentEntry) return false;
+    const downRow = currentEntry.row + currentEntry.rowSpan;
+    if (downRow >= rowCount) return false;
+    const downEntry = grid[downRow]?.[c];
+    if (!downEntry || !downEntry.isOrigin) return false;
+    if (downEntry.colSpan !== currentEntry.colSpan) return false;
+
+    return this.#changeTable(() => {
+      const topCell = currentEntry.cell;
+      const bottomCell = downEntry.cell;
+      topCell.rowSpan = currentEntry.rowSpan + downEntry.rowSpan;
+      if (bottomCell.textContent.trim()) {
+        topCell.append(topCell.ownerDocument.createTextNode(" "), ...bottomCell.childNodes);
+      }
+      bottomCell.remove();
+      return topCell;
+    });
+  }
+
+  splitCell() {
+    const context = this.getTableContext();
+    if (!context?.cell) return false;
+    const cell = context.cell;
+    const colSpan = cell.colSpan || 1;
+    const rowSpan = cell.rowSpan || 1;
+    if (colSpan <= 1 && rowSpan <= 1) return false;
+
+    return this.#changeTable((current) => {
+      const { grid } = buildTableGrid(current.table);
+      const startR = current.rowIndex;
+      const startC = current.columnIndex;
+      const targetCell = current.cell;
+      const doc = targetCell.ownerDocument;
+
+      targetCell.colSpan = 1;
+      targetCell.rowSpan = 1;
+
+      for (let dr = 0; dr < rowSpan; dr++) {
+        const r = startR + dr;
+        const row = current.table.rows[r];
+        for (let dc = 0; dc < colSpan; dc++) {
+          if (dr === 0 && dc === 0) continue;
+          const c = startC + dc;
+          const newCell = doc.createElement(targetCell.tagName.toLowerCase());
+          newCell.textContent = "";
+          newCell.style.padding = ".45em";
+          copyCellStyle(targetCell, newCell);
+
+          let inserted = false;
+          for (let checkC = c - 1; checkC >= 0; checkC--) {
+            const prevEntry = grid[r]?.[checkC];
+            if (prevEntry && prevEntry.cell !== targetCell && prevEntry.cell.parentElement === row) {
+              prevEntry.cell.after(newCell);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) {
+            if (dr === 0) targetCell.after(newCell);
+            else row.prepend(newCell);
+          }
+        }
+      }
+
+      return targetCell;
     });
   }
 
@@ -1044,7 +1418,7 @@ export class PageEditor {
       .filter((element, _index, elements) => !elements.some((other) => other !== element && other.contains(element)))
       .sort((left, right) => {
         const position = left.compareDocumentPosition(right);
-        return position & left.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING ? 1 : -1;
+        return position & left.ownerDocument.defaultView.Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
       });
     if (!removedElements.length) return false;
     const batchId = removedElements.length > 1 ? crypto.randomUUID() : "";
@@ -1054,6 +1428,7 @@ export class PageEditor {
       elementId: this.#ensureElementId(removed),
       removedElementIds: [removed, ...removed.querySelectorAll("*")].map((element) => this.#ensureElementId(element)),
       parentId: removed.parentElement ? this.#ensureElementId(removed.parentElement) : "",
+      nextSiblingId: removed.nextElementSibling ? this.#ensureElementId(removed.nextElementSibling) : "",
       index: removed.parentElement ? [...removed.parentElement.children].indexOf(removed) : -1,
       before: this.#cleanOuterHtml(removed),
       after: "",
@@ -1124,7 +1499,8 @@ export class PageEditor {
       const parent = this.#findByEditorId(change.parentId);
       element = this.#elementFromHtml(change.before);
       if (!parent || !element) return false;
-      parent.insertBefore(element, parent.children[change.index] ?? null);
+      const nextSibling = change.nextSiblingId ? this.#findByEditorId(change.nextSiblingId) : null;
+      parent.insertBefore(element, nextSibling ?? parent.children[change.index] ?? null);
       this.select(element);
       return true;
     }

@@ -178,23 +178,66 @@
           </div>
         </details>
 
-        <details id="table-tools" class="table-tools" open hidden>
-          <summary>表の作成・編集</summary>
+        <div id="table-edit-tools" class="table-edit-tools" hidden>
+          <p id="table-selection-state">表を選択中</p>
+
+          <div class="table-tool-group">
+            <span class="table-group-title">行操作</span>
+            <div class="table-button-row">
+              <button id="add-table-row-before" type="button">上に行を追加</button>
+              <button id="add-table-row" type="button">下に行を追加</button>
+            </div>
+            <div class="table-button-row">
+              <button id="move-table-row-up" type="button">行を上へ移動</button>
+              <button id="move-table-row-down" type="button">行を下へ移動</button>
+            </div>
+            <button id="delete-table-row" type="button">この行を削除</button>
+          </div>
+
+          <div class="table-tool-group">
+            <span class="table-group-title">列操作</span>
+            <div class="table-button-row">
+              <button id="add-table-column-before" type="button">左に列を追加</button>
+              <button id="add-table-column" type="button">右に列を追加</button>
+            </div>
+            <button id="delete-table-column" type="button">この列を削除</button>
+          </div>
+
+          <div class="table-tool-group">
+            <span class="table-group-title">見出し・文字配置</span>
+            <div class="table-button-row">
+              <button id="toggle-cell-type" type="button">見出し切替(th/td)</button>
+              <button id="toggle-first-column-header" type="button">1列目を見出し化</button>
+            </div>
+            <div class="table-button-row table-align-buttons">
+              <button id="table-align-left" type="button">左揃え</button>
+              <button id="table-align-center" type="button">中央揃え</button>
+              <button id="table-align-right" type="button">右揃え</button>
+            </div>
+          </div>
+
+          <div class="table-tool-group">
+            <span class="table-group-title">セル結合（マージ）</span>
+            <div class="table-button-row">
+              <button id="merge-cell-right" type="button">右と結合</button>
+              <button id="merge-cell-down" type="button">下と結合</button>
+            </div>
+            <button id="split-cell" type="button">結合を解除</button>
+          </div>
+
+          <button id="delete-table" class="danger" type="button">表全体を削除</button>
+          <p class="table-tools-help">セルの文章は、セルをクリックして「文章」欄またはダブルクリックで編集できます。</p>
+        </div>
+
+        <details id="table-create-tools" class="table-tools advanced-field">
+          <summary>表の新規作成</summary>
           <div class="table-create-tools">
             <label>行数<input id="table-row-count" type="number" min="1" max="50" value="3" /></label>
             <label>列数<input id="table-column-count" type="number" min="1" max="20" value="3" /></label>
             <label class="table-header-option"><input id="table-header-row" type="checkbox" checked /> 1行目を見出しにする</label>
             <button id="insert-table" type="button">選択位置の後に表を追加</button>
           </div>
-          <div id="table-edit-tools" class="table-edit-tools" hidden>
-            <p id="table-selection-state">表を選択中</p>
-            <button id="add-table-row" type="button">下に行を追加</button>
-            <button id="delete-table-row" type="button">この行を削除</button>
-            <button id="add-table-column" type="button">右に列を追加</button>
-            <button id="delete-table-column" type="button">この列を削除</button>
-            <button id="delete-table" class="danger" type="button">表全体を削除</button>
-          </div>
-          <p class="table-tools-help">セルの文章は、セルをクリックして右側の「文章」欄またはダブルクリックで編集できます。</p>
+          <p class="table-tools-help">選択中の要素の直後に新しい表を挿入します。</p>
         </details>
 
         <fieldset id="inspector-fields" disabled>
