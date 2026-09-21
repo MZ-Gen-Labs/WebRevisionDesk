@@ -19,6 +19,7 @@
         <button id="undo" type="button" disabled title="直前の編集を元に戻す（Ctrl/Cmd+Z）">1つ戻す</button>
         <button id="redo" type="button" disabled title="戻した編集をやり直す（Ctrl/Cmd+Shift+Z）">やり直す</button>
         <button id="reset" type="button" disabled>すべてリセット</button>
+        <button id="search-replace" type="button" disabled>検索・置換</button>
         <button id="save-project-page" class="button-subtle" type="button" disabled>今すぐ保存</button>
         <button id="download-package" class="button-package" type="button" disabled>共有用ファイル一式を保存</button>
         <details class="export-menu">
@@ -200,6 +201,25 @@
           </div>
         </details>
 
+        <details id="table-tools" class="table-tools" open hidden>
+          <summary>表の作成・編集</summary>
+          <div class="table-create-tools">
+            <label>行数<input id="table-row-count" type="number" min="1" max="50" value="3" /></label>
+            <label>列数<input id="table-column-count" type="number" min="1" max="20" value="3" /></label>
+            <label class="table-header-option"><input id="table-header-row" type="checkbox" checked /> 1行目を見出しにする</label>
+            <button id="insert-table" type="button">選択位置の後に表を追加</button>
+          </div>
+          <div id="table-edit-tools" class="table-edit-tools" hidden>
+            <p id="table-selection-state">表を選択中</p>
+            <button id="add-table-row" type="button">下に行を追加</button>
+            <button id="delete-table-row" type="button">この行を削除</button>
+            <button id="add-table-column" type="button">右に列を追加</button>
+            <button id="delete-table-column" type="button">この列を削除</button>
+            <button id="delete-table" class="danger" type="button">表全体を削除</button>
+          </div>
+          <p class="table-tools-help">セルの文章は、セルをクリックして右側の「文章」欄またはダブルクリックで編集できます。</p>
+        </details>
+
         <fieldset id="inspector-fields" disabled>
           <label data-editor-field="text">
             文章
@@ -267,6 +287,88 @@
         </div>
       </aside>
     </main>
+
+    <dialog id="search-replace-dialog" class="search-replace-dialog">
+      <form method="dialog">
+        <div id="search-replace-drag-handle" class="package-dialog-heading search-replace-drag-handle" tabindex="0" aria-label="検索・置換ウィンドウを移動">
+          <div>
+            <p class="eyebrow">Search &amp; Replace</p>
+            <h2>複数ルールで検索・置換</h2>
+            <small>この見出しをドラッグして移動できます</small>
+          </div>
+          <button value="cancel" type="submit" aria-label="閉じる">閉じる</button>
+        </div>
+        <section id="search-replace-config">
+          <p class="search-replace-help">上から順に検索し、候補ごとに置換するか確認します。上位ルールが置換した範囲は下位ルールで再置換しません。「本文を自動判定」は記事領域を優先し、ヘッダー・ナビ・フッター等を除外します。より厳密に絞る場合はCSSセレクターを指定できます。前後の条件は検索文字列との最大間隔で判定し、改行区切りの条件をORまたはANDで組み合わせます。間隔0は文字列同士が隣接している状態です。</p>
+          <div class="search-rule-toolbar">
+            <button id="add-search-rule" type="button">ルールを追加</button>
+            <button id="export-search-rules" type="button">条件をファイルに保存</button>
+            <button id="import-search-rules" type="button">条件をファイルから復元</button>
+            <input id="search-rules-file" type="file" accept=".json,application/json" hidden>
+            <span>最大10件・端末内保存とJSONファイル保存に対応</span>
+          </div>
+          <div id="search-rule-list" class="search-rule-list"></div>
+          <div class="package-dialog-actions">
+            <button id="save-search-rules" type="button">設定を保存</button>
+            <button id="preview-all-search-rules" type="button">全ルールの検出結果を確認</button>
+            <button id="start-search-replace" class="button-primary" type="button">上から確認を開始</button>
+          </div>
+        </section>
+        <section id="search-replace-overview" class="search-replace-overview" hidden>
+          <div class="search-review-heading">
+            <strong>全ルールの検出結果</strong>
+            <span id="search-overview-summary"></span>
+          </div>
+          <div class="search-highlight-legend" aria-label="検索結果の色分け">
+            <span><i data-kind="candidate"></i>置換候補</span>
+            <span><i data-kind="excluded"></i>条件・上位ルールで除外</span>
+          </div>
+          <p class="search-overview-help">ページをスクロールして、すべてのルールの候補と除外箇所を確認できます。上位ルールと重なる範囲は、下位ルールでは除外として表示します。</p>
+          <div id="search-overview-rules" class="search-overview-rules"></div>
+          <div class="search-review-actions">
+            <button id="back-search-overview-settings" type="button">設定に戻る</button>
+            <button id="start-search-replace-from-overview" class="button-primary" type="button">この内容で上から確認</button>
+          </div>
+        </section>
+        <section id="search-replace-review" class="search-replace-review" hidden>
+          <div class="search-review-heading">
+            <strong id="search-review-rule"></strong>
+            <span id="search-review-progress"></span>
+          </div>
+          <div class="search-highlight-legend" aria-label="検索結果の色分け">
+            <span><i data-kind="candidate"></i>置換候補</span>
+            <span><i data-kind="current"></i>現在の処理対象</span>
+            <span><i data-kind="excluded"></i>条件・上位ルールで除外</span>
+          </div>
+          <div class="search-review-context">
+            <small>周辺の文章</small>
+            <p id="search-review-context"></p>
+          </div>
+          <div class="search-review-comparison">
+            <div><small>検索結果</small><pre id="search-review-before"></pre></div>
+            <div><small>置換後</small><pre id="search-review-after"></pre></div>
+          </div>
+          <div class="search-review-actions">
+            <button id="skip-search-match" type="button">今回はスキップ</button>
+            <button id="replace-search-match" class="button-primary" type="button">この候補を置換</button>
+            <button id="replace-all-search-rule" type="button">このルールの残りを全置換</button>
+            <button id="stop-search-replace" type="button">確認を終了</button>
+          </div>
+        </section>
+        <section id="search-replace-empty" class="search-replace-empty" hidden>
+          <div class="search-empty-heading">
+            <strong>置換できる候補がありません</strong>
+            <span id="search-empty-count"></span>
+          </div>
+          <p id="search-empty-summary"></p>
+          <p class="search-empty-help">検索文字がページ内にあっても、検索範囲の外、リンク内、前後の除外条件に一致する場合は置換対象になりません。設定に戻って条件を見直せます。</p>
+          <div class="search-review-actions">
+            <button id="back-search-settings" type="button">設定に戻る</button>
+            <button value="cancel" type="submit">閉じる</button>
+          </div>
+        </section>
+      </form>
+    </dialog>
 
     <dialog id="package-dialog" class="package-dialog">
       <form method="dialog">

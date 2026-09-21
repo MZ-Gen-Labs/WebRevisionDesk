@@ -10,6 +10,7 @@ const TYPE_LABELS = {
   "alt-change": "画像alt変更",
   "image-change": "画像差し替え",
   "class-change": "CSS class変更",
+  "table-change": "表の構成変更",
   "element-add": "ブロック追加",
   "element-delete": "要素削除",
   "element-move": "要素移動",

@@ -2,6 +2,13 @@ import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { downloadProjectPackage } from "./project-package.js";
+import {
+  DEFAULT_SEARCH_REPLACE_RULE,
+  MAX_SEARCH_REPLACE_RULES,
+  findTextMatches,
+  normalizeSearchReplaceRule,
+  validateSearchReplaceRule,
+} from "./search-replace.js";
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { shouldCheckForUpdatesOnStartup } from "./update-policy.js";
@@ -13,7 +20,8 @@ const ui = {
   loginCancel: $("#login-cancel"), loginState: $("#login-state"),
   file: $("#html-file"), htmlImportButton: $("#html-import-button"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
   fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
-  modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"), download: $("#download"),
+  modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"),
+  searchReplace: $("#search-replace"), download: $("#download"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -49,16 +57,40 @@ const ui = {
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
   pageStructurePanel: $("#page-structure-panel"), pageTitle: $("#page-title-value"),
   pageDescription: $("#page-description-value"), pageH1: $("#page-h1-value"),
+  tableTools: $("#table-tools"), tableRowCount: $("#table-row-count"),
+  tableColumnCount: $("#table-column-count"), tableHeaderRow: $("#table-header-row"),
+  insertTable: $("#insert-table"), tableEditTools: $("#table-edit-tools"),
+  tableSelectionState: $("#table-selection-state"), addTableRow: $("#add-table-row"),
+  deleteTableRow: $("#delete-table-row"), addTableColumn: $("#add-table-column"),
+  deleteTableColumn: $("#delete-table-column"), deleteTable: $("#delete-table"),
   importPreviewPage: $("#import-preview-page"), refreshPreview: $("#refresh-preview"),
   screenshotPreview: $("#screenshot-preview"), screenshotPreviewImage: $("#screenshot-preview-image"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
   confirmPackageDownload: $("#confirm-package-download"),
+  searchReplaceDialog: $("#search-replace-dialog"), searchReplaceConfig: $("#search-replace-config"),
+  searchReplaceDragHandle: $("#search-replace-drag-handle"),
+  searchReplaceReview: $("#search-replace-review"), searchRuleList: $("#search-rule-list"),
+  searchReplaceOverview: $("#search-replace-overview"), searchOverviewSummary: $("#search-overview-summary"),
+  searchOverviewRules: $("#search-overview-rules"), previewAllSearchRules: $("#preview-all-search-rules"),
+  backSearchOverviewSettings: $("#back-search-overview-settings"),
+  startSearchReplaceFromOverview: $("#start-search-replace-from-overview"),
+  searchReplaceEmpty: $("#search-replace-empty"), searchEmptyCount: $("#search-empty-count"),
+  searchEmptySummary: $("#search-empty-summary"), backSearchSettings: $("#back-search-settings"),
+  addSearchRule: $("#add-search-rule"),
+  exportSearchRules: $("#export-search-rules"), importSearchRules: $("#import-search-rules"),
+  searchRulesFile: $("#search-rules-file"),
+  saveSearchRules: $("#save-search-rules"), startSearchReplace: $("#start-search-replace"),
+  searchReviewRule: $("#search-review-rule"), searchReviewProgress: $("#search-review-progress"),
+  searchReviewContext: $("#search-review-context"), searchReviewBefore: $("#search-review-before"),
+  searchReviewAfter: $("#search-review-after"), skipSearchMatch: $("#skip-search-match"),
+  replaceSearchMatch: $("#replace-search-match"), replaceAllSearchRule: $("#replace-all-search-rule"),
+  stopSearchReplace: $("#stop-search-replace"),
 };
 
 const state = {
-  fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", changes: [], redoChanges: [],
+  fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", viewMode: "modified", changes: [], redoChanges: [],
   sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
   focusedProjectUrl: "",
   projectSelectionAnchorUrl: "",
@@ -90,12 +122,15 @@ let canApplyAppUpdate = false;
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
 const PACKAGE_FILE_SELECTION_KEY = "web-revision-package-file-selection";
+const SEARCH_REPLACE_RULES_KEY = "web-revision-search-replace-rules";
 const AUTO_SAVE_DELAY_MS = 1200;
 let editRevision = 0;
 let autoSaveTimer = 0;
 let autoSavePromise = Promise.resolve();
 let autoSaveInProgress = false;
 let autoSaveError = null;
+let searchReplaceRules = [];
+let searchReplaceSession = null;
 
 function canAutoSaveCurrentPage() {
   return Boolean(projectStore.project && state.originalHtml && state.activeProjectPageId && !state.previewOnly);
@@ -191,6 +226,133 @@ function initializeProjectSidebarResize() {
   ui.projectSidebarResizer.addEventListener("dblclick", () => setProjectSidebarWidth(210));
 }
 
+function positionSearchReplaceDialog(left, top) {
+  if (!ui.searchReplaceDialog.open) return;
+  const rect = ui.searchReplaceDialog.getBoundingClientRect();
+  const edge = 12;
+  const normalizedLeft = Math.min(Math.max(edge, left), Math.max(edge, window.innerWidth - rect.width - edge));
+  const normalizedTop = Math.min(Math.max(edge, top), Math.max(edge, window.innerHeight - rect.height - edge));
+  Object.assign(ui.searchReplaceDialog.style, {
+    margin: "0",
+    left: `${Math.round(normalizedLeft)}px`,
+    top: `${Math.round(normalizedTop)}px`,
+    right: "auto",
+    bottom: "auto",
+  });
+}
+
+function centerSearchReplaceDialog() {
+  if (!ui.searchReplaceDialog.open) return;
+  const rect = ui.searchReplaceDialog.getBoundingClientRect();
+  positionSearchReplaceDialog((window.innerWidth - rect.width) / 2, (window.innerHeight - rect.height) / 2);
+}
+
+function keepSearchReplaceDialogOnScreen() {
+  if (!ui.searchReplaceDialog.open) return;
+  const rect = ui.searchReplaceDialog.getBoundingClientRect();
+  positionSearchReplaceDialog(rect.left, rect.top);
+}
+
+function positionSearchReplaceDialogAwayFrom(target) {
+  if (!ui.searchReplaceDialog.open || !target) return;
+  const dialog = ui.searchReplaceDialog.getBoundingClientRect();
+  const edge = 12;
+  const gap = 18;
+  const maxLeft = Math.max(edge, window.innerWidth - dialog.width - edge);
+  const maxTop = Math.max(edge, window.innerHeight - dialog.height - edge);
+  const targetCenterX = (target.left + target.right) / 2;
+  const targetCenterY = (target.top + target.bottom) / 2;
+  const slots = [
+    { id: "top-left", left: edge, top: edge },
+    { id: "top-right", left: maxLeft, top: edge },
+    { id: "bottom-left", left: edge, top: maxTop },
+    { id: "bottom-right", left: maxLeft, top: maxTop },
+  ];
+  const expanded = {
+    left: target.left - gap, top: target.top - gap,
+    right: target.right + gap, bottom: target.bottom + gap,
+  };
+  const overlapArea = ({ left, top }) => {
+    const right = left + dialog.width;
+    const bottom = top + dialog.height;
+    const overlapWidth = Math.max(0, Math.min(right, expanded.right) - Math.max(left, expanded.left));
+    const overlapHeight = Math.max(0, Math.min(bottom, expanded.bottom) - Math.max(top, expanded.top));
+    return overlapWidth * overlapHeight;
+  };
+  const previous = slots.find((slot) => slot.id === searchReplaceSession?.dialogPlacement);
+  // 同じ位置の候補でウィンドウが行き来しないよう、重ならない限り前回位置を維持する。
+  if (previous && overlapArea(previous) === 0) {
+    positionSearchReplaceDialog(previous.left, previous.top);
+    return;
+  }
+  const score = ({ left, top }) => {
+    const distance = (left + dialog.width / 2 - targetCenterX) ** 2 + (top + dialog.height / 2 - targetCenterY) ** 2;
+    return overlapArea({ left, top }) * 1_000_000 - distance;
+  };
+  const best = slots.sort((a, b) => score(a) - score(b))[0];
+  if (searchReplaceSession) searchReplaceSession.dialogPlacement = best.id;
+  positionSearchReplaceDialog(best.left, best.top);
+}
+
+function autoPositionSearchReplaceDialog(node, match) {
+  const expected = searchReplaceSession?.current;
+  const update = () => {
+    if (!expected || searchReplaceSession?.current !== expected) return;
+    positionSearchReplaceDialogAwayFrom(editor.getTextMatchViewportRect(node, match.index, match.length));
+  };
+  requestAnimationFrame(update);
+  // 初回候補ではダイアログの横幅が縮小中なので、遷移完了後にも補正する。
+  setTimeout(update, 180);
+}
+
+function initializeSearchReplaceDialogMovement() {
+  ui.searchReplaceDragHandle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    event.preventDefault();
+    const rect = ui.searchReplaceDialog.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
+    ui.searchReplaceDialog.classList.add("dragging");
+    ui.searchReplaceDragHandle.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => positionSearchReplaceDialog(moveEvent.clientX - offsetX, moveEvent.clientY - offsetY);
+    const finish = () => {
+      ui.searchReplaceDialog.classList.remove("dragging");
+      ui.searchReplaceDragHandle.removeEventListener("pointermove", move);
+      ui.searchReplaceDragHandle.removeEventListener("pointerup", finish);
+      ui.searchReplaceDragHandle.removeEventListener("pointercancel", finish);
+    };
+    ui.searchReplaceDragHandle.addEventListener("pointermove", move);
+    ui.searchReplaceDragHandle.addEventListener("pointerup", finish);
+    ui.searchReplaceDragHandle.addEventListener("pointercancel", finish);
+  });
+  ui.searchReplaceDragHandle.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    event.preventDefault();
+    const rect = ui.searchReplaceDialog.getBoundingClientRect();
+    const step = event.shiftKey ? 40 : 10;
+    const horizontal = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+    const vertical = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+    positionSearchReplaceDialog(rect.left + horizontal, rect.top + vertical);
+  });
+  window.addEventListener("resize", keepSearchReplaceDialogOnScreen);
+}
+
+function relaySearchDialogWheel(event) {
+  if (!ui.searchReplaceDialog.open || (!ui.searchReplaceDialog.classList.contains("reviewing")
+    && !ui.searchReplaceDialog.classList.contains("overviewing"))) return;
+  const frameRect = ui.frame.getBoundingClientRect();
+  const overFrame = event.clientX >= frameRect.left && event.clientX <= frameRect.right
+    && event.clientY >= frameRect.top && event.clientY <= frameRect.bottom;
+  const dialogRect = ui.searchReplaceDialog.getBoundingClientRect();
+  const overDialog = event.clientX >= dialogRect.left && event.clientX <= dialogRect.right
+    && event.clientY >= dialogRect.top && event.clientY <= dialogRect.bottom;
+  if (!overFrame || overDialog) return;
+  event.preventDefault();
+  editor.scrollBy(event.deltaX, event.deltaY);
+}
+
+window.addEventListener("wheel", relaySearchDialogWheel, { capture: true, passive: false });
+
 function formatBytes(value) {
   if (!Number.isFinite(value)) return "";
   if (value < 1024 * 1024) return `${Math.ceil(value / 1024)}KB`;
@@ -276,6 +438,16 @@ function recordChange(change) {
     }
   }
   if (change.type !== "element-move") {
+    if (change.type === "table-change") {
+      const previousIndex = state.changes.findLastIndex((item) => item.type === "table-change" && item.elementId === change.elementId);
+      if (previousIndex >= 0) {
+        const previous = state.changes.splice(previousIndex, 1)[0];
+        const merged = { ...previous, after: change.after, afterHtml: change.afterHtml, timestamp: change.timestamp };
+        if (merged.before === merged.after) return "cancelled-table-change";
+        state.changes.push(merged);
+        return "merged";
+      }
+    }
     state.changes.push(change);
     return "added";
   }
@@ -418,6 +590,7 @@ function setButtonProcessing(button, processing) {
   if (processing) {
     if (!button.dataset.idleText) button.dataset.idleText = button.textContent;
     button.dataset.idleAriaLabel = button.getAttribute("aria-label") ?? "";
+    button.dataset.idleDisabled = button.disabled ? "true" : "false";
     button.setAttribute("aria-label", `${button.dataset.idleText}（処理中）`);
     button.classList.add("is-processing");
     button.setAttribute("aria-busy", "true");
@@ -428,6 +601,8 @@ function setButtonProcessing(button, processing) {
   else button.removeAttribute("aria-label");
   delete button.dataset.idleText;
   delete button.dataset.idleAriaLabel;
+  if (button.dataset.idleDisabled !== undefined) button.disabled = button.dataset.idleDisabled === "true";
+  delete button.dataset.idleDisabled;
   button.classList.remove("is-processing");
   button.removeAttribute("aria-busy");
 }
@@ -437,14 +612,24 @@ function setControls(enabled) {
   [ui.original, ui.reset, ui.download].forEach((button) => { button.disabled = !enabled; });
   ui.modified.disabled = !enabled || state.previewOnly;
   ui.redline.disabled = !enabled || state.previewOnly || changeCount === 0;
+  ui.searchReplace.disabled = !enabled || state.previewOnly;
   ui.downloadPackage.disabled = !enabled;
   ui.downloadDiff.disabled = !enabled || changeCount === 0;
   ui.downloadRedline.disabled = !enabled || changeCount === 0;
   ui.pageStructurePanel.hidden = !enabled || state.previewOnly;
+  ui.insertTable.disabled = !enabled || state.previewOnly || state.mode !== "modified";
   ui.pageTitle.disabled = ui.pageDescription.disabled = ui.pageH1.disabled = !enabled || state.previewOnly || state.mode !== "modified";
   ui.showHeadingOutline.disabled = !enabled || state.previewOnly;
+  syncTableToolsVisibility();
   updateUndoControls();
   syncProjectControls();
+}
+
+function syncTableToolsVisibility(tableContext = editor.getTableContext()) {
+  const available = Boolean(state.originalHtml) && !state.previewOnly;
+  const tableSelected = state.mode === "modified" && Boolean(tableContext);
+  ui.tableTools.hidden = !available || (!ui.advancedMode.checked && !tableSelected);
+  if (tableSelected) ui.tableTools.open = true;
 }
 
 function syncProjectControls() {
@@ -469,6 +654,7 @@ function updateBatchControls() {
   ui.checkProjectPages.disabled = loginBlocked() || state.batchRunning || !selected.some((page) => page.saved);
   ui.resetProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
   ui.deleteProjectPages.disabled = state.batchRunning || selected.length === 0;
+  ui.reset.disabled = state.batchRunning || (!state.originalHtml && !selected.some((page) => page.saved));
   ui.downloadPackage.disabled = state.batchRunning || (!state.originalHtml && !selected.some((page) => page.saved));
 }
 
@@ -625,6 +811,14 @@ function showSelection(element, selectedElements = element ? [element] : []) {
   const editable = Boolean(element) && state.mode === "modified";
   ui.fields.disabled = !editable;
   const selectionCount = selectedElements.length;
+  const tableContext = selectionCount === 1 ? editor.getTableContext() : null;
+  syncTableToolsVisibility(tableContext);
+  ui.tableEditTools.hidden = !editable || !tableContext;
+  if (tableContext) {
+    ui.tableSelectionState.textContent = `表（${tableContext.rowCount}行 × ${tableContext.columnCount}列）を選択中`;
+    ui.deleteTableRow.disabled = tableContext.rowCount <= 1;
+    ui.deleteTableColumn.disabled = tableContext.columnCount <= 1;
+  }
   ui.label.textContent = selectionCount > 1 ? `${selectionCount}個の要素を選択` : element ? describeElement(element) : "未選択";
   const fieldVisibility = {
     text: false, link: false, image: false, "image-url": false, alt: false, class: Boolean(element), "inline-link": editor.hasInlineLinkSelection(),
@@ -732,7 +926,7 @@ async function loadHtml(html, fileName, options = {}) {
   ui.importPreviewPage.hidden = true;
   ui.refreshPreview.hidden = true;
   setControls(true);
-  await render(state.previewOnly ? "original" : "modified", { captureCurrent: false });
+  await render(state.previewOnly ? "original" : state.viewMode, { captureCurrent: false });
   renderProjectPages();
   updateGuidance();
   document.querySelector("#setup-panel").open = false;
@@ -1469,13 +1663,160 @@ ui.cancelCapture.addEventListener("click", async () => {
   setStatus("取得用ブラウザをキャンセルしました。", "success");
 });
 
-ui.original.addEventListener("click", () => render("original"));
-ui.modified.addEventListener("click", () => render("modified"));
-ui.redline.addEventListener("click", () => render("redline"));
+ui.original.addEventListener("click", () => {
+  state.viewMode = "original";
+  return render("original");
+});
+ui.modified.addEventListener("click", () => {
+  state.viewMode = "modified";
+  return render("modified");
+});
+ui.redline.addEventListener("click", () => {
+  state.viewMode = "redline";
+  return render("redline");
+});
+ui.searchReplace.addEventListener("click", async () => {
+  if (state.mode !== "modified") {
+    state.viewMode = "modified";
+    await render("modified");
+  }
+  editor.clearSearchHighlight();
+  searchReplaceRules = readSearchRulesFromForm();
+  renderSearchRules();
+  ui.searchReplaceDialog.classList.remove("reviewing", "overviewing");
+  ui.searchReplaceConfig.hidden = false;
+  ui.searchReplaceOverview.hidden = true;
+  ui.searchReplaceReview.hidden = true;
+  ui.searchReplaceEmpty.hidden = true;
+  searchReplaceSession = null;
+  ui.searchReplaceDialog.showModal();
+  centerSearchReplaceDialog();
+});
+ui.addSearchRule.addEventListener("click", () => {
+  searchReplaceRules = readSearchRulesFromForm();
+  if (searchReplaceRules.length >= MAX_SEARCH_REPLACE_RULES) return;
+  searchReplaceRules.push(normalizeSearchReplaceRule({}, searchReplaceRules.length));
+  renderSearchRules();
+});
+ui.exportSearchRules.addEventListener("click", () => {
+  exportSearchRulesFile();
+});
+ui.importSearchRules.addEventListener("click", () => {
+  ui.searchRulesFile.click();
+});
+ui.searchRulesFile.addEventListener("change", () => {
+  void importSearchRulesFile(ui.searchRulesFile.files?.[0]);
+});
+ui.saveSearchRules.addEventListener("click", () => {
+  saveSearchRules();
+  setStatus(`検索・置換ルールを${searchReplaceRules.length}件保存しました。`, "success");
+});
+ui.startSearchReplace.addEventListener("click", () => { void startSearchReplace(); });
+ui.previewAllSearchRules.addEventListener("click", () => { void previewAllSearchRules(); });
+ui.backSearchOverviewSettings.addEventListener("click", () => {
+  editor.clearSearchHighlight();
+  searchReplaceSession = null;
+  ui.searchReplaceDialog.classList.remove("reviewing", "overviewing");
+  ui.searchReplaceOverview.hidden = true;
+  ui.searchReplaceConfig.hidden = false;
+  requestAnimationFrame(keepSearchReplaceDialogOnScreen);
+});
+ui.startSearchReplaceFromOverview.addEventListener("click", () => {
+  const rules = searchReplaceSession?.rules;
+  if (!rules?.length) return;
+  editor.clearSearchHighlight();
+  beginSearchReplaceSession(rules);
+});
+ui.replaceSearchMatch.addEventListener("click", () => {
+  if (!replaceCurrentSearchCandidate()) return;
+  findNextSearchCandidate();
+});
+ui.skipSearchMatch.addEventListener("click", () => {
+  const session = searchReplaceSession;
+  if (!session?.current) return;
+  const { match } = session.current;
+  session.skips += 1;
+  session.candidates += 1;
+  session.offset = match.index + Math.max(1, match.length);
+  session.current = null;
+  findNextSearchCandidate();
+});
+ui.replaceAllSearchRule.addEventListener("click", async () => {
+  const session = searchReplaceSession;
+  if (!session?.current) return;
+  const targetRuleIndex = session.ruleIndex;
+  setButtonProcessing(ui.replaceAllSearchRule, true);
+  try {
+    let count = 0;
+    while (searchReplaceSession?.current && searchReplaceSession.ruleIndex === targetRuleIndex) {
+      replaceCurrentSearchCandidate();
+      count += 1;
+      if (!findNextSearchCandidate({ show: false })) return;
+      if (count % 50 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    if (searchReplaceSession?.current) showSearchCandidate();
+  } finally {
+    setButtonProcessing(ui.replaceAllSearchRule, false);
+  }
+});
+ui.stopSearchReplace.addEventListener("click", () => finishSearchReplace(false));
+ui.backSearchSettings.addEventListener("click", () => {
+  editor.clearSearchHighlight();
+  searchReplaceSession = null;
+  ui.searchReplaceDialog.classList.remove("reviewing", "overviewing");
+  ui.searchReplaceConfig.hidden = false;
+  ui.searchReplaceOverview.hidden = true;
+  ui.searchReplaceReview.hidden = true;
+  ui.searchReplaceEmpty.hidden = true;
+  requestAnimationFrame(keepSearchReplaceDialogOnScreen);
+});
+ui.searchReplaceDialog.addEventListener("close", () => {
+  editor.clearSearchHighlight();
+  searchReplaceSession = null;
+  ui.searchReplaceDialog.classList.remove("reviewing", "overviewing", "dragging");
+  ui.searchReplaceConfig.hidden = false;
+  ui.searchReplaceOverview.hidden = true;
+  ui.searchReplaceReview.hidden = true;
+  ui.searchReplaceEmpty.hidden = true;
+});
 ui.undo.addEventListener("click", () => applyUndoRedo("undo"));
 ui.redo.addEventListener("click", () => applyUndoRedo("redo"));
 ui.reset.addEventListener("click", async () => {
-  if (!window.confirm("すべての修正を破棄して、読み込み時点へ戻しますか？")) return;
+  const checkedPages = listedProjectPages()
+    .filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  if (checkedPages.length) {
+    const message = `チェックした${checkedPages.length}ページのすべての修正を破棄して、それぞれの取得時点へ戻しますか？\n\n取得済みページと一覧は残り、編集内容・変更履歴だけがリセットされます。`;
+    if (!window.confirm(message)) return;
+    state.batchRunning = true;
+    setButtonProcessing(ui.reset, true);
+    updateBatchControls();
+    try {
+      await flushAutoSave();
+      const activeReset = checkedPages.some((page) => page.id === state.activeProjectPageId);
+      await projectStore.resetPageChanges(checkedPages.map((page) => page.id));
+      if (activeReset) {
+        const activePage = projectStore.project.pages.find((page) => page.id === state.activeProjectPageId);
+        const saved = await projectStore.loadPage(state.activeProjectPageId);
+        await loadHtml(saved.originalHtml, activePage.fileName, {
+          sourceUrl: activePage.url,
+          activeProjectPageId: activePage.id,
+          workingHtml: saved.originalHtml,
+          changes: [],
+          dirty: false,
+        });
+      }
+      renderProjectPages();
+      setStatus(`チェックした${checkedPages.length}ページを取得時点へ戻しました。`, "success");
+    } catch (error) {
+      setStatus(`ページをリセットできませんでした: ${error.message}`, "error");
+    } finally {
+      state.batchRunning = false;
+      setButtonProcessing(ui.reset, false);
+      setControls(Boolean(state.originalHtml));
+    }
+    return;
+  }
+  if (!window.confirm("現在のページのすべての修正を破棄して、読み込み時点へ戻しますか？")) return;
   state.modifiedHtml = state.originalHtml;
   state.changes = [];
   state.redoChanges = [];
@@ -1503,6 +1844,485 @@ ui.downloadDiff.addEventListener("click", () => {
 });
 function selectedSavedPackagePages() {
   return actionTargetPages().filter((page) => page.saved);
+}
+
+function readSearchRulesFromForm() {
+  return [...ui.searchRuleList.querySelectorAll(".search-rule")].map((card, index) => normalizeSearchReplaceRule({
+    id: card.dataset.ruleId,
+    name: card.querySelector('[data-field="name"]').value,
+    enabled: card.querySelector('[data-field="enabled"]').checked,
+    search: card.querySelector('[data-field="search"]').value,
+    replacement: card.querySelector('[data-field="replacement"]').value,
+    searchScope: card.querySelector('[data-field="searchScope"]').value,
+    searchSelector: card.querySelector('[data-field="searchSelector"]').value,
+    useRegex: card.querySelector('[data-field="useRegex"]').checked,
+    caseSensitive: card.querySelector('[data-field="caseSensitive"]').checked,
+    excludeLinkedText: card.querySelector('[data-field="excludeLinkedText"]').checked,
+    excludeBreadcrumbText: card.querySelector('[data-field="excludeBreadcrumbText"]').checked,
+    requiredBefore: card.querySelector('[data-field="requiredBefore"]').value,
+    requiredMode: card.querySelector('[data-field="requiredMode"]').value,
+    requiredBeforeDistance: card.querySelector('[data-field="requiredBeforeDistance"]').value,
+    forbiddenBefore: card.querySelector('[data-field="forbiddenBefore"]').value,
+    forbiddenMode: card.querySelector('[data-field="forbiddenMode"]').value,
+    forbiddenBeforeDistance: card.querySelector('[data-field="forbiddenBeforeDistance"]').value,
+    forbiddenAfter: card.querySelector('[data-field="forbiddenAfter"]').value,
+    forbiddenAfterMode: card.querySelector('[data-field="forbiddenAfterMode"]').value,
+    forbiddenAfterDistance: card.querySelector('[data-field="forbiddenAfterDistance"]').value,
+    prefixUsesRegex: card.querySelector('[data-field="prefixUsesRegex"]').checked,
+  }, index));
+}
+
+function renderSearchRules() {
+  ui.searchRuleList.replaceChildren(...searchReplaceRules.map((rule, index) => {
+    const card = document.createElement("article");
+    card.className = "search-rule";
+    card.dataset.ruleId = rule.id;
+    card.innerHTML = `
+      <div class="search-rule-header">
+        <strong>ルール ${index + 1}</strong>
+        <label><input data-field="enabled" type="checkbox">使用する</label>
+        <input data-field="name" type="text" aria-label="ルール名" placeholder="ルール名">
+        <button data-action="up" type="button" title="上へ移動">↑</button>
+        <button data-action="down" type="button" title="下へ移動">↓</button>
+        <button data-action="remove" class="danger-button" type="button">削除</button>
+      </div>
+      <div class="search-rule-grid">
+        <label>検索文字列／正規表現<input data-field="search" type="text" placeholder="例: 変更前の文字列"></label>
+        <label>置換文字列<input data-field="replacement" type="text" placeholder="例: 変更後の文字列"></label>
+        <label>検索範囲<select data-field="searchScope"><option value="page">ページ全体</option><option value="article">本文を自動判定</option><option value="selector">CSSセレクターで指定</option></select></label>
+        <label>範囲のCSSセレクター<input data-field="searchSelector" type="text" placeholder="例: main .article-body"></label>
+        <div class="search-condition-grid">
+          <fieldset class="search-condition-card">
+            <legend>前に必要な文字列</legend>
+            <textarea data-field="requiredBefore" aria-label="前に必要な文字列" placeholder="改行区切り"></textarea>
+            <label>条件の組み合わせ<select data-field="requiredMode"><option value="or">いずれか（OR）</option><option value="and">すべて（AND）</option></select></label>
+            <label>前方条件との最大間隔<input data-field="requiredBeforeDistance" type="number" min="0" max="500"><small>条件の末尾から検索文字列の先頭まで</small></label>
+          </fieldset>
+          <fieldset class="search-condition-card">
+            <legend>前にあってはならない文字列</legend>
+            <textarea data-field="forbiddenBefore" aria-label="前にあってはならない文字列" placeholder="改行区切り"></textarea>
+            <label>条件の組み合わせ<select data-field="forbiddenMode"><option value="or">いずれか（OR）</option><option value="and">すべて（AND）</option></select></label>
+            <label>前方条件との最大間隔<input data-field="forbiddenBeforeDistance" type="number" min="0" max="500"><small>条件の末尾から検索文字列の先頭まで</small></label>
+          </fieldset>
+          <fieldset class="search-condition-card">
+            <legend>後ろにあってはならない文字列</legend>
+            <textarea data-field="forbiddenAfter" aria-label="後ろにあってはならない文字列" placeholder="改行区切り"></textarea>
+            <label>条件の組み合わせ<select data-field="forbiddenAfterMode"><option value="or">いずれか（OR）</option><option value="and">すべて（AND）</option></select></label>
+            <label>後方条件との最大間隔<input data-field="forbiddenAfterDistance" type="number" min="0" max="500"><small>検索文字列の末尾から条件の先頭まで</small></label>
+          </fieldset>
+        </div>
+        <div class="search-rule-options">
+          <label><input data-field="useRegex" type="checkbox">検索に正規表現を使う</label>
+          <label><input data-field="caseSensitive" type="checkbox">大文字・小文字を区別</label>
+          <label><input data-field="excludeLinkedText" type="checkbox">リンク内の文字を除外</label>
+          <label><input data-field="excludeBreadcrumbText" type="checkbox">パンくず内の文字を除外</label>
+          <label><input data-field="prefixUsesRegex" type="checkbox">前後条件に正規表現を使う</label>
+          <span>置換では <code>$1</code>〜<code>$99</code>、<code>$&amp;</code>を利用できます。</span>
+        </div>
+      </div>
+      <p class="search-rule-error" hidden></p>`;
+    card.querySelector('[data-field="enabled"]').checked = rule.enabled;
+    card.querySelector('[data-field="name"]').value = rule.name;
+    card.querySelector('[data-field="search"]').value = rule.search;
+    card.querySelector('[data-field="replacement"]').value = rule.replacement;
+    card.querySelector('[data-field="searchScope"]').value = rule.searchScope;
+    card.querySelector('[data-field="searchSelector"]').value = rule.searchSelector;
+    card.querySelector('[data-field="requiredBefore"]').value = rule.requiredBefore;
+    card.querySelector('[data-field="requiredMode"]').value = rule.requiredMode;
+    card.querySelector('[data-field="requiredBeforeDistance"]').value = String(rule.requiredBeforeDistance);
+    card.querySelector('[data-field="forbiddenBefore"]').value = rule.forbiddenBefore;
+    card.querySelector('[data-field="forbiddenMode"]').value = rule.forbiddenMode;
+    card.querySelector('[data-field="forbiddenBeforeDistance"]').value = String(rule.forbiddenBeforeDistance);
+    card.querySelector('[data-field="forbiddenAfter"]').value = rule.forbiddenAfter;
+    card.querySelector('[data-field="forbiddenAfterMode"]').value = rule.forbiddenAfterMode;
+    card.querySelector('[data-field="forbiddenAfterDistance"]').value = String(rule.forbiddenAfterDistance);
+    card.querySelector('[data-field="useRegex"]').checked = rule.useRegex;
+    card.querySelector('[data-field="caseSensitive"]').checked = rule.caseSensitive;
+    card.querySelector('[data-field="excludeLinkedText"]').checked = rule.excludeLinkedText;
+    card.querySelector('[data-field="excludeBreadcrumbText"]').checked = rule.excludeBreadcrumbText;
+    card.querySelector('[data-field="prefixUsesRegex"]').checked = rule.prefixUsesRegex;
+    const syncSearchSelector = () => {
+      const custom = card.querySelector('[data-field="searchScope"]').value === "selector";
+      card.querySelector('[data-field="searchSelector"]').disabled = !custom;
+    };
+    card.querySelector('[data-field="searchScope"]').addEventListener("change", syncSearchSelector);
+    syncSearchSelector();
+    card.querySelector('[data-action="up"]').disabled = index === 0;
+    card.querySelector('[data-action="down"]').disabled = index === searchReplaceRules.length - 1;
+    card.querySelector('[data-action="up"]').addEventListener("click", () => moveSearchRule(index, -1));
+    card.querySelector('[data-action="down"]').addEventListener("click", () => moveSearchRule(index, 1));
+    card.querySelector('[data-action="remove"]').addEventListener("click", () => {
+      searchReplaceRules = readSearchRulesFromForm();
+      searchReplaceRules.splice(index, 1);
+      renderSearchRules();
+    });
+    return card;
+  }));
+  ui.addSearchRule.disabled = searchReplaceRules.length >= MAX_SEARCH_REPLACE_RULES;
+}
+
+function moveSearchRule(index, direction) {
+  searchReplaceRules = readSearchRulesFromForm();
+  const target = index + direction;
+  if (target < 0 || target >= searchReplaceRules.length) return;
+  [searchReplaceRules[index], searchReplaceRules[target]] = [searchReplaceRules[target], searchReplaceRules[index]];
+  renderSearchRules();
+}
+
+function saveSearchRules() {
+  searchReplaceRules = readSearchRulesFromForm().slice(0, MAX_SEARCH_REPLACE_RULES);
+  localStorage.setItem(SEARCH_REPLACE_RULES_KEY, JSON.stringify(searchReplaceRules));
+}
+
+function exportSearchRulesFile() {
+  saveSearchRules();
+  const payload = {
+    format: "web-revision-desk-search-rules",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    rules: searchReplaceRules,
+  };
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "web-revision-desk-search-rules.json";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setStatus(`検索・置換ルール${searchReplaceRules.length}件をファイルに保存しました。`, "success");
+}
+
+async function importSearchRulesFile(file) {
+  if (!file) return;
+  try {
+    if (file.size > 1024 * 1024) throw new Error("ファイルサイズは1MB以下にしてください。");
+    const parsed = JSON.parse(await file.text());
+    const rules = Array.isArray(parsed) ? parsed : parsed?.rules;
+    if (!Array.isArray(rules)) throw new Error("検索・置換ルールのファイルではありません。");
+    if (!rules.length) throw new Error("復元できるルールがありません。");
+    if (rules.length > MAX_SEARCH_REPLACE_RULES) throw new Error(`ルールは最大${MAX_SEARCH_REPLACE_RULES}件です。`);
+    const restored = rules.map((rule, index) => {
+      if (!rule || typeof rule !== "object" || Array.isArray(rule)) {
+        throw new Error(`ルール${index + 1}の形式が正しくありません。`);
+      }
+      return normalizeSearchReplaceRule(rule, index);
+    });
+    searchReplaceRules = restored;
+    localStorage.setItem(SEARCH_REPLACE_RULES_KEY, JSON.stringify(searchReplaceRules));
+    renderSearchRules();
+    setStatus(`ファイルから検索・置換ルール${searchReplaceRules.length}件を復元しました。`, "success");
+  } catch (error) {
+    setStatus(`検索・置換ルールを復元できませんでした: ${error.message}`, "error");
+  } finally {
+    ui.searchRulesFile.value = "";
+  }
+}
+
+function initializeSearchReplace() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SEARCH_REPLACE_RULES_KEY) || "[]");
+    searchReplaceRules = Array.isArray(stored)
+      ? stored.slice(0, MAX_SEARCH_REPLACE_RULES).map(normalizeSearchReplaceRule)
+      : [];
+  } catch {
+    searchReplaceRules = [];
+  }
+  if (!searchReplaceRules.length) searchReplaceRules = [normalizeSearchReplaceRule(DEFAULT_SEARCH_REPLACE_RULE, 0)];
+  renderSearchRules();
+}
+
+function overlapsProtectedRange(match, ranges = []) {
+  const start = match.index;
+  const end = match.index + Math.max(1, match.length);
+  return ranges.some((range) => start < range.end && end > range.start);
+}
+
+const BREADCRUMB_SELECTOR = [
+  '[aria-label*="breadcrumb" i]',
+  '[aria-label*="パンくず"]',
+  '[class*="breadcrumb" i]',
+  '[id*="breadcrumb" i]',
+  '[class*="topicpath" i]',
+  '[id*="topicpath" i]',
+  '[class*="topic-path" i]',
+  '[id*="topic-path" i]',
+  '[class*="pankuzu" i]',
+  '[id*="pankuzu" i]',
+  '[itemtype*="BreadcrumbList" i]',
+].join(",");
+
+function isBreadcrumbTextNode(node) {
+  return Boolean(node.parentElement?.closest(BREADCRUMB_SELECTOR));
+}
+
+function applySearchExclusions(matches, node, rule, protectedRangeMap = searchReplaceSession?.protectedRanges) {
+  const protectedRanges = protectedRangeMap?.get(node) || [];
+  return matches.map((match) => {
+    const excludedReasons = [...match.excludedReasons];
+    const breadcrumb = isBreadcrumbTextNode(node);
+    if (breadcrumb && rule.excludeBreadcrumbText) excludedReasons.push("breadcrumb-text");
+    if (!breadcrumb && rule.excludeLinkedText && node.parentElement?.closest("a")) excludedReasons.push("linked-text");
+    if (overlapsProtectedRange(match, protectedRanges)) excludedReasons.push("prior-rule");
+    if (excludedReasons.length === match.excludedReasons.length) return match;
+    return {
+      ...match,
+      excluded: true,
+      excludedReasons,
+    };
+  });
+}
+
+function validateEnabledSearchRules() {
+  searchReplaceRules = readSearchRulesFromForm();
+  ui.searchRuleList.querySelectorAll(".search-rule-error").forEach((item) => { item.hidden = true; });
+  const enabled = searchReplaceRules.filter((rule) => rule.enabled && rule.search);
+  if (!enabled.length) {
+    setStatus("使用する検索ルールを1件以上設定してください。", "error");
+    return null;
+  }
+  for (const rule of enabled) {
+    try {
+      validateSearchReplaceRule(rule);
+      if (rule.searchScope === "selector") {
+        const selector = rule.searchSelector.trim();
+        if (!selector) throw new Error("検索範囲のCSSセレクターを入力してください。");
+        let matches;
+        try { matches = editor.getDocument().querySelectorAll(selector); }
+        catch { throw new Error("検索範囲のCSSセレクターが正しくありません。"); }
+        if (!matches.length) throw new Error("指定したCSSセレクターに一致する範囲がありません。");
+      }
+    } catch (error) {
+      const card = ui.searchRuleList.querySelector(`[data-rule-id="${CSS.escape(rule.id)}"]`);
+      const message = card?.querySelector(".search-rule-error");
+      if (message) { message.textContent = `設定エラー: ${error.message}`; message.hidden = false; }
+      setStatus(`検索ルール「${rule.name}」を確認してください。`, "error");
+      return null;
+    }
+  }
+  saveSearchRules();
+  return enabled;
+}
+
+function collectSearchRuleOverview(rules) {
+  const protectedRanges = new WeakMap();
+  const highlighted = [];
+  const summaries = [];
+  rules.forEach((rule, ruleIndex) => {
+    let eligible = 0;
+    let excluded = 0;
+    for (const node of editor.getSearchTextNodes(rule)) {
+      const matches = applySearchExclusions(findTextMatches(node.data, rule), node, rule, protectedRanges);
+      for (const match of matches) {
+        const item = { ...match, node, ruleIndex, ruleName: rule.name };
+        highlighted.push(item);
+        if (item.excluded) {
+          excluded += 1;
+          continue;
+        }
+        eligible += 1;
+        const ranges = protectedRanges.get(node) || [];
+        ranges.push({ start: match.index, end: match.index + Math.max(1, match.length) });
+        protectedRanges.set(node, ranges);
+      }
+    }
+    summaries.push({ name: rule.name, eligible, excluded });
+  });
+  return { highlighted, summaries };
+}
+
+async function previewAllSearchRules() {
+  const enabled = validateEnabledSearchRules();
+  if (!enabled) return;
+  if (state.mode !== "modified") await render("modified");
+  const { highlighted, summaries } = collectSearchRuleOverview(enabled);
+  const eligible = summaries.reduce((sum, item) => sum + item.eligible, 0);
+  const excluded = summaries.reduce((sum, item) => sum + item.excluded, 0);
+  ui.searchOverviewSummary.textContent = `候補 ${eligible}件・除外 ${excluded}件`;
+  ui.searchOverviewRules.replaceChildren(...summaries.map((summary) => {
+    const row = document.createElement("div");
+    row.className = "search-overview-rule";
+    const name = document.createElement("strong");
+    name.textContent = summary.name;
+    const count = document.createElement("span");
+    count.textContent = `候補 ${summary.eligible}件・除外 ${summary.excluded}件`;
+    row.append(name, count);
+    return row;
+  }));
+  searchReplaceSession = { rules: enabled, overview: true, protectedRanges: new WeakMap() };
+  editor.highlightSearchMatches(highlighted, null);
+  ui.searchReplaceConfig.hidden = true;
+  ui.searchReplaceReview.hidden = true;
+  ui.searchReplaceEmpty.hidden = true;
+  ui.searchReplaceOverview.hidden = false;
+  ui.searchReplaceDialog.classList.add("reviewing", "overviewing");
+  setStatus(`全ルールで候補${eligible}件、除外${excluded}件を検出しました。ページをスクロールして確認できます。`, eligible ? "success" : "error");
+  requestAnimationFrame(keepSearchReplaceDialogOnScreen);
+}
+
+function protectReplacementRange(node, match) {
+  const session = searchReplaceSession;
+  if (!session) return;
+  const replacementLength = match.replacement.length;
+  const oldEnd = match.index + match.length;
+  const delta = replacementLength - match.length;
+  const ranges = (session.protectedRanges.get(node) || []).map((range) => {
+    if (range.start >= oldEnd) return { start: range.start + delta, end: range.end + delta };
+    return range;
+  });
+  if (replacementLength > 0) ranges.push({ start: match.index, end: match.index + replacementLength });
+  session.protectedRanges.set(node, ranges);
+}
+
+function showSearchCandidate() {
+  const { rule, match, node } = searchReplaceSession.current;
+  const highlightedMatches = (searchReplaceSession.nodes || []).flatMap((textNode) => (
+    applySearchExclusions(findTextMatches(textNode.data, rule), textNode, rule).map((item) => ({ ...item, node: textNode }))
+  ));
+  const eligibleCount = highlightedMatches.filter((item) => !item.excluded).length;
+  const excludedCount = highlightedMatches.length - eligibleCount;
+  const beforeStart = Math.max(0, match.index - 55);
+  const afterEnd = Math.min(node.data.length, match.index + match.length + 55);
+  const context = `${beforeStart ? "…" : ""}${node.data.slice(beforeStart, match.index)}【${match.matched}】${node.data.slice(match.index + match.length, afterEnd)}${afterEnd < node.data.length ? "…" : ""}`;
+  const scopeLabel = rule.searchScope === "article" ? "本文のみ"
+    : rule.searchScope === "selector" ? `範囲: ${rule.searchSelector}` : "ページ全体";
+  ui.searchReviewRule.textContent = `${rule.name}（${scopeLabel}）`;
+  ui.searchReviewProgress.textContent = `ルール ${searchReplaceSession.ruleIndex + 1}/${searchReplaceSession.rules.length}・候補 ${searchReplaceSession.candidates + 1}・対象 ${eligibleCount}件・除外 ${excludedCount}件`;
+  ui.searchReviewContext.textContent = context;
+  ui.searchReviewBefore.textContent = match.matched || "（空文字）";
+  ui.searchReviewAfter.textContent = match.replacement || "（空文字へ置換）";
+  editor.highlightSearchMatches(highlightedMatches, { node, index: match.index, length: match.length });
+  autoPositionSearchReplaceDialog(node, match);
+}
+
+function finishSearchReplace(completed = true) {
+  if (!searchReplaceSession) return;
+  const { replacements, skips } = searchReplaceSession;
+  searchReplaceSession = null;
+  editor.clearSearchHighlight();
+  ui.searchReplaceDialog.close();
+  setStatus(`${completed ? "検索・置換が完了しました" : "検索・置換を終了しました"}。置換 ${replacements}件、スキップ ${skips}件です。`, "success");
+}
+
+function showSearchNoCandidates() {
+  const session = searchReplaceSession;
+  if (!session) return;
+  const pageNodes = editor.getSearchTextNodes({ searchScope: "page" });
+  const highlighted = [];
+  const counts = { total: 0, outside: 0, linked: 0, breadcrumb: 0, conditions: 0, prior: 0 };
+  for (const rule of session.rules) {
+    const scopedNodes = new Set(editor.getSearchTextNodes(rule));
+    for (const node of pageNodes) {
+      for (const rawMatch of findTextMatches(node.data, rule)) {
+        const match = applySearchExclusions([rawMatch], node, rule)[0];
+        const excludedReasons = [...match.excludedReasons];
+        if (!scopedNodes.has(node)) excludedReasons.push("outside-scope");
+        const item = {
+          ...match,
+          node,
+          excluded: true,
+          excludedReasons: [...new Set(excludedReasons)],
+        };
+        highlighted.push(item);
+        counts.total += 1;
+        if (item.excludedReasons.includes("outside-scope")) counts.outside += 1;
+        if (item.excludedReasons.includes("linked-text")) counts.linked += 1;
+        if (item.excludedReasons.includes("breadcrumb-text")) counts.breadcrumb += 1;
+        if (item.excludedReasons.includes("prior-rule")) counts.prior += 1;
+        if (item.excludedReasons.some((reason) => ["required-before", "forbidden-before", "forbidden-after"].includes(reason))) counts.conditions += 1;
+      }
+    }
+  }
+  editor.highlightSearchMatches(highlighted, null);
+  const details = [];
+  if (counts.outside) details.push(`検索範囲外 ${counts.outside}件`);
+  if (counts.linked) details.push(`リンク内 ${counts.linked}件`);
+  if (counts.breadcrumb) details.push(`パンくず内 ${counts.breadcrumb}件`);
+  if (counts.conditions) details.push(`前後の条件で除外 ${counts.conditions}件`);
+  if (counts.prior) details.push(`上位ルールで処理済み ${counts.prior}件`);
+  ui.searchReplaceReview.hidden = true;
+  ui.searchReplaceEmpty.hidden = false;
+  ui.searchEmptyCount.textContent = `検出 ${counts.total}件`;
+  ui.searchEmptySummary.textContent = counts.total
+    ? `検索文字は見つかりましたが、すべて対象外です（${details.join("、") || "除外条件に一致"}）。対象外の文字はページ上に赤色で表示しています。`
+    : "有効なルールの検索文字は、このページ内に見つかりませんでした。";
+  setStatus(counts.total ? `検索文字を${counts.total}件検出しましたが、すべて置換対象外です。` : "検索文字が見つかりませんでした。", "error");
+  requestAnimationFrame(keepSearchReplaceDialogOnScreen);
+}
+
+function findNextSearchCandidate({ show = true } = {}) {
+  const session = searchReplaceSession;
+  if (!session) return false;
+  while (session.ruleIndex < session.rules.length) {
+    if (!session.nodes) {
+      session.nodes = editor.getSearchTextNodes(session.rules[session.ruleIndex]);
+      session.nodeIndex = 0;
+      session.offset = 0;
+    }
+    while (session.nodeIndex < session.nodes.length) {
+      const node = session.nodes[session.nodeIndex];
+      if (!node?.isConnected) {
+        session.nodeIndex += 1;
+        session.offset = 0;
+        continue;
+      }
+      const rule = session.rules[session.ruleIndex];
+      const match = applySearchExclusions(
+        findTextMatches(node.data, rule, session.offset),
+        node,
+        rule,
+      ).find((item) => !item.excluded) || null;
+      if (match) {
+        session.current = { node, match, rule: session.rules[session.ruleIndex], ruleIndex: session.ruleIndex };
+        if (show) showSearchCandidate();
+        return true;
+      }
+      session.nodeIndex += 1;
+      session.offset = 0;
+    }
+    session.ruleIndex += 1;
+    session.nodes = null;
+  }
+  if (session.candidates === 0 && session.replacements === 0 && session.skips === 0) showSearchNoCandidates();
+  else finishSearchReplace(true);
+  return false;
+}
+
+function replaceCurrentSearchCandidate() {
+  const session = searchReplaceSession;
+  if (!session?.current) return false;
+  const { node, match } = session.current;
+  if (!editor.replaceTextNodeMatch(node, match.index, match.length, match.replacement)) return false;
+  protectReplacementRange(node, match);
+  session.replacements += 1;
+  session.candidates += 1;
+  session.offset = match.index + Math.max(1, match.replacement.length);
+  session.current = null;
+  return true;
+}
+
+function beginSearchReplaceSession(enabled) {
+  searchReplaceSession = {
+    rules: enabled, ruleIndex: 0, nodes: null, nodeIndex: 0, offset: 0,
+    current: null, candidates: 0, replacements: 0, skips: 0, dialogPlacement: "",
+    protectedRanges: new WeakMap(),
+  };
+  ui.searchReplaceConfig.hidden = true;
+  ui.searchReplaceOverview.hidden = true;
+  ui.searchReplaceReview.hidden = false;
+  ui.searchReplaceEmpty.hidden = true;
+  ui.searchReplaceDialog.classList.add("reviewing");
+  ui.searchReplaceDialog.classList.remove("overviewing");
+  requestAnimationFrame(keepSearchReplaceDialogOnScreen);
+  findNextSearchCandidate();
+}
+
+async function startSearchReplace() {
+  const enabled = validateEnabledSearchRules();
+  if (!enabled) return;
+  if (state.mode !== "modified") await render("modified");
+  beginSearchReplaceSession(enabled);
 }
 
 function packageFileInputs() {
@@ -1696,6 +2516,17 @@ ui.classes.addEventListener("change", () => {
 });
 ui.before.addEventListener("click", () => editor.moveBefore());
 ui.after.addEventListener("click", () => editor.moveAfter());
+ui.insertTable.addEventListener("click", () => {
+  const created = editor.insertTable(ui.tableRowCount.value, ui.tableColumnCount.value, { headerRow: ui.tableHeaderRow.checked });
+  if (created) setStatus("表を追加しました。セルを選択して文章や行・列を編集できます。", "success");
+});
+ui.addTableRow.addEventListener("click", () => editor.addTableRow());
+ui.deleteTableRow.addEventListener("click", () => editor.deleteTableRow());
+ui.addTableColumn.addEventListener("click", () => editor.addTableColumn());
+ui.deleteTableColumn.addEventListener("click", () => editor.deleteTableColumn());
+ui.deleteTable.addEventListener("click", () => {
+  if (window.confirm("選択中の表全体を削除しますか？")) editor.deleteTable();
+});
 ui.copyElement.addEventListener("click", () => {
   const count = editor.copySelected();
   if (!count) return;
@@ -1721,6 +2552,7 @@ ui.clearHistory.addEventListener("click", async () => {
 });
 ui.advancedMode.addEventListener("change", () => {
   ui.inspector.classList.toggle("show-advanced", ui.advancedMode.checked);
+  syncTableToolsVisibility();
 });
 ui.image.addEventListener("change", () => {
   const file = ui.image.files?.[0];
@@ -1847,7 +2679,9 @@ ui.loginCancel.addEventListener("click", () => finishLogin(false));
 ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
 initializeProjectSidebarResize();
+initializeSearchReplaceDialogMovement();
 initializePackageFileSelection();
+initializeSearchReplace();
 void refreshRecentProjects();
 syncLoginControls();
 updateGuidance();

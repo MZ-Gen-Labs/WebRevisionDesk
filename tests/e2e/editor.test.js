@@ -148,6 +148,479 @@ test("a user can add saved HTML to a project, edit, inspect changes and export",
   await page.close();
 });
 
+test("the selected original, modified, or redline view remains active when pages change", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  const openPage = async (name, url, heading) => {
+    await page.setInputFiles("#html-file", {
+      name,
+      mimeType: "text/html",
+      buffer: Buffer.from(`<!doctype html><html><head><meta name="web-revision-source-url" content="${url}"></head><body><main><h1>${heading}</h1></main></body></html>`),
+    });
+    await page.locator("#file-name").filter({ hasText: name }).waitFor();
+  };
+
+  await openPage("view-a.html", "https://example.com/pages/view-a", "ページA");
+  await page.locator("#show-original").click();
+  await openPage("view-b.html", "https://example.com/pages/view-b", "ページB");
+  assert.equal(await page.locator("#show-original").evaluate((button) => button.classList.contains("active")), true);
+  assert.match(await page.locator("#mode-badge").textContent(), /修正前/);
+
+  await page.locator("#show-modified").click();
+  await openPage("view-c.html", "https://example.com/pages/view-c", "ページC");
+  assert.equal(await page.locator("#show-modified").evaluate((button) => button.classList.contains("active")), true);
+  assert.match(await page.locator("#mode-badge").textContent(), /修正後/);
+
+  const heading = page.frameLocator("#page-frame").locator("h1");
+  await heading.dispatchEvent("click");
+  await page.locator("#text-value").fill("変更済みページC");
+  await page.locator("#text-value").dispatchEvent("change");
+  await page.locator("#show-redline").click();
+  await openPage("view-d.html", "https://example.com/pages/view-d", "ページD");
+  assert.equal(await page.locator("#show-redline").evaluate((button) => button.classList.contains("active")), true);
+  assert.match(await page.locator("#mode-badge").textContent(), /変更箇所/);
+  await page.close();
+});
+
+test("search and replace can start from original or redline and switches to the editable view", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, "https://example.com/pages/search-from-any-view");
+  await page.setInputFiles("#html-file", {
+    name: "search-from-any-view.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body><main><h1>変更前の見出し</h1><p>検索対象</p></main></body></html>"),
+  });
+  await page.frameLocator("#page-frame").locator("h1").click();
+  await page.locator("#text-value").fill("変更後の見出し");
+  await page.locator("#text-value").dispatchEvent("change");
+
+  await page.locator("#show-original").click();
+  assert.equal(await page.locator("#search-replace").isEnabled(), true);
+  await page.locator("#search-replace").click();
+  await page.locator("#search-replace-dialog").waitFor({ state: "visible" });
+  assert.match(await page.locator("#mode-badge").textContent(), /修正後・編集可能/);
+  assert.equal(await page.locator("#show-modified").evaluate((button) => button.classList.contains("active")), true);
+  await page.locator('#search-replace-dialog button[aria-label="閉じる"]').click();
+
+  await page.locator("#show-redline").click();
+  assert.equal(await page.locator("#search-replace").isEnabled(), true);
+  await page.locator("#search-replace").click();
+  await page.locator("#search-replace-dialog").waitFor({ state: "visible" });
+  assert.match(await page.locator("#mode-badge").textContent(), /修正後・編集可能/);
+  await page.close();
+});
+
+test("tables can be inserted and existing rows and columns can be edited with undo and redo", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, "https://example.com/pages/table-editing");
+  await page.setInputFiles("#html-file", {
+    name: "table-editing.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body><main><p id=anchor>表の前</p><table id=existing><tbody><tr><td>A1</td><td>A2</td></tr><tr><td>B1</td><td>B2</td></tr></tbody></table></main></body></html>"),
+  });
+  const frame = page.frameLocator("#page-frame");
+
+  assert.equal(await page.locator("#table-tools").isVisible(), false);
+  await frame.locator("#anchor").click();
+  assert.equal(await page.locator("#table-tools").isVisible(), false);
+  await page.locator("#advanced-mode").check();
+  assert.equal(await page.locator("#table-tools").isVisible(), true);
+  await page.locator("#table-row-count").fill("3");
+  await page.locator("#table-column-count").fill("2");
+  await page.locator("#table-header-row").check();
+  await page.locator("#insert-table").click();
+  const inserted = frame.locator("#anchor + table");
+  assert.equal(await inserted.locator("tr").count(), 3);
+  assert.equal(await inserted.locator("tr").first().locator("th").count(), 2);
+  assert.equal(await page.locator("#history-count").textContent(), "1");
+
+  await page.locator("#advanced-mode").uncheck();
+  await frame.locator("#existing td").first().click();
+  assert.equal(await page.locator("#advanced-mode").isChecked(), false);
+  assert.equal(await page.locator("#table-edit-tools").isVisible(), true);
+  assert.match(await page.locator("#table-selection-state").textContent(), /2行 × 2列/);
+  await page.locator("#add-table-row").click();
+  await page.locator("#add-table-column").click();
+  assert.equal(await frame.locator("#existing tr").count(), 3);
+  assert.equal(await frame.locator("#existing tr").first().locator("td, th").count(), 3);
+  assert.match(await page.locator("#table-selection-state").textContent(), /3行 × 3列/);
+
+  await page.locator("#undo").click();
+  assert.equal(await frame.locator("#existing tr").count(), 2);
+  assert.equal(await frame.locator("#existing tr").first().locator("td, th").count(), 2);
+  await page.locator("#redo").click();
+  assert.equal(await frame.locator("#existing tr").count(), 3);
+  assert.equal(await frame.locator("#existing tr").first().locator("td, th").count(), 3);
+
+  await page.locator("#delete-table-row").click();
+  await page.locator("#delete-table-column").click();
+  assert.equal(await frame.locator("#existing tr").count(), 2);
+  assert.equal(await frame.locator("#existing tr").first().locator("td, th").count(), 2);
+  await frame.locator("#anchor").click();
+  assert.equal(await page.locator("#table-tools").isVisible(), false);
+  await page.close();
+});
+
+test("reset applies to every checked saved page without removing the pages", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, "https://example.com/pages/reset-a");
+  const importAndEdit = async (name, url, original, changed) => {
+    await page.locator("#setup-panel").evaluate((details) => { details.open = true; });
+    await page.locator("#manual-page-url").fill(url);
+    await page.setInputFiles("#html-file", {
+      name,
+      mimeType: "text/html",
+      buffer: Buffer.from(`<!doctype html><html><head><title>${original}</title></head><body><main><h1>${original}</h1></main></body></html>`),
+    });
+    const heading = page.frameLocator("#page-frame").locator("h1");
+    await heading.click();
+    await page.locator("#text-value").fill(changed);
+    await page.locator("#text-value").dispatchEvent("change");
+    await page.locator("#save-state").filter({ hasText: "自動保存済み" }).waitFor();
+  };
+  await importAndEdit("reset-a.html", "https://example.com/pages/reset-a", "原本A", "変更A");
+  await importAndEdit("reset-b.html", "https://example.com/pages/reset-b", "原本B", "変更B");
+  const pageChecks = page.locator('.project-page-row input[type="checkbox"]');
+  await pageChecks.nth(0).check();
+  await pageChecks.nth(1).check();
+  assert.equal(await page.locator('.project-page-row input[type="checkbox"]:checked').count(), 2);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#reset").click();
+  await page.locator("#status").filter({ hasText: "チェックした2ページを取得時点へ戻しました" }).waitFor();
+  assert.equal(await page.locator(".project-page").filter({ hasText: "変更 0件" }).count(), 2);
+  assert.equal(await page.frameLocator("#page-frame").locator("h1").textContent(), "原本B");
+
+  await page.locator(".project-page").filter({ hasText: "原本A" }).click();
+  assert.equal(await page.frameLocator("#page-frame").locator("h1").textContent(), "原本A");
+  assert.equal(await page.locator(".project-page.saved").count(), 2);
+  await page.close();
+});
+
+test("saved search rules review matches in order and avoids already-replaced terms", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", {
+    name: "search-replace.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html lang=\"ja\"><body><header><p>旧名称 ヘッダー</p></header><main><h1>項目一覧</h1><p>旧名称 と 新名称 旧名称 と 旧名称 2025</p><p>次の 旧名称</p><p><a href=\"/item\">旧名称 リンク</a></p></main><footer>旧名称 フッター</footer></body></html>"),
+  });
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+
+  await page.locator("#search-replace").click();
+  const dialogBeforeDrag = await page.locator("#search-replace-dialog").boundingBox();
+  const dragHandle = await page.locator("#search-replace-drag-handle").boundingBox();
+  assert.ok(dialogBeforeDrag && dragHandle);
+  await page.mouse.move(dragHandle.x + 120, dragHandle.y + 24);
+  await page.mouse.down();
+  await page.mouse.move(dragHandle.x + 165, dragHandle.y + 24);
+  await page.mouse.up();
+  const dialogAfterDrag = await page.locator("#search-replace-dialog").boundingBox();
+  assert.ok(dialogAfterDrag.x > dialogBeforeDrag.x + 25);
+  const rule = page.locator(".search-rule").first();
+  await rule.locator('[data-field="name"]').fill("製品名の変更");
+  await rule.locator('[data-field="search"]').fill("旧名称");
+  await rule.locator('[data-field="replacement"]').fill("新名称");
+  await rule.locator('[data-field="searchScope"]').selectOption("article");
+  await rule.locator('[data-field="excludeLinkedText"]').check();
+  await rule.locator('[data-field="forbiddenBefore"]').fill("新名称");
+  await rule.locator('[data-field="forbiddenAfter"]').fill("2025");
+  await rule.locator('[data-field="forbiddenBeforeDistance"]').fill("1");
+  await rule.locator('[data-field="forbiddenAfterDistance"]').fill("1");
+  await page.locator("#save-search-rules").click();
+  await page.locator('#search-replace-dialog button[aria-label="閉じる"]').click();
+
+  await page.locator("#search-replace").click();
+  assert.equal(await rule.locator('[data-field="search"]').inputValue(), "旧名称");
+  assert.equal(await rule.locator('[data-field="forbiddenBefore"]').inputValue(), "新名称");
+  assert.equal(await rule.locator('[data-field="forbiddenAfter"]').inputValue(), "2025");
+  assert.equal(await rule.locator('[data-field="forbiddenBeforeDistance"]').inputValue(), "1");
+  assert.equal(await rule.locator('[data-field="forbiddenAfterDistance"]').inputValue(), "1");
+  assert.equal(await rule.locator('[data-field="searchScope"]').inputValue(), "article");
+  assert.equal(await rule.locator('[data-field="excludeLinkedText"]').isChecked(), true);
+  const configDialogWidth = (await page.locator("#search-replace-dialog").boundingBox()).width;
+  await page.locator("#start-search-replace").click();
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator("#search-replace-dialog").evaluate((dialog) => dialog.classList.contains("reviewing")), true);
+  assert.ok((await page.locator("#search-replace-dialog").boundingBox()).width < configDialogWidth);
+  assert.equal(await page.locator("#search-replace-dialog").evaluate((dialog) => getComputedStyle(dialog, "::backdrop").backgroundColor), "rgba(25, 26, 42, 0.12)");
+  assert.equal(await page.locator("#search-review-rule").textContent(), "製品名の変更（本文のみ）");
+  assert.equal(await page.locator("#search-review-before").textContent(), "旧名称");
+  assert.equal(await page.locator("#search-review-after").textContent(), "新名称");
+  assert.match(await page.locator("#search-review-context").textContent(), /【旧名称】 と 新名称 旧名称/);
+  assert.deepEqual(await page.frameLocator("#page-frame").locator("body").evaluate(() => ({
+    candidates: CSS.highlights?.get("web-revision-search-all")?.size || 0,
+    current: CSS.highlights?.get("web-revision-search-current")?.size || 0,
+    excluded: CSS.highlights?.get("web-revision-search-excluded")?.size || 0,
+    currentText: [...(CSS.highlights?.get("web-revision-search-current") || [])][0]?.toString() || "",
+  })), { candidates: 2, current: 1, excluded: 3, currentText: "旧名称" });
+  const frameBox = await page.locator("#page-frame").boundingBox();
+  const matchBox = await page.frameLocator("#page-frame").locator("body").evaluate(() => {
+    const range = [...CSS.highlights.get("web-revision-search-current")][0];
+    const rect = range.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  });
+  const reviewDialogBox = await page.locator("#search-replace-dialog").boundingBox();
+  const outerMatch = {
+    left: frameBox.x + matchBox.left, top: frameBox.y + matchBox.top,
+    right: frameBox.x + matchBox.right, bottom: frameBox.y + matchBox.bottom,
+  };
+  const overlaps = reviewDialogBox.x < outerMatch.right && reviewDialogBox.x + reviewDialogBox.width > outerMatch.left
+    && reviewDialogBox.y < outerMatch.bottom && reviewDialogBox.y + reviewDialogBox.height > outerMatch.top;
+  assert.equal(overlaps, false);
+
+  const firstDialogPosition = await page.locator("#search-replace-dialog").boundingBox();
+  await page.locator("#replace-search-match").click();
+  await page.waitForTimeout(220);
+  const secondDialogPosition = await page.locator("#search-replace-dialog").boundingBox();
+  assert.ok(Math.abs(secondDialogPosition.x - firstDialogPosition.x) <= 2);
+  assert.ok(Math.abs(secondDialogPosition.y - firstDialogPosition.y) <= 2);
+  assert.deepEqual(await page.frameLocator("#page-frame").locator("body").evaluate(() => ({
+    candidates: CSS.highlights?.get("web-revision-search-all")?.size || 0,
+    current: CSS.highlights?.get("web-revision-search-current")?.size || 0,
+    excluded: CSS.highlights?.get("web-revision-search-excluded")?.size || 0,
+  })), { candidates: 1, current: 1, excluded: 3 });
+  await page.locator("#replace-search-match").click();
+  await page.locator("#search-replace-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.frameLocator("#page-frame").locator("main p").first().textContent(), "新名称 と 新名称 旧名称 と 旧名称 2025");
+  assert.equal(await page.frameLocator("#page-frame").locator("main p").nth(1).textContent(), "次の 新名称");
+  assert.equal(await page.frameLocator("#page-frame").locator("header p").textContent(), "旧名称 ヘッダー");
+  assert.equal(await page.frameLocator("#page-frame").locator("footer").textContent(), "旧名称 フッター");
+  assert.equal(await page.frameLocator("#page-frame").locator('a[href="/item"]').textContent(), "旧名称 リンク");
+  assert.equal(await page.locator("#history-count").textContent(), "2");
+  assert.match(await page.locator("#status").textContent(), /置換 2件、スキップ 0件/);
+  assert.equal(await page.frameLocator("#page-frame").locator("body").evaluate(() => [...CSS.highlights.keys()].some((name) => name.startsWith("web-revision-search-"))), false);
+
+  await page.locator("#undo").click();
+  await page.locator("#undo").click();
+  assert.equal(await page.frameLocator("#page-frame").locator("main p").first().textContent(), "旧名称 と 新名称 旧名称 と 旧名称 2025");
+
+  await page.locator("#search-replace").click();
+  await page.locator("#add-search-rule").click();
+  const example = page.locator(".search-rule").last();
+  await example.locator('[data-field="name"]').fill("バックアップ用ルール");
+  await example.locator('[data-field="search"]').fill("用語A");
+  await example.locator('[data-field="replacement"]').fill("用語B");
+  await example.locator('[data-field="forbiddenBefore"]').fill("接頭語");
+  await example.locator('[data-field="forbiddenAfter"]').fill("除外語");
+
+  const rulesDownloadPromise = page.waitForEvent("download");
+  await page.locator("#export-search-rules").click();
+  const rulesDownload = await rulesDownloadPromise;
+  assert.equal(rulesDownload.suggestedFilename(), "web-revision-desk-search-rules.json");
+  const rulesFilePath = await rulesDownload.path();
+  const exportedRules = JSON.parse(await readFile(rulesFilePath, "utf8"));
+  assert.equal(exportedRules.format, "web-revision-desk-search-rules");
+  assert.equal(exportedRules.version, 1);
+  assert.equal(exportedRules.rules.length, 2);
+
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  assert.equal(await page.locator(".search-rule").count(), 0);
+  await page.locator("#search-rules-file").setInputFiles({
+    name: "saved-search-rules.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(exportedRules)),
+  });
+  await page.locator("#status").filter({ hasText: "ルール2件を復元しました" }).waitFor();
+  assert.equal(await page.locator(".search-rule").count(), 2);
+  assert.equal(await page.locator(".search-rule").last().locator('[data-field="name"]').inputValue(), "バックアップ用ルール");
+  await page.close();
+});
+
+test("all search rules can be previewed together while the page remains scrollable", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page, "https://example.com/pages/search-overview");
+  await page.setInputFiles("#html-file", {
+    name: "search-overview.html",
+    mimeType: "text/html",
+    buffer: Buffer.from('<!doctype html><html><body><main><p>用語A 用語B</p><div style="height:2400px"></div><p>用語A 用語B</p></main></body></html>'),
+  });
+  await page.locator("#search-replace").click();
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  await page.locator("#add-search-rule").click();
+  const first = page.locator(".search-rule").first();
+  await first.locator('[data-field="name"]').fill("ルールA");
+  await first.locator('[data-field="search"]').fill("用語A");
+  await first.locator('[data-field="replacement"]').fill("置換A");
+  await page.locator("#add-search-rule").click();
+  const second = page.locator(".search-rule").nth(1);
+  await second.locator('[data-field="name"]').fill("ルールB");
+  await second.locator('[data-field="search"]').fill("用語B");
+  await second.locator('[data-field="replacement"]').fill("置換B");
+  await page.locator("#preview-all-search-rules").click();
+
+  await page.locator("#search-replace-overview").waitFor();
+  assert.equal(await page.locator("#search-overview-summary").textContent(), "候補 4件・除外 0件");
+  assert.deepEqual(await page.locator(".search-overview-rule").allTextContents(), [
+    "ルールA候補 2件・除外 0件",
+    "ルールB候補 2件・除外 0件",
+  ]);
+  assert.equal(await page.frameLocator("#page-frame").locator("body").evaluate(() => CSS.highlights?.get("web-revision-search-all")?.size || 0), 4);
+
+  const frameBox = await page.locator("#page-frame").boundingBox();
+  const dialogBox = await page.locator("#search-replace-dialog").boundingBox();
+  const points = [
+    { x: frameBox.x + 8, y: frameBox.y + frameBox.height - 8 },
+    { x: frameBox.x + frameBox.width - 8, y: frameBox.y + frameBox.height - 8 },
+  ];
+  const point = points.find(({ x, y }) => !(x >= dialogBox.x && x <= dialogBox.x + dialogBox.width
+    && y >= dialogBox.y && y <= dialogBox.y + dialogBox.height));
+  assert.ok(point);
+  await page.evaluate(({ x, y }) => {
+    window.dispatchEvent(new WheelEvent("wheel", { clientX: x, clientY: y, deltaY: 600, bubbles: true, cancelable: true }));
+  }, point);
+  assert.ok(await page.frameLocator("#page-frame").locator("body").evaluate(() => window.scrollY) > 0);
+
+  await page.locator("#start-search-replace-from-overview").click();
+  assert.match(await page.locator("#search-review-progress").textContent(), /ルール 1\/2/);
+  await page.locator("#stop-search-replace").click();
+  await page.close();
+});
+
+test("breadcrumb text is controlled independently from ordinary linked text", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", {
+    name: "breadcrumb-search.html",
+    mimeType: "text/html",
+    buffer: Buffer.from('<!doctype html><html><body><nav class="pankuzu"><ul class="pankuzu_list"><li class="pankuzu_item"><a href="/parent">対象語</a></li></ul></nav><main><a href="/ordinary">対象語</a><p>対象語</p></main></body></html>'),
+  });
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+  await page.locator("#search-replace").click();
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  await page.locator("#add-search-rule").click();
+  const rule = page.locator(".search-rule").first();
+  await rule.locator('[data-field="search"]').fill("対象語");
+  await rule.locator('[data-field="replacement"]').fill("変更語");
+  await rule.locator('[data-field="excludeLinkedText"]').check();
+  assert.equal(await rule.locator('[data-field="excludeBreadcrumbText"]').isChecked(), false);
+  await page.locator("#start-search-replace").click();
+  assert.match(await page.locator("#search-review-progress").textContent(), /対象 2件・除外 1件/);
+  assert.equal(await page.locator("#search-review-context").textContent(), "【対象語】");
+  await page.locator("#stop-search-replace").click();
+
+  await page.locator("#search-replace").click();
+  await rule.locator('[data-field="excludeBreadcrumbText"]').check();
+  await page.locator("#start-search-replace").click();
+  assert.match(await page.locator("#search-review-progress").textContent(), /対象 1件・除外 2件/);
+  await page.locator("#stop-search-replace").click();
+  await page.close();
+});
+
+test("condition rules exclude nearby variants and later rules do not reprocess earlier replacements", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", {
+    name: "search-priority.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body><main><p>旧語 X / 新語 旧語 / 旧語-除外 / 旧語 除外 / 旧語100</p></main></body></html>"),
+  });
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+  await page.locator("#search-replace").click();
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  await page.locator("#add-search-rule").click();
+  const firstRule = page.locator(".search-rule").first();
+  await firstRule.locator('[data-field="name"]').fill("上位ルール");
+  await firstRule.locator('[data-field="search"]').fill("旧語");
+  await firstRule.locator('[data-field="replacement"]').fill("新語");
+  await firstRule.locator('[data-field="forbiddenBefore"]').fill("新語");
+  await firstRule.locator('[data-field="forbiddenAfter"]').fill("除外\n100");
+  await firstRule.locator('[data-field="forbiddenBeforeDistance"]').fill("1");
+  await firstRule.locator('[data-field="forbiddenAfterDistance"]').fill("1");
+  await firstRule.locator('[data-field="searchScope"]').selectOption("article");
+
+  await page.locator("#add-search-rule").click();
+  const lowerRule = page.locator(".search-rule").nth(1);
+  await lowerRule.locator('[data-field="name"]').fill("下位ルール");
+  await lowerRule.locator('[data-field="search"]').fill("新語");
+  await lowerRule.locator('[data-field="replacement"]').fill("SECOND");
+  await lowerRule.locator('[data-field="searchScope"]').selectOption("article");
+
+  await page.locator("#start-search-replace").click();
+  assert.match(await page.locator("#search-review-progress").textContent(), /対象 1件・除外 4件/);
+  await page.locator("#replace-all-search-rule").click();
+  await page.locator("#search-review-rule").filter({ hasText: "下位ルール" }).waitFor();
+  await page.waitForFunction(() => !document.querySelector("#replace-all-search-rule")?.disabled);
+  assert.equal(await page.locator("#replace-all-search-rule").isEnabled(), true);
+  assert.match(await page.locator("#search-review-progress").textContent(), /対象 1件・除外 1件/);
+  assert.match(await page.locator("#search-review-context").textContent(), /新語 X \/ 【新語】 旧語/);
+  await page.locator("#replace-search-match").click();
+  await page.locator("#search-replace-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.frameLocator("#page-frame").locator("main p").textContent(),
+    "新語 X / SECOND 旧語 / 旧語-除外 / 旧語 除外 / 旧語100");
+  assert.equal(await page.locator("#history-count").textContent(), "2");
+  await page.close();
+});
+
+test("article search prefers the actual layout main area over an unrelated article", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", {
+    name: "layout-main-search.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body><article><p>補助情報</p></article><div class=\"layoutArea_main\"><h1>旧語 項目構成</h1><p>旧語 標準仕様</p></div></body></html>"),
+  });
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+  await page.locator("#search-replace").click();
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  await page.locator("#add-search-rule").click();
+  const rule = page.locator(".search-rule").first();
+  await rule.locator('[data-field="search"]').fill("旧語");
+  await rule.locator('[data-field="replacement"]').fill("新語");
+  await rule.locator('[data-field="searchScope"]').selectOption("article");
+  await page.locator("#start-search-replace").click();
+  assert.equal(await page.locator("#search-review-before").textContent(), "旧語");
+  assert.match(await page.locator("#search-review-progress").textContent(), /対象 2件/);
+  await page.locator("#replace-all-search-rule").click();
+  await page.locator("#search-replace-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.frameLocator("#page-frame").locator(".layoutArea_main h1").textContent(), "新語 項目構成");
+  assert.equal(await page.frameLocator("#page-frame").locator("article p").textContent(), "補助情報");
+  await page.close();
+});
+
+test("search dialog stays open and explains when every match is excluded", async () => {
+  const page = await browser.newPage();
+  await prepareMemoryProject(page);
+  await page.setInputFiles("#html-file", {
+    name: "excluded-search.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<!doctype html><html><body><main><p>旧語100</p><p><a href=\"/item\">旧語 Link</a></p></main></body></html>"),
+  });
+  await page.locator("#mode-badge").filter({ hasText: "修正後・編集可能" }).waitFor();
+  await page.locator("#search-replace").click();
+  while (await page.locator(".search-rule").count()) {
+    await page.locator('.search-rule [data-action="remove"]').last().click();
+  }
+  await page.locator("#add-search-rule").click();
+  const rule = page.locator(".search-rule").first();
+  await rule.locator('[data-field="search"]').fill("旧語");
+  await rule.locator('[data-field="replacement"]').fill("新語");
+  await rule.locator('[data-field="forbiddenAfter"]').fill("100");
+  await rule.locator('[data-field="forbiddenAfterDistance"]').fill("0");
+  await rule.locator('[data-field="searchScope"]').selectOption("article");
+  await rule.locator('[data-field="excludeLinkedText"]').check();
+  await page.locator("#start-search-replace").click();
+  await page.locator("#search-replace-empty").waitFor();
+  assert.equal(await page.locator("#search-replace-dialog").isVisible(), true);
+  assert.equal(await page.locator("#search-empty-count").textContent(), "検出 2件");
+  assert.match(await page.locator("#search-empty-summary").textContent(), /リンク内 1件/);
+  assert.match(await page.locator("#search-empty-summary").textContent(), /前後の条件で除外 1件/);
+  assert.equal(await page.frameLocator("#page-frame").locator("body").evaluate(() => CSS.highlights?.get("web-revision-search-excluded")?.size || 0), 2);
+  await page.locator("#back-search-settings").click();
+  assert.equal(await page.locator("#search-replace-config").isVisible(), true);
+  await page.close();
+});
+
 test("a deleted image shows a visible deletion label in the redline page", async () => {
   const page = await browser.newPage();
   await prepareMemoryProject(page);

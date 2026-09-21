@@ -12,6 +12,17 @@ const TEXT_BLOCKLIST = new Set([
   "HTML", "HEAD", "BODY", "SCRIPT", "STYLE", "LINK", "META", "IMG", "VIDEO", "AUDIO", "IFRAME", "CANVAS", "SVG",
 ]);
 const STRUCTURE_ELEMENTS = new Set(["HTML", "HEAD", "BODY"]);
+const SEARCH_HIGHLIGHTS = {
+  all: "web-revision-search-all",
+  excluded: "web-revision-search-excluded",
+  current: "web-revision-search-current",
+};
+const ARTICLE_BODY_SELECTORS = [
+  "[itemprop='articleBody']", ".article-body", ".article-content", ".entry-content", ".post-content",
+  ".main-content", ".main-contents", "#main-content", "#main-contents", ".layoutArea_main",
+  ".layout-area-main", ".page-main", ".contents-main", "#contents",
+];
+const ARTICLE_CONTAINER_SELECTORS = ["article", "main", "[role='main']", "#main", "#content", ".content"];
 const IMAGE_EXTENSIONS = new Map([
   ["image/jpeg", "jpg"], ["image/png", "png"], ["image/gif", "gif"],
   ["image/webp", "webp"], ["image/svg+xml", "svg"], ["image/avif", "avif"], ["image/bmp", "bmp"],
@@ -48,6 +59,7 @@ export class PageEditor {
   }
 
   load(html, editable) {
+    this.clearSearchHighlight();
     this.editable = editable;
     this.selected = null;
     this.selectedElements = new Set();
@@ -71,6 +83,7 @@ export class PageEditor {
   }
 
   unload() {
+    this.clearSearchHighlight();
     this.clearSelection();
     this.editable = false;
     this.loaded = false;
@@ -89,6 +102,20 @@ export class PageEditor {
     style.id = EDITOR_STYLE_ID;
     style.textContent = `
       .${EDITOR_CLASS} { outline: 3px solid #5b5bd6 !important; outline-offset: 2px !important; }
+      ::highlight(${SEARCH_HIGHLIGHTS.all}) {
+        color: #2a2200;
+        background: #fff0a8;
+      }
+      ::highlight(${SEARCH_HIGHLIGHTS.excluded}) {
+        color: #711c16;
+        background: #ffd4d0;
+        text-decoration: line-through #b42318 2px;
+      }
+      ::highlight(${SEARCH_HIGHLIGHTS.current}) {
+        color: #201000;
+        background: #ffad33;
+        text-decoration: underline #c43e00 4px;
+      }
       [contenteditable="true"] { cursor: text !important; }
     `;
     doc.head?.append(style);
@@ -232,6 +259,129 @@ export class PageEditor {
     return this.frame.contentDocument;
   }
 
+  getSearchTextNodes({ searchScope = "page", searchSelector = "" } = {}) {
+    const doc = this.getDocument();
+    const win = this.frame.contentWindow;
+    if (!doc?.body || !win) return [];
+    let roots = [doc.body];
+    if (searchScope === "selector") {
+      const selector = String(searchSelector || "").trim();
+      if (!selector) throw new Error("検索範囲のCSSセレクターを入力してください。");
+      try { roots = [...doc.querySelectorAll(selector)]; }
+      catch { throw new Error("検索範囲のCSSセレクターが正しくありません。"); }
+      if (!roots.length) throw new Error("指定したCSSセレクターに一致する範囲がありません。");
+    } else if (searchScope === "article") {
+      const specific = [...doc.querySelectorAll(ARTICLE_BODY_SELECTORS.join(","))];
+      const containers = specific.length ? specific : [...doc.querySelectorAll(ARTICLE_CONTAINER_SELECTORS.join(","))];
+      roots = containers.length ? containers : [doc.body];
+    }
+    const blocked = "script, style, noscript, textarea, select, option, template, [hidden], [aria-hidden='true']";
+    const articleChrome = "header, nav, footer, aside, [role='navigation'], [role='banner'], [role='contentinfo']";
+    const nodes = [];
+    const walker = doc.createTreeWalker(doc.body, win.NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement;
+      if (!parent || !node.data.trim() || parent.closest(blocked) || !roots.some((root) => root.contains(node))) continue;
+      if (searchScope === "article" && parent.closest(articleChrome)) continue;
+      const style = win.getComputedStyle(parent);
+      if (style.display === "none" || style.visibility === "hidden") continue;
+      nodes.push(node);
+    }
+    return nodes;
+  }
+
+  selectTextNodeContainer(node) {
+    const element = node?.parentElement;
+    if (!element?.isConnected) return false;
+    this.select(element);
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+    return true;
+  }
+
+  clearSearchHighlight() {
+    const registry = this.frame.contentWindow?.CSS?.highlights;
+    Object.values(SEARCH_HIGHLIGHTS).forEach((name) => registry?.delete(name));
+  }
+
+  highlightSearchMatches(matches, current) {
+    this.clearSearchHighlight();
+    const doc = this.getDocument();
+    const win = this.frame.contentWindow;
+    const connectedMatches = matches.filter((item) => item?.node?.isConnected);
+    if (!doc || !win || (!connectedMatches.length && !current?.node?.isConnected)) return false;
+    const makeRange = ({ node, index, length }) => {
+      if (!node?.isConnected || index < 0 || length <= 0) return null;
+      const range = doc.createRange();
+      range.setStart(node, Math.min(index, node.data.length));
+      range.setEnd(node, Math.min(index + length, node.data.length));
+      return range;
+    };
+    if (win.CSS?.highlights && win.Highlight) {
+      const regularRanges = connectedMatches.filter((item) => !item.excluded).map(makeRange).filter(Boolean);
+      const excludedRanges = connectedMatches.filter((item) => item.excluded).map(makeRange).filter(Boolean);
+      const currentRange = current ? makeRange(current) : null;
+      if (regularRanges.length) win.CSS.highlights.set(SEARCH_HIGHLIGHTS.all, new win.Highlight(...regularRanges));
+      if (excludedRanges.length) win.CSS.highlights.set(SEARCH_HIGHLIGHTS.excluded, new win.Highlight(...excludedRanges));
+      if (currentRange) {
+        const active = new win.Highlight(currentRange);
+        active.priority = 10;
+        win.CSS.highlights.set(SEARCH_HIGHLIGHTS.current, active);
+      }
+    } else {
+      const range = current ? makeRange(current) : null;
+      const selection = doc.getSelection();
+      selection?.removeAllRanges();
+      if (range) selection?.addRange(range);
+    }
+    return current?.node?.isConnected ? this.selectTextNodeContainer(current.node) : true;
+  }
+
+  highlightTextMatch(node, index, length) {
+    const current = { node, index, length, excluded: false };
+    return this.highlightSearchMatches([current], current);
+  }
+
+  getTextMatchViewportRect(node, index, length) {
+    const doc = this.getDocument();
+    if (!doc || !node?.isConnected) return null;
+    const frameRect = this.frame.getBoundingClientRect();
+    let matchRect;
+    if (length > 0) {
+      const range = doc.createRange();
+      range.setStart(node, Math.min(index, node.data.length));
+      range.setEnd(node, Math.min(index + length, node.data.length));
+      matchRect = range.getBoundingClientRect();
+    } else {
+      matchRect = node.parentElement?.getBoundingClientRect();
+    }
+    if (!matchRect) return null;
+    return {
+      left: frameRect.left + matchRect.left,
+      top: frameRect.top + matchRect.top,
+      right: frameRect.left + matchRect.right,
+      bottom: frameRect.top + matchRect.bottom,
+      width: matchRect.width,
+      height: matchRect.height,
+    };
+  }
+
+  scrollBy(left, top) {
+    this.frame.contentWindow?.scrollBy({ left, top, behavior: "auto" });
+  }
+
+  replaceTextNodeMatch(node, index, length, replacement) {
+    const element = node?.parentElement;
+    if (!element?.isConnected || index < 0 || length < 0) return false;
+    const before = element.textContent ?? "";
+    const beforeHtml = element.innerHTML;
+    node.data = `${node.data.slice(0, index)}${replacement}${node.data.slice(index + length)}`;
+    const after = element.textContent ?? "";
+    if (before === after && beforeHtml === element.innerHTML) return false;
+    this.#emitChange("text-change", element, before, after, { beforeHtml, afterHtml: element.innerHTML });
+    this.select(element);
+    return true;
+  }
+
   getHtml() {
     if (!this.loaded || !this.getDocument()) return "";
     return serializeDocument(this.getDocument(), { keepEditorIds: true });
@@ -332,6 +482,148 @@ export class PageEditor {
     heading.textContent = after;
     this.#emitChange("text-change", heading, before, after, { beforeHtml, afterHtml: heading.innerHTML });
     return true;
+  }
+
+  getTableContext() {
+    const table = this.selected?.closest?.("table");
+    if (!table) return null;
+    const rows = [...table.rows];
+    const selectedCell = this.selected?.closest?.("th, td");
+    const row = selectedCell?.closest("tr") || this.selected?.closest?.("tr") || rows[0] || null;
+    const cells = row ? [...row.cells] : [];
+    const cell = selectedCell && cells.includes(selectedCell) ? selectedCell : cells[0] || null;
+    return {
+      table,
+      row,
+      cell,
+      rowIndex: row ? rows.indexOf(row) : -1,
+      columnIndex: cell ? cells.indexOf(cell) : 0,
+      rowCount: rows.length,
+      columnCount: Math.max(0, ...rows.map((item) => item.cells.length)),
+    };
+  }
+
+  insertTable(rowCount = 3, columnCount = 3, { headerRow = true } = {}) {
+    const doc = this.getDocument();
+    if (!doc || !this.editable) return false;
+    const rows = Math.max(1, Math.min(50, Number(rowCount) || 1));
+    const columns = Math.max(1, Math.min(20, Number(columnCount) || 1));
+    const table = doc.createElement("table");
+    table.setAttribute("border", "1");
+    table.style.borderCollapse = "collapse";
+    table.style.width = "100%";
+    if (headerRow) {
+      const thead = table.createTHead();
+      const row = thead.insertRow();
+      for (let column = 0; column < columns; column += 1) {
+        const cell = doc.createElement("th");
+        cell.textContent = `見出し${column + 1}`;
+        cell.style.padding = ".45em";
+        row.append(cell);
+      }
+    }
+    const body = table.createTBody();
+    const bodyRows = Math.max(headerRow ? rows - 1 : rows, headerRow && rows === 1 ? 0 : 1);
+    for (let rowIndex = 0; rowIndex < bodyRows; rowIndex += 1) {
+      const row = body.insertRow();
+      for (let column = 0; column < columns; column += 1) {
+        const cell = row.insertCell();
+        cell.textContent = `セル${rowIndex + 1}-${column + 1}`;
+        cell.style.padding = ".45em";
+      }
+    }
+    this.#assignNewIds(table);
+    const selectedTable = this.selected?.closest?.("table");
+    const target = selectedTable || (this.selected && !STRUCTURE_ELEMENTS.has(this.selected.tagName) ? this.selected : null);
+    const parent = target?.parentElement || doc.querySelector("main") || doc.body;
+    if (!parent) return false;
+    if (target) target.after(table);
+    else parent.append(table);
+    const change = {
+      type: "element-add",
+      target: this.#describe(table),
+      elementId: this.#ensureElementId(table),
+      parentId: this.#ensureElementId(parent),
+      index: [...parent.children].indexOf(table),
+      before: "",
+      after: this.#cleanOuterHtml(table),
+      action: "table",
+      timestamp: new Date().toISOString(),
+    };
+    this.select(table.querySelector("th, td") || table);
+    this.callbacks.onChange?.(change);
+    return true;
+  }
+
+  addTableRow() {
+    return this.#changeTable((context) => {
+      const doc = this.getDocument();
+      const reference = context.row;
+      let section = reference?.parentElement;
+      if (!section || section.tagName === "THEAD") section = context.table.tBodies[0] || context.table.createTBody();
+      const row = doc.createElement("tr");
+      const columns = Math.max(1, context.columnCount);
+      for (let index = 0; index < columns; index += 1) {
+        const cell = doc.createElement("td");
+        cell.textContent = "セル";
+        cell.style.padding = ".45em";
+        row.append(cell);
+      }
+      if (reference && reference.parentElement === section) reference.after(row);
+      else section.prepend(row);
+      return row.cells[0] || row;
+    });
+  }
+
+  deleteTableRow() {
+    const context = this.getTableContext();
+    if (!context?.row || context.rowCount <= 1) return false;
+    return this.#changeTable((current) => {
+      const rows = [...current.table.rows];
+      const replacement = rows[current.rowIndex + 1] || rows[current.rowIndex - 1];
+      current.row.remove();
+      return replacement?.cells[Math.min(current.columnIndex, Math.max(0, replacement.cells.length - 1))] || replacement || current.table;
+    });
+  }
+
+  addTableColumn() {
+    return this.#changeTable((context) => {
+      let selected = null;
+      [...context.table.rows].forEach((row, rowIndex) => {
+        const reference = row.cells[context.columnIndex] || row.cells[row.cells.length - 1] || null;
+        const tag = reference?.tagName === "TH" || row.parentElement?.tagName === "THEAD" ? "th" : "td";
+        const cell = row.ownerDocument.createElement(tag);
+        cell.textContent = tag === "th" ? "見出し" : "セル";
+        cell.style.padding = ".45em";
+        if (reference) reference.after(cell);
+        else row.append(cell);
+        if (rowIndex === context.rowIndex) selected = cell;
+      });
+      return selected || context.table;
+    });
+  }
+
+  deleteTableColumn() {
+    const context = this.getTableContext();
+    if (!context || context.columnCount <= 1) return false;
+    return this.#changeTable((current) => {
+      let selected = null;
+      [...current.table.rows].forEach((row, rowIndex) => {
+        const cell = row.cells[current.columnIndex];
+        if (cell) cell.remove();
+        if (rowIndex === current.rowIndex) {
+          selected = row.cells[Math.min(current.columnIndex, Math.max(0, row.cells.length - 1))] || row;
+        }
+      });
+      return selected || current.table;
+    });
+  }
+
+  deleteTable() {
+    const context = this.getTableContext();
+    if (!context) return false;
+    this.select(context.table);
+    return this.deleteSelected();
   }
 
   getSelectionCount() {
@@ -487,6 +779,23 @@ export class PageEditor {
       child.removeAttribute("contenteditable");
     });
     return clone.outerHTML;
+  }
+
+  #changeTable(mutator) {
+    const context = this.getTableContext();
+    if (!context || !this.editable) return false;
+    const before = this.#cleanOuterHtml(context.table);
+    const selection = mutator(context);
+    this.#assignNewIdsToMissing(context.table);
+    const after = this.#cleanOuterHtml(context.table);
+    if (before === after) return false;
+    this.#emitChange("table-change", context.table, before, after, { beforeHtml: before, afterHtml: after });
+    this.select(selection?.isConnected ? selection : context.table);
+    return true;
+  }
+
+  #assignNewIdsToMissing(root) {
+    [root, ...root.querySelectorAll("*")].forEach((element) => this.#ensureElementId(element));
   }
 
   #describe(element) {
@@ -801,6 +1110,15 @@ export class PageEditor {
       if (!parent || !element) return false;
       parent.insertBefore(element, parent.children[change.index] ?? null);
       this.select(element);
+      return true;
+    }
+
+    if (change.type === "table-change") {
+      if (!element) return false;
+      const replacement = this.#elementFromHtml(undo ? change.before : change.after);
+      if (!replacement) return false;
+      element.replaceWith(replacement);
+      this.select(replacement.querySelector("th, td") || replacement);
       return true;
     }
 

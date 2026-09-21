@@ -252,6 +252,25 @@ export class ProjectStore {
     return { page, originalHtml, workingHtml, changes: data.changes || [] };
   }
 
+  async resetPageChanges(pageIds) {
+    if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
+    const ids = new Set(pageIds);
+    const targets = this.project.pages.filter((page) => ids.has(page.id));
+    const resetPages = [];
+    for (const page of targets) {
+      const saved = await this.loadPage(page.id);
+      const reset = await this.savePage({
+        fileName: page.fileName,
+        sourceUrl: page.url,
+        originalHtml: saved.originalHtml,
+        workingHtml: saved.originalHtml,
+        changes: [],
+      });
+      resetPages.push(reset);
+    }
+    return resetPages;
+  }
+
   async resetPages(pageIds) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
     const ids = new Set(pageIds);
