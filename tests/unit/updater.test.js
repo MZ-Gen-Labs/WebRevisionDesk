@@ -26,6 +26,32 @@ test("updater records progress and displays failures", async () => {
   assert.doesNotMatch(source, /Get-FileHash/);
   assert.match(source, /Security\.Cryptography\.SHA256/);
   assert.match(source, /TemporaryScriptPath/);
+  assert.match(source, /uninstallerBackup/);
+  assert.match(source, /Filter "unins\*"/);
+});
+
+test("Windows installer is per-user and installs the portable payload", async () => {
+  const source = await readFile(path.join(root, "installer", "WebRevisionDesk.iss"), "utf8");
+  assert.match(source, /DefaultDirName=\{localappdata\}\\Programs\\WebRevisionDesk/);
+  assert.match(source, /PrivilegesRequired=lowest/);
+  assert.match(source, /release-electron\\WebRevisionDesk\\\*/);
+});
+
+test("macOS updater verifies, replaces, and relaunches the app bundle", async () => {
+  const source = await readFile(path.join(root, "electron", "updater.sh"), "utf8");
+  assert.match(source, /shasum -a 256/);
+  assert.match(source, /WebRevisionDesk\.app/);
+  assert.match(source, /open -n/);
+  assert.match(source, /Library\/Logs\/WebRevisionDesk/);
+  assert.match(source, /osascript/);
+});
+
+test("Electron selects macOS update ZIPs and starts the shell updater", async () => {
+  const source = await readFile(path.join(root, "electron", "main.mjs"), "utf8");
+  assert.ok(source.includes("-mac-${arch}\\\\.zip"));
+  assert.match(source, /electron", "updater\.sh/);
+  assert.match(source, /spawn\("\/bin\/sh"/);
+  assert.match(source, /macInstallPath/);
 });
 
 test("BOM-prefixed updater parses in Windows PowerShell", { skip: process.platform !== "win32" }, async () => {

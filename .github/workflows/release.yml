@@ -1,4 +1,4 @@
-name: Windows Release
+name: Release
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   attestations: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-2025
     env:
       GH_TOKEN: ${{ github.token }}
@@ -57,21 +57,81 @@ jobs:
           if (-not $executable) { throw "Packaged Electron executable was not found." }
           $process = Start-Process -FilePath $executable.FullName -ArgumentList "--editor-smoke-test" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Electron release smoke test failed with exit code $($process.ExitCode)." }
+      - name: Build per-user Windows installer
+        shell: pwsh
+        run: |
+          npm run build:windows:installer
+          $installer = Get-ChildItem release-electron -Filter *-Setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "Windows Setup.exe was not created." }
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
           name: WebRevisionDesk-${{ env.RELEASE_TAG }}-windows
           path: |
             release-electron/*.zip
+            release-electron/*-Setup.exe
             release-electron/SHA256SUMS.txt
           if-no-files-found: error
-      - name: Publish GitHub Release
-        shell: pwsh
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.18.0"
+          cache: npm
+      - name: Validate version tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          $files = Get-ChildItem release-electron -File | ForEach-Object { $_.FullName }
-          gh release view $env:RELEASE_TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG $files --clobber
-          } else {
-            gh release create $env:RELEASE_TAG $files --verify-tag --generate-notes --title "Web Revision Desk $env:RELEASE_TAG"
-          }
+          npm run version:check -- --tag "$REQUESTED_TAG"
+          echo "RELEASE_TAG=$REQUESTED_TAG" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test:unit
+      - name: Build macOS Electron archive and DMG
+        run: npm run build:electron:mac
+      - name: Smoke test macOS Electron archive
+        run: |
+          archive=$(find release-electron-mac -name '*.zip' -type f | head -n 1)
+          test -n "$archive"
+          target="$RUNNER_TEMP/electron-release-smoke"
+          mkdir -p "$target"
+          ditto -x -k "$archive" "$target"
+          executable=$(find "$target" -path '*/WebRevisionDesk.app/Contents/MacOS/Electron' -type f | head -n 1)
+          test -n "$executable"
+          "$executable" --editor-smoke-test
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: WebRevisionDesk-${{ env.RELEASE_TAG }}-macos-arm64
+          path: |
+            release-electron-mac/*.zip
+            release-electron-mac/*.dmg
+            release-electron-mac/SHA256SUMS.txt
+          if-no-files-found: error
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        run: |
+          find artifacts -name SHA256SUMS.txt -exec cat {} \; > SHA256SUMS.txt
+          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.dmg' \) -print)
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 && exists=true || exists=false
+          if [ "$exists" = true ]; then
+            gh release upload "$RELEASE_TAG" $files SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" $files SHA256SUMS.txt --verify-tag --generate-notes --title "Web Revision Desk $RELEASE_TAG"
+          fi

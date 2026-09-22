@@ -12,6 +12,7 @@ $ErrorActionPreference = "Stop"
 $parent = Split-Path -Parent $InstallDirectory
 $stage = Join-Path $parent (".WebRevisionDesk-update-" + [guid]::NewGuid())
 $backup = Join-Path $parent (".WebRevisionDesk-backup-" + [guid]::NewGuid())
+$uninstallerBackup = Join-Path $stage ".uninstaller"
 $logDirectory = Join-Path $env:LOCALAPPDATA "WebRevisionDesk\logs"
 $logPath = Join-Path $logDirectory "updater.log"
 
@@ -56,6 +57,13 @@ try {
   }
   Write-UpdaterLog "更新ファイルのSHA-256を確認しました。"
   New-Item -ItemType Directory -Path $stage | Out-Null
+  # An Inno Setup installation keeps its uninstaller in the app directory.
+  # Preserve it while replacing the portable application payload.
+  $uninstallerFiles = Get-ChildItem -LiteralPath $InstallDirectory -Filter "unins*" -File -ErrorAction SilentlyContinue
+  if ($uninstallerFiles) {
+    New-Item -ItemType Directory -Path $uninstallerBackup | Out-Null
+    $uninstallerFiles | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $uninstallerBackup -Force }
+  }
   Expand-Archive -LiteralPath $ZipPath -DestinationPath $stage -Force
   # Current archives contain a stable WebRevisionDesk/ top-level directory.
   # Accept the earlier root-level format too so upgrades from old releases work.
@@ -71,6 +79,11 @@ try {
       Move-Item -LiteralPath $backup -Destination $InstallDirectory
     }
     throw
+  }
+  if (Test-Path -LiteralPath $uninstallerBackup) {
+    Get-ChildItem -LiteralPath $uninstallerBackup -File | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $InstallDirectory -Force
+    }
   }
   Remove-Item -LiteralPath $backup -Recurse -Force
   Write-UpdaterLog "更新ファイルをインストール先へ配置しました。"
