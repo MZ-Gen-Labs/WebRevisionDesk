@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
@@ -36,6 +38,7 @@ let projectDirectory = "";
 let shuttingDown = false;
 let allowMainWindowClose = false;
 let mainWindowClosePending = false;
+let downloadedUpdate = null;
 const backgroundWindows = new Set();
 const diagnosticEvents = [];
 
@@ -489,6 +492,79 @@ function jsonResponse(value, status = 200) {
   return ipcResponse(JSON.stringify(value), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
 }
 
+const RELEASE_API_URL = "https://api.github.com/repos/MZ-Gen-Labs/WebRevisionDesk/releases/latest";
+const VERSION_TAG = /^v?(\d+)\.(\d+)\.(\d+)$/;
+
+function compareVersions(left, right) {
+  const a = String(left).match(VERSION_TAG);
+  const b = String(right).match(VERSION_TAG);
+  if (!a || !b) throw new Error("更新バージョンの形式が正しくありません。");
+  for (let index = 1; index <= 3; index += 1) {
+    const difference = Number(a[index]) - Number(b[index]);
+    if (difference) return Math.sign(difference);
+  }
+  return 0;
+}
+
+function portableInstallDirectory() {
+  if (process.platform !== "win32" || !app.isPackaged) return "";
+  const directory = path.dirname(process.execPath);
+  return path.basename(process.execPath).toLowerCase() === "webrevisiondesk.exe" ? directory : "";
+}
+
+async function fetchLatestRelease() {
+  const response = await net.fetch(RELEASE_API_URL, { headers: { Accept: "application/vnd.github+json", "User-Agent": "WebRevisionDesk" } });
+  if (!response.ok) throw new Error(`更新情報を取得できませんでした（HTTP ${response.status}）。`);
+  const release = await response.json();
+  const version = String(release.tag_name || "").replace(/^v/, "");
+  const zip = release.assets?.find((asset) => /^WebRevisionDesk-\d+\.\d+\.\d+-electron-win-x64\.zip$/.test(asset.name));
+  const sums = release.assets?.find((asset) => asset.name === "SHA256SUMS.txt");
+  if (!zip || !sums || !VERSION_TAG.test(version)) throw new Error("更新リリースの配布ファイルが見つかりません。");
+  return { version, zipUrl: zip.browser_download_url, zipName: zip.name, sumsUrl: sums.browser_download_url, notes: String(release.body || "") };
+}
+
+async function checkForUpdate() {
+  const installDirectory = portableInstallDirectory();
+  if (!installDirectory) return { supported: false, currentVersion: packageJson.version };
+  const release = await fetchLatestRelease();
+  return { supported: true, currentVersion: packageJson.version, available: compareVersions(release.version, packageJson.version) > 0, ...release };
+}
+
+async function downloadUpdate() {
+  const update = await checkForUpdate();
+  if (!update.available) return { ...update, downloaded: false };
+  const sumsResponse = await net.fetch(update.sumsUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
+  const zipResponse = await net.fetch(update.zipUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
+  if (!sumsResponse.ok || !zipResponse.ok) throw new Error("更新ファイルをダウンロードできませんでした。");
+  const sums = await sumsResponse.text();
+  const expected = sums.match(new RegExp(`^([a-fA-F0-9]{64})\\s+${update.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
+  if (!expected) throw new Error("公開されたSHA-256チェックサムが見つかりません。");
+  const body = Buffer.from(await zipResponse.arrayBuffer());
+  const actual = createHash("sha256").update(body).digest("hex");
+  if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("更新ファイルのSHA-256が一致しません。");
+  const updatesDirectory = path.join(app.getPath("userData"), "updates");
+  await mkdir(updatesDirectory, { recursive: true });
+  const zipPath = path.join(updatesDirectory, update.zipName);
+  await writeFile(zipPath, body);
+  downloadedUpdate = { ...update, zipPath, sha256: actual, installDirectory: portableInstallDirectory() };
+  await record("update-downloaded", { version: update.version });
+  return { ...update, downloaded: true };
+}
+
+function applyDownloadedUpdate() {
+  if (!downloadedUpdate?.zipPath || !portableInstallDirectory()) throw new Error("適用できる更新ファイルがありません。");
+  const script = path.join(rootDirectory, "electron", "updater.ps1");
+  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+    "-ProcessId", String(process.pid), "-InstallDirectory", downloadedUpdate.installDirectory,
+    "-ZipPath", downloadedUpdate.zipPath, "-Sha256", downloadedUpdate.sha256, "-ExecutableName", path.basename(process.execPath)], {
+    detached: true, stdio: "ignore", windowsHide: true,
+  });
+  child.unref();
+  allowMainWindowClose = true;
+  app.quit();
+  return { restarting: true };
+}
+
 async function readEditorSettings() {
   try {
     return JSON.parse(await readFile(path.join(app.getPath("userData"), "settings.json"), "utf8"));
@@ -540,6 +616,9 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   if (method === "GET" && url === "/api/app-info") {
     return jsonResponse({ version: packageJson.version });
   }
+  if (method === "GET" && url === "/api/update/check") return jsonResponse(await checkForUpdate());
+  if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate());
+  if (method === "POST" && url === "/api/update/apply") return jsonResponse(applyDownloadedUpdate());
   if (method === "POST" && url === "/api/capture/start") {
     const metadata = await openCapturePage(body.url, { show: true });
     activeCaptureSessionId = crypto.randomUUID();

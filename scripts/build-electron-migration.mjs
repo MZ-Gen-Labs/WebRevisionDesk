@@ -68,5 +68,12 @@ await run("powershell.exe", [
 
 const digest = createHash("sha256").update(await readFile(zipPath)).digest("hex");
 await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${digest}  ${path.basename(zipPath)}\n`, "ascii");
+await writeFile(path.join(releaseRoot, "release.json"), `${JSON.stringify({
+  version: packageJson.version,
+  channel: "stable",
+  asset: path.basename(zipPath),
+  sha256: digest,
+  publishedAt: new Date().toISOString(),
+}, null, 2)}\n`, "utf8");
 
 console.log(`Created ${zipPath}\nSHA-256 ${digest}`);

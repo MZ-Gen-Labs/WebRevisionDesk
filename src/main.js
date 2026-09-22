@@ -22,6 +22,8 @@ const ui = {
   fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
   modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"),
   searchReplace: $("#search-replace"), download: $("#download"),
+  updateControls: $("#update-controls"), updateStatus: $("#update-status"), checkUpdate: $("#check-update"),
+  downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -369,6 +371,64 @@ async function loadAppInfo() {
     console.warn("App information could not be loaded:", error);
   }
 }
+
+let availableUpdate = null;
+
+async function checkForApplicationUpdate({ quiet = false } = {}) {
+  setButtonProcessing(ui.checkUpdate, true);
+  try {
+    const response = await appFetch("/api/update/check", { cache: "no-store" });
+    if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+    const update = await response.json();
+    if (!update.supported) return;
+    ui.updateControls.hidden = false;
+    availableUpdate = update.available ? update : null;
+    ui.downloadUpdate.hidden = !update.available;
+    ui.applyUpdate.hidden = true;
+    ui.updateStatus.textContent = update.available ? `v${update.version} を利用できます` : "最新版です";
+    if (!quiet) setStatus(update.available ? `v${update.version} をダウンロードできます。` : "このアプリは最新版です。", "success");
+  } catch (error) {
+    if (!quiet) setStatus(`更新を確認できませんでした: ${error.message}`, "error");
+  } finally {
+    setButtonProcessing(ui.checkUpdate, false);
+  }
+}
+
+ui.checkUpdate.addEventListener("click", () => { void checkForApplicationUpdate(); });
+ui.downloadUpdate.addEventListener("click", async () => {
+  setButtonProcessing(ui.downloadUpdate, true);
+  try {
+    const response = await appFetch("/api/update/download", { method: "POST" });
+    if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+    const update = await response.json();
+    if (!update.downloaded) return checkForApplicationUpdate();
+    availableUpdate = update;
+    ui.downloadUpdate.hidden = true;
+    ui.applyUpdate.hidden = false;
+    ui.updateStatus.textContent = `v${update.version} を準備しました`;
+    setStatus("更新をダウンロードし、SHA-256を確認しました。", "success");
+  } catch (error) {
+    setStatus(`更新をダウンロードできませんでした: ${error.message}`, "error");
+  } finally {
+    setButtonProcessing(ui.downloadUpdate, false);
+  }
+});
+ui.applyUpdate.addEventListener("click", async () => {
+  if (!availableUpdate || !window.confirm(`v${availableUpdate.version} を適用するため、アプリを再起動します。`)) return;
+  try {
+    const saved = await window.webRevisionFlushAutosave();
+    if (saved.needsManualSave) {
+      setStatus("未保存の編集内容があるため、保存または共有用ファイルの出力後に更新してください。", "error");
+      return;
+    }
+    if (!saved.ok) throw new Error(saved.message || "編集内容を保存できませんでした。");
+    const response = await appFetch("/api/update/apply", { method: "POST" });
+    if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+    ui.updateStatus.textContent = "更新して再起動しています…";
+  } catch (error) {
+    setStatus(`更新を適用できませんでした: ${error.message}`, "error");
+  }
+});
 function recordChange(change) {
   if (change.type === "element-delete") {
     const removedElementIds = new Set(change.removedElementIds || [change.elementId]);
@@ -2776,6 +2836,7 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 loadAppInfo();
+if (globalThis.webRevisionDesktop?.request) void checkForApplicationUpdate({ quiet: true });
 ui.loginRequired.addEventListener("change", async () => {
   loginReady = false;
   syncLoginControls();

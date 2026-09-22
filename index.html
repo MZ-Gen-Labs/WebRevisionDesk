@@ -13,6 +13,12 @@
         <h1>Webサイト修正案エディター <span id="app-version" class="version-button">v--</span></h1>
       </div>
       <div class="toolbar" aria-label="編集・保存操作">
+        <div id="update-controls" class="update-controls" hidden>
+          <span id="update-status"></span>
+          <button id="check-update" class="button-subtle" type="button">更新を確認</button>
+          <button id="download-update" class="button-primary" type="button" hidden>更新をダウンロード</button>
+          <button id="apply-update" class="button-primary" type="button" hidden>再起動して更新</button>
+        </div>
         <button id="show-original" type="button" disabled>修正前</button>
         <button id="show-modified" type="button" disabled>修正後</button>
         <button id="show-redline" class="button-redline" type="button" disabled>変更箇所</button>

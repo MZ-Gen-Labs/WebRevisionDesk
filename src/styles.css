@@ -33,6 +33,8 @@ h1 { margin-bottom: 0; font-size: 1.3rem; }
 h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .eyebrow { margin-bottom: .25rem; color: #62637a; font-size: .72rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: .5rem; }
+.update-controls { display: flex; align-items: center; gap: .35rem; padding-right: .55rem; border-right: 1px solid #dedfe7; }
+.update-controls span { max-width: 210px; color: #55566c; font-size: .72rem; }
 .export-menu { position: relative; }
 .export-menu summary { border: 1px solid #d4d5df; border-radius: 9px; padding: .65rem .85rem; cursor: pointer; list-style: none; background: #fff; }
 .export-menu summary::-webkit-details-marker { display: none; }
