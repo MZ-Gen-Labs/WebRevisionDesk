@@ -8,14 +8,14 @@ button, .button { border: 1px solid #d4d5df; border-radius: 9px; background: #ff
 button:hover:not(:disabled), .button:hover { border-color: #7779d8; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button.is-processing:disabled { opacity: .95; }
-button.is-processing { position: relative; border-color: #7779d8; color: #3f3fa8; background: #eeeeff; animation: processing-pulse 1.15s ease-in-out infinite; }
+button.is-processing { position: relative; border-color: #7777df; color: #3b3bb0; background: #f5f5ff; animation: processing-pulse .8s ease-in-out infinite; }
 button.is-processing::before { content: ""; width: .55em; height: .55em; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
 @keyframes processing-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgb(91 91 214 / 8%); filter: brightness(1); }
-  50% { box-shadow: 0 0 0 5px rgb(91 91 214 / 15%); filter: brightness(.94); }
+  0%, 100% { border-color: #7777df; background: #f5f5ff; color: #3b3bb0; opacity: 1; box-shadow: 0 0 0 0 rgb(91 91 214 / 0%); }
+  50% { border-color: #25257f; background: #b5b5ff; color: #15154f; opacity: .58; box-shadow: 0 0 0 8px rgb(91 91 214 / 42%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  button.is-processing { animation: none; }
+  button.is-processing { animation-duration: 1.25s; }
 }
 .button[aria-disabled="true"] { pointer-events: none; cursor: not-allowed; opacity: .45; }
 button.active { border-color: #5b5bd6; color: #4747bd; background: #eeeeff; }
