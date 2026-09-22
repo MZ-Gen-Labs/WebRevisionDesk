@@ -1126,6 +1126,8 @@ function renderProjectPages() {
     button.classList.toggle("saved", page.saved);
     button.classList.toggle("changed", page.checkStatus === "changed");
     button.classList.toggle("unavailable", state.unavailableProjectUrls.has(page.url));
+    const resourceFailureCount = Array.isArray(page.resourceFailures) ? page.resourceFailures.length : 0;
+    button.classList.toggle("has-resource-failures", resourceFailureCount > 0);
     button.classList.toggle("active", page.url === state.focusedProjectUrl);
     const title = document.createElement("strong");
     const path = document.createElement("small");
@@ -1146,6 +1148,13 @@ function renderProjectPages() {
           ? "優先取得待ち"
           : "未取得・クリックして画像とページを取得";
     button.append(title, path, status);
+    if (page.saved && resourceFailureCount > 0) {
+      const failures = document.createElement("span");
+      failures.className = "page-resource-failures";
+      failures.textContent = `⚠ 取り込み失敗 ${resourceFailureCount}件`;
+      failures.title = "画像・CSSなど、関連ファイルの取得に失敗した件数です。ページを開くと詳細を確認できます。";
+      button.append(failures);
+    }
     button.addEventListener("click", (event) => handleProjectPageClick(event, page, listed));
     row.append(checkbox, button);
     if (page.saved && page.checkStatus === "changed") {

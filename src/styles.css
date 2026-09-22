@@ -109,6 +109,8 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .project-page.active { border-color: #5b5bd6; background: #eeeeff; }
 .project-page .page-status { width: max-content; border-radius: 999px; padding: .12rem .4rem; color: #775d12; background: #fff0bd; font-size: .64rem; font-weight: 700; }
 .project-page.saved .page-status { color: #16603f; background: #dff4e8; }
+.project-page.has-resource-failures { border-color: #d39434; background: #fff9ec; }
+.project-page .page-resource-failures { width: max-content; border-radius: 999px; padding: .12rem .4rem; color: #8b4d08; background: #ffe1a6; font-size: .64rem; font-weight: 700; }
 .project-page.changed { border-color: #d39434; background: #fff9ec; }
 .project-page.changed .page-status { color: #8b4d08; background: #ffe1a6; }
 .project-page.unavailable { border-color: #cc4b4b; background: #fff1f1; }

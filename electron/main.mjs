@@ -6,6 +6,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserTaskQueue } from "../src/browser-task-queue.js";
+import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -234,7 +235,8 @@ async function fetchResource(url, failures) {
   // copy.  Do not turn those expected omissions into capture warnings.
   const intentionallyExcluded = (contentType = "") => {
     const pathname = new URL(url, "https://example.com").pathname.toLowerCase();
-    return /\.(?:js|mjs|cjs)(?:$|\.)/.test(pathname)
+    return isTrackingResourceUrl(url)
+      || /\.(?:js|mjs|cjs)(?:$|\.)/.test(pathname)
       || /^(?:application|text)\/(?:x-)?(?:javascript|ecmascript)$/i.test(contentType)
       || /^text\/plain$/i.test(contentType);
   };
@@ -513,8 +515,11 @@ function portableInstallDirectory() {
 }
 
 function macInstallPath() {
-  if (process.platform !== "darwin" || !app.isPackaged) return "";
-  const appPath = path.resolve(process.execPath, "..", "..", "..");
+  if (process.platform !== "darwin") return "";
+  // This app is distributed as Resources/app rather than app.asar. In that
+  // layout Electron can report app.isPackaged as false, even from a DMG install.
+  // The app path itself reliably distinguishes an installed .app from dev mode.
+  const appPath = path.resolve(app.getAppPath(), "..", "..", "..");
   return path.extname(appPath) === ".app" ? appPath : "";
 }
 

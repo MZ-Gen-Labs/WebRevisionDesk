@@ -52,6 +52,7 @@ test("Electron selects macOS update ZIPs and starts the shell updater", async ()
   assert.match(source, /electron", "updater\.sh/);
   assert.match(source, /spawn\("\/bin\/sh"/);
   assert.match(source, /macInstallPath/);
+  assert.match(source, /path\.resolve\(app\.getAppPath\(\), "\.\.", "\.\.", "\.\."\)/);
 });
 
 test("BOM-prefixed updater parses in Windows PowerShell", { skip: process.platform !== "win32" }, async () => {
