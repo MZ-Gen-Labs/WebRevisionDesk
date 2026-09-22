@@ -168,9 +168,23 @@
         ></iframe>
       </section>
 
+      <div
+        id="inspector-resizer"
+        class="inspector-resizer"
+        role="separator"
+        aria-label="編集メニューの幅を調整"
+        aria-orientation="vertical"
+        aria-valuemin="220"
+        aria-valuemax="560"
+        tabindex="0"
+        title="左右へドラッグして編集メニューの幅を調整"
+      ></div>
       <aside class="inspector" aria-label="選択要素の編集">
         <div class="inspector-heading">
-          <p class="eyebrow">Edit menu</p>
+          <div class="inspector-heading-actions">
+            <p class="eyebrow">Edit menu</p>
+            <button id="collapse-inspector" class="icon-button" type="button" aria-label="編集メニューを閉じる" title="編集メニューを閉じる（Alt + 3）">×</button>
+          </div>
           <h2>編集メニュー</h2>
           <code id="element-label">未選択</code>
           <p id="selection-help" class="selection-help">ページ内の直したい文章や画像をクリックしてください。</p>
@@ -322,6 +336,7 @@
           <p>読み込んだページのスクリプト、フォーム送信、ポップアップは実行されません。</p>
         </div>
       </aside>
+      <button id="show-inspector" class="show-inspector" type="button" hidden aria-label="編集メニューを表示" title="編集メニューを表示（Alt + 3）">◀ 編集メニュー</button>
     </main>
 
     <dialog id="search-replace-dialog" class="search-replace-dialog">

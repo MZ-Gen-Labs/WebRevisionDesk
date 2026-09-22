@@ -74,6 +74,7 @@ const ui = {
   resourceFailures: $("#resource-failures"), resourceFailureList: $("#resource-failure-list"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
+  inspectorResizer: $("#inspector-resizer"), collapseInspector: $("#collapse-inspector"), showInspector: $("#show-inspector"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
   confirmPackageDownload: $("#confirm-package-download"),
   searchReplaceDialog: $("#search-replace-dialog"), searchReplaceConfig: $("#search-replace-config"),
@@ -130,6 +131,9 @@ function syncLoginControls() {
 }
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
+const INSPECTOR_WIDTH_KEY = "web-revision-inspector-width";
+const INSPECTOR_COLLAPSED_KEY = "web-revision-inspector-collapsed";
+const DEFAULT_INSPECTOR_WIDTH = 300;
 const PACKAGE_FILE_SELECTION_KEY = "web-revision-package-file-selection";
 const SEARCH_REPLACE_RULES_KEY = "web-revision-search-replace-rules";
 const AUTO_SAVE_DELAY_MS = 1200;
@@ -233,6 +237,57 @@ function initializeProjectSidebarResize() {
     setProjectSidebarWidth(next);
   });
   ui.projectSidebarResizer.addEventListener("dblclick", () => setProjectSidebarWidth(210));
+}
+
+function setInspectorWidth(width, { persist = true } = {}) {
+  const normalized = Math.round(Math.min(560, Math.max(220, width)));
+  ui.workspace.style.setProperty("--inspector-width", `${normalized}px`);
+  ui.inspectorResizer.setAttribute("aria-valuenow", String(normalized));
+  if (persist) localStorage.setItem(INSPECTOR_WIDTH_KEY, String(normalized));
+}
+
+function setInspectorCollapsed(collapsed, { persist = true } = {}) {
+  ui.workspace.classList.toggle("inspector-collapsed", collapsed);
+  ui.showInspector.hidden = !collapsed;
+  if (persist) localStorage.setItem(INSPECTOR_COLLAPSED_KEY, String(collapsed));
+}
+
+function initializeInspectorResize() {
+  const savedWidth = Number(localStorage.getItem(INSPECTOR_WIDTH_KEY));
+  setInspectorWidth(Number.isFinite(savedWidth) && savedWidth > 0 ? savedWidth : DEFAULT_INSPECTOR_WIDTH, { persist: false });
+  setInspectorCollapsed(localStorage.getItem(INSPECTOR_COLLAPSED_KEY) === "true", { persist: false });
+  ui.inspectorResizer.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startWidth = ui.inspector.getBoundingClientRect().width;
+    ui.workspace.classList.add("resizing-inspector");
+    ui.inspectorResizer.setPointerCapture(event.pointerId);
+    const move = (moveEvent) => {
+      const nextWidth = startWidth + startX - moveEvent.clientX;
+      if (nextWidth < 140) setInspectorCollapsed(true);
+      else setInspectorWidth(nextWidth, { persist: false });
+    };
+    const finish = () => {
+      ui.workspace.classList.remove("resizing-inspector");
+      ui.inspectorResizer.removeEventListener("pointermove", move);
+      ui.inspectorResizer.removeEventListener("pointerup", finish);
+      ui.inspectorResizer.removeEventListener("pointercancel", finish);
+      if (!ui.workspace.classList.contains("inspector-collapsed")) setInspectorWidth(ui.inspector.getBoundingClientRect().width);
+    };
+    ui.inspectorResizer.addEventListener("pointermove", move);
+    ui.inspectorResizer.addEventListener("pointerup", finish);
+    ui.inspectorResizer.addEventListener("pointercancel", finish);
+  });
+  ui.inspectorResizer.addEventListener("keydown", (event) => {
+    const current = ui.inspector.getBoundingClientRect().width;
+    const next = event.key === "ArrowLeft" ? current + 20 : event.key === "ArrowRight" ? current - 20 : event.key === "Home" ? 220 : event.key === "End" ? 560 : null;
+    if (next === null) return;
+    event.preventDefault();
+    setInspectorWidth(next);
+  });
+  ui.inspectorResizer.addEventListener("dblclick", () => setInspectorWidth(DEFAULT_INSPECTOR_WIDTH));
+  ui.collapseInspector.addEventListener("click", () => setInspectorCollapsed(true));
+  ui.showInspector.addEventListener("click", () => setInspectorCollapsed(false));
 }
 
 function positionSearchReplaceDialog(left, top) {
@@ -2729,6 +2784,11 @@ function handleKeyboardShortcut(event) {
       setSidebarPanel("outline");
       return;
     }
+    if (event.code === "Digit3") {
+      event.preventDefault();
+      setInspectorCollapsed(!ui.workspace.classList.contains("inspector-collapsed"));
+      return;
+    }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       if (moveSidebarSelection(event.key === "ArrowDown" ? 1 : -1)) event.preventDefault();
       return;
@@ -2950,6 +3010,7 @@ ui.loginCancel.addEventListener("click", () => finishLogin(false));
 ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
 initializeProjectSidebarResize();
+initializeInspectorResize();
 initializeSearchReplaceDialogMovement();
 initializePackageFileSelection();
 initializeSearchReplace();
