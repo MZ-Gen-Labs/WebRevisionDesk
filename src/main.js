@@ -86,6 +86,7 @@ const ui = {
   exportSearchRules: $("#export-search-rules"), importSearchRules: $("#import-search-rules"),
   searchRulesFile: $("#search-rules-file"),
   saveSearchRules: $("#save-search-rules"), startSearchReplace: $("#start-search-replace"),
+  replaceAllSearchRules: $("#replace-all-search-rules"), replaceSelectedPages: $("#replace-selected-pages"),
   searchReviewRule: $("#search-review-rule"), searchReviewProgress: $("#search-review-progress"),
   searchReviewContext: $("#search-review-context"), searchReviewBefore: $("#search-review-before"),
   searchReviewAfter: $("#search-review-after"), skipSearchMatch: $("#skip-search-match"),
@@ -1709,6 +1710,8 @@ ui.saveSearchRules.addEventListener("click", () => {
   setStatus(`検索・置換ルールを${searchReplaceRules.length}件保存しました。`, "success");
 });
 ui.startSearchReplace.addEventListener("click", () => { void startSearchReplace(); });
+ui.replaceAllSearchRules.addEventListener("click", () => { void replaceAllSearchRulesWithoutConfirmation(); });
+ui.replaceSelectedPages.addEventListener("click", () => { void replaceSelectedPagesWithoutConfirmation(); });
 ui.previewAllSearchRules.addEventListener("click", () => { void previewAllSearchRules(); });
 ui.backSearchOverviewSettings.addEventListener("click", () => {
   editor.clearSearchHighlight();
@@ -2335,6 +2338,98 @@ async function startSearchReplace() {
   if (!enabled) return;
   if (state.mode !== "modified") await render("modified");
   beginSearchReplaceSession(enabled);
+}
+
+async function applyAllSearchRulesWithoutConfirmation(rules) {
+  const previousSession = searchReplaceSession;
+  const session = { protectedRanges: new WeakMap() };
+  searchReplaceSession = session;
+  let replacements = 0;
+  try {
+    for (const rule of rules) {
+      for (const node of editor.getSearchTextNodes(rule)) {
+        // Replace from the end so offsets calculated from the current text node
+        // remain valid.  protectReplacementRange preserves the existing rule
+        // ordering rule for subsequent search rules.
+        const matches = applySearchExclusions(findTextMatches(node.data, rule), node, rule, session.protectedRanges)
+          .filter((match) => !match.excluded)
+          .sort((a, b) => b.index - a.index);
+        for (const match of matches) {
+          if (editor.replaceTextNodeMatch(node, match.index, match.length, match.replacement)) {
+            protectReplacementRange(node, match);
+            replacements += 1;
+          }
+        }
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  } finally {
+    searchReplaceSession = previousSession;
+  }
+  return replacements;
+}
+
+async function replaceAllSearchRulesWithoutConfirmation() {
+  const enabled = validateEnabledSearchRules();
+  if (!enabled) return;
+  setButtonProcessing(ui.replaceAllSearchRules, true);
+  try {
+    if (state.mode !== "modified") await render("modified");
+    const replacements = await applyAllSearchRulesWithoutConfirmation(enabled);
+    editor.clearSearchHighlight();
+    ui.searchReplaceDialog.close();
+    setStatus(`確認なしの一括全置換が完了しました。${replacements}件を置換しました。`, "success");
+  } catch (error) {
+    setStatus(`一括全置換に失敗しました: ${error.message}`, "error");
+  } finally {
+    setButtonProcessing(ui.replaceAllSearchRules, false);
+  }
+}
+
+async function replaceSelectedPagesWithoutConfirmation() {
+  const enabled = validateEnabledSearchRules();
+  if (!enabled) return;
+  const targets = listedProjectPages().filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  if (!targets.length) {
+    setStatus("ページ一覧で、保存済みページをチェックしてから実行してください。", "error");
+    return;
+  }
+  setButtonProcessing(ui.replaceSelectedPages, true);
+  state.batchRunning = true;
+  updateBatchControls();
+  let completed = 0;
+  let replacements = 0;
+  let failed = 0;
+  let fatalError = null;
+  try {
+    await flushAutoSave({ force: true });
+    ui.searchReplaceDialog.close();
+    for (let index = 0; index < targets.length; index += 1) {
+      const page = targets[index];
+      ui.batchProgress.textContent = `${targets.length}件中 ${index + 1}件目：${page.title} を置換中…`;
+      try {
+        await openProjectPage(page.id);
+        if (state.activeProjectPageId !== page.id) throw new Error(`「${page.title}」を開けませんでした。`);
+        if (state.mode !== "modified") await render("modified");
+        replacements += await applyAllSearchRulesWithoutConfirmation(enabled);
+        await flushAutoSave({ force: true, quiet: true });
+        completed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  } catch (error) {
+    fatalError = error;
+  } finally {
+    state.batchRunning = false;
+    setButtonProcessing(ui.replaceSelectedPages, false);
+    ui.batchProgress.textContent = `一括全置換 完了 ${completed}/${targets.length}ページ・置換 ${replacements}件${failed ? "・失敗あり" : ""}`;
+    renderProjectPages();
+    updateBatchControls();
+    if (fatalError) setStatus(`選択ページへの一括全置換で停止しました: ${fatalError.message}`, "error");
+    else if (!failed) setStatus(`選択した${completed}ページへの一括全置換が完了しました。合計${replacements}件を置換しました。`, "success");
+    else setStatus(`選択ページへの一括全置換が完了しました。${completed}ページ・合計${replacements}件を置換し、${failed}ページは処理できませんでした。`, "error");
+  }
 }
 
 function packageFileInputs() {

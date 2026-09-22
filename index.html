@@ -324,7 +324,7 @@
           <button value="cancel" type="submit" aria-label="閉じる">閉じる</button>
         </div>
         <section id="search-replace-config">
-          <p class="search-replace-help">上から順に検索し、候補ごとに置換するか確認します。上位ルールが置換した範囲は下位ルールで再置換しません。「本文を自動判定」は記事領域を優先し、ヘッダー・ナビ・フッター等を除外します。より厳密に絞る場合はCSSセレクターを指定できます。前後の条件は検索文字列との最大間隔で判定し、改行区切りの条件をORまたはANDで組み合わせます。間隔0は文字列同士が隣接している状態です。</p>
+          <p class="search-replace-help">上から順に検索し、候補ごとに置換するか確認します。上位ルールが置換した範囲は下位ルールで再置換しません。「本文を自動判定」は記事領域を優先し、ヘッダー・ナビ・フッター等を除外します。より厳密に絞る場合はCSSセレクターを指定できます。前後の条件は検索文字列との最大間隔で判定し、改行区切りの条件をORまたはANDで組み合わせます。間隔0は文字列同士が隣接している状態です。一括全置換は確認なしで直ちに適用します。</p>
           <div class="search-rule-toolbar">
             <button id="add-search-rule" type="button">ルールを追加</button>
             <button id="export-search-rules" type="button">条件をファイルに保存</button>
@@ -337,6 +337,8 @@
             <button id="save-search-rules" type="button">設定を保存</button>
             <button id="preview-all-search-rules" type="button">全ルールの検出結果を確認</button>
             <button id="start-search-replace" class="button-primary" type="button">上から確認を開始</button>
+            <button id="replace-all-search-rules" type="button">一括全置換（確認なし）</button>
+            <button id="replace-selected-pages" type="button">選択ページへ一括全置換</button>
           </div>
         </section>
         <section id="search-replace-overview" class="search-replace-overview" hidden>

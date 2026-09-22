@@ -227,10 +227,19 @@ async function inspectContents(contents) {
 }
 
 async function fetchResource(url, failures) {
+  // Script and beacon requests are deliberately not embedded in the offline
+  // copy.  Do not turn those expected omissions into capture warnings.
+  const intentionallyExcluded = (contentType = "") => {
+    const pathname = new URL(url, "https://example.com").pathname.toLowerCase();
+    return /\.(?:js|mjs|cjs)(?:$|\.)/.test(pathname)
+      || /^(?:application|text)\/(?:x-)?(?:javascript|ecmascript)$/i.test(contentType)
+      || /^text\/plain$/i.test(contentType);
+  };
   const addFailure = (reason) => {
     if (failures.length >= 20) return;
     failures.push({ url: redactUrl(url).slice(0, 240), reason: String(reason || "取得に失敗").slice(0, 160) });
   };
+  if (intentionallyExcluded()) return null;
   try {
     const response = await captureSession.fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!response.ok) {
@@ -257,6 +266,7 @@ async function fetchResource(url, failures) {
       }
     }
     if (!(contentType === "text/css" || /^(image|font|audio|video)\//i.test(contentType) || /font/i.test(contentType))) {
+      if (intentionallyExcluded(contentType)) return null;
       addFailure(`非対応のContent-Type (${contentType || "不明"})`);
       return null;
     }
