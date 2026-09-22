@@ -48,9 +48,14 @@
       <div class="setup-content">
     <section class="project-bar" aria-label="案件フォルダ管理">
       <button id="select-project-folder" class="button-primary" type="button">案件フォルダを選択</button>
-      <label>案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
-      <label>基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
-      <button id="crawl-project-pages" type="button" disabled>関連ページを探す</button>
+      <label class="project-name-input">案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
+      <label class="project-base-url-input">基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
+      <button id="crawl-project-pages" type="button" disabled>関連ページ</button>
+      <div class="pipeline-options" aria-label="関連ページの連動処理">
+        <label class="pipeline-option"><input id="crawl-capture-pages" type="checkbox" disabled /> ページ取得</label>
+        <label class="pipeline-option"><input id="crawl-replace-pages" type="checkbox" disabled /> 検索置換</label>
+      </div>
+      <button id="cancel-pipeline" class="danger-button" type="button" hidden>中断</button>
       <span id="project-state">案件フォルダ未選択</span>
     </section>
     <section id="recent-projects" class="recent-projects" aria-label="最近開いた案件" hidden>

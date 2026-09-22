@@ -42,6 +42,7 @@ const ui = {
   recentProjects: $("#recent-projects"), recentProjectList: $("#recent-project-list"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
+  crawlCapturePages: $("#crawl-capture-pages"), crawlReplacePages: $("#crawl-replace-pages"), cancelPipeline: $("#cancel-pipeline"),
   projectState: $("#project-state"), projectPages: $("#project-pages"), projectPageCount: $("#project-page-count"),
   showProjectList: $("#show-project-list"), showHeadingOutline: $("#show-heading-outline"),
   projectListPanel: $("#project-list-panel"), headingOutlinePanel: $("#heading-outline-panel"),
@@ -103,6 +104,7 @@ const state = {
   projectSelectionAnchorUrl: "",
   selectedProjectUrls: new Set(), batchRunning: false, queuedCaptureUrls: new Set(), activeCaptureUrl: "",
   unavailableProjectUrls: new Set(),
+  pipelineCancelled: false,
   resourceFailures: [],
 };
 let captureSessionId = "";
@@ -110,6 +112,7 @@ let loginSessionId = "";
 let loginReady = false;
 let loginBusy = false;
 let interactiveCaptureQueue = Promise.resolve();
+let pipelineRunning = false;
 
 function loginBlocked() {
   return loginBusy || Boolean(loginSessionId) || (ui.loginRequired.checked && !loginReady);
@@ -650,7 +653,10 @@ function syncProjectControls() {
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
-  ui.crawlProjectPages.disabled = !hasProject || loginBlocked();
+  ui.crawlProjectPages.disabled = !hasProject || loginBlocked() || pipelineRunning;
+  ui.crawlCapturePages.disabled = !hasProject || loginBlocked() || pipelineRunning;
+  ui.crawlReplacePages.disabled = !hasProject || loginBlocked() || pipelineRunning;
+  ui.cancelPipeline.hidden = !pipelineRunning;
   ui.manualPageUrl.disabled = !hasProject;
   ui.addProjectUrl.disabled = !hasProject || !ui.manualPageUrl.value.trim();
   ui.file.disabled = !hasProject;
@@ -1578,29 +1584,101 @@ ui.saveProjectPage.addEventListener("click", async () => {
   }
 });
 
-ui.crawlProjectPages.addEventListener("click", async () => {
+async function crawlRelatedPages() {
+  projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
+  await projectStore.saveProject();
+  ui.projectState.textContent = "基準URL配下を検索しています…";
+  const response = await postJson("/api/crawl", { baseUrl: projectStore.project.baseUrl, maxPages: 100 });
+  const result = await response.json();
+  await projectStore.mergeDiscoveredPages(result.pages);
+  renderProjectPages();
+  const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
+  const limitText = result.truncated ? "（100件で打ち切り）" : "";
+  ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
+  return { result, message: `配下ページを${result.pages.length}件確認しました${errorText}${limitText}` };
+}
+
+async function runRelatedPagesPipeline() {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
+  if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてから実行してください。", "error");
+  const capture = ui.crawlCapturePages.checked;
+  const replace = ui.crawlReplacePages.checked;
+  pipelineRunning = true;
+  state.pipelineCancelled = false;
+  state.batchRunning = true;
+  ui.cancelPipeline.disabled = false;
   setButtonProcessing(ui.crawlProjectPages, true);
+  ui.batchProgress.classList.add("is-processing");
+  syncProjectControls();
+  let captured = 0;
+  let replacedPages = 0;
+  let replacements = 0;
+  let failed = 0;
   try {
-    projectStore.setMetadata({ projectName: ui.projectName.value, baseUrl: ui.projectBaseUrl.value });
-    await projectStore.saveProject();
-    ui.projectState.textContent = "基準URL配下を検索しています…";
-    setStatus("リンクをたどって配下ページを検索しています。ページ数によって時間がかかります。", "info");
-    const response = await postJson("/api/crawl", { baseUrl: projectStore.project.baseUrl, maxPages: 100 });
-    const result = await response.json();
-    await projectStore.mergeDiscoveredPages(result.pages);
-    renderProjectPages();
-    const errorText = result.errors.length ? `、取得失敗 ${result.errors.length}件` : "";
-    const limitText = result.truncated ? "（100件で打ち切り）" : "";
-    ui.projectState.textContent = `${projectStore.project.projectName}：候補${projectStore.project.discoveredPages.length}ページ`;
-    setStatus(`配下ページを${result.pages.length}件確認しました${errorText}${limitText}。未取得ページをクリックすると画像プレビューを表示します。`, "success");
+    setStatus("関連ページ処理中です。探索・取得・検索置換を順番に実行しています。", "info");
+    ui.batchProgress.textContent = "[1/3 関連ページ探索中]";
+    const crawled = await crawlRelatedPages();
+    if (state.pipelineCancelled) return;
+    if (capture) {
+      const targets = listedProjectPages().filter((page) => !page.saved);
+      for (let index = 0; index < targets.length; index += 1) {
+        if (state.pipelineCancelled) return;
+        const page = targets[index];
+        ui.batchProgress.textContent = `[2/3 ページ取得中] ${index + 1}/${targets.length}：${page.title}`;
+        setStatus(`関連ページ処理中です。ページ取得 ${index + 1}/${targets.length} を実行しています。`, "info");
+        try {
+          const capturedPage = await captureUrlDirectly(page.url);
+          await projectStore.savePage({ fileName: capturedPage.fileName, sourceUrl: capturedPage.url, originalHtml: capturedPage.html, workingHtml: capturedPage.html, changes: [], resourceFailures: capturedPage.resourceFailures });
+          captured += 1;
+        } catch { failed += 1; }
+        renderProjectPages();
+      }
+    }
+    if (replace && !state.pipelineCancelled) {
+      searchReplaceRules = readSearchRulesFromForm();
+      const rules = searchReplaceRules.filter((rule) => rule.enabled && rule.search);
+      if (!rules.length) {
+        setStatus("検索置換は有効なルールがないためスキップしました。", "info");
+      } else {
+        for (const rule of rules) validateSearchReplaceRule(rule);
+        const targets = listedProjectPages().filter((page) => page.saved);
+        for (let index = 0; index < targets.length; index += 1) {
+          if (state.pipelineCancelled) return;
+          const page = targets[index];
+          ui.batchProgress.textContent = `[3/3 検索置換中] ${index + 1}/${targets.length}：${page.title}`;
+          setStatus(`関連ページ処理中です。検索置換 ${index + 1}/${targets.length} を実行しています。`, "info");
+          try {
+            await openProjectPage(page.id);
+            if (state.activeProjectPageId !== page.id) throw new Error("ページを開けませんでした。");
+            if (state.mode !== "modified") await render("modified");
+            replacements += await applyAllSearchRulesWithoutConfirmation(rules);
+            await flushAutoSave({ force: true, quiet: true });
+            replacedPages += 1;
+          } catch { failed += 1; }
+        }
+      }
+    }
+    setStatus(`${crawled.message}。取得 ${captured}件、置換 ${replacedPages}ページ・${replacements}件${failed ? `、失敗 ${failed}件` : ""}です。`, failed ? "error" : "success");
   } catch (error) {
     ui.projectState.textContent = "配下ページの検索に失敗しました";
-    setStatus(`配下ページを検索できませんでした: ${error.message}`, "error");
+    setStatus(`関連ページ処理に失敗しました: ${error.message}`, "error");
   } finally {
+    const cancelled = state.pipelineCancelled;
+    pipelineRunning = false;
+    state.batchRunning = false;
     setButtonProcessing(ui.crawlProjectPages, false);
+    ui.batchProgress.classList.remove("is-processing");
+    if (cancelled) setStatus(`処理を中断しました。取得 ${captured}件、置換 ${replacedPages}ページ・${replacements}件を完了しています。`, "info");
+    renderProjectPages();
     syncProjectControls();
   }
+}
+
+ui.crawlProjectPages.addEventListener("click", () => { void runRelatedPagesPipeline(); });
+ui.cancelPipeline.addEventListener("click", () => {
+  state.pipelineCancelled = true;
+  ui.cancelPipeline.disabled = true;
+  ui.batchProgress.textContent = "現在のページ処理が完了後に中断します…";
 });
 
 ui.addProjectUrl.addEventListener("click", async () => {
