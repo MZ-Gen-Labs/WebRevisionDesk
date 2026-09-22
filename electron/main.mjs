@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
@@ -551,14 +551,44 @@ async function downloadUpdate() {
   return { ...update, downloaded: true };
 }
 
-function applyDownloadedUpdate() {
+async function applyDownloadedUpdate() {
   if (!downloadedUpdate?.zipPath || !portableInstallDirectory()) throw new Error("適用できる更新ファイルがありません。");
-  const script = path.join(rootDirectory, "electron", "updater.ps1");
-  const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
+  const sourceScript = path.join(rootDirectory, "electron", "updater.ps1");
+  const updaterDirectory = path.join(app.getPath("temp"), "WebRevisionDesk");
+  const script = path.join(updaterDirectory, `updater-${randomUUID()}.ps1`);
+  await mkdir(updaterDirectory, { recursive: true });
+  const scriptBody = (await readFile(sourceScript, "utf8")).replace(/^\uFEFF/, "");
+  // Windows PowerShell 5.1 treats BOM-less UTF-8 scripts as the active ANSI
+  // code page, which corrupts Japanese strings before the script can run.
+  await writeFile(script, `\uFEFF${scriptBody}`, "utf8");
+  const powershell = process.env.SystemRoot
+    ? path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    : "powershell.exe";
+  const quoteWindowsArg = (value) => `"${String(value).replaceAll('"', '""')}"`;
+  const launcherScript = path.join(updaterDirectory, `launch-${randomUUID()}.cmd`);
+  const updaterArguments = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script,
     "-ProcessId", String(process.pid), "-InstallDirectory", downloadedUpdate.installDirectory,
-    "-ZipPath", downloadedUpdate.zipPath, "-Sha256", downloadedUpdate.sha256, "-ExecutableName", path.basename(process.execPath)], {
+    "-ZipPath", downloadedUpdate.zipPath, "-Sha256", downloadedUpdate.sha256,
+    "-ExecutableName", path.basename(process.execPath), "-TemporaryScriptPath", script,
+    "-TemporaryLauncherPath", launcherScript];
+  const updaterCommand = updaterArguments.map(quoteWindowsArg).join(" ");
+  await writeFile(launcherScript, `@echo off\r\nstart "" /b ${quoteWindowsArg(powershell)} ${updaterCommand}\r\n`, "ascii");
+  const launcher = process.env.ComSpec || "cmd.exe";
+  const child = spawn(launcher, ["/d", "/c", launcherScript], {
+    cwd: updaterDirectory,
     detached: true, stdio: "ignore", windowsHide: true,
   });
+  child.once("error", (error) => {
+    void record("update-process-error", { message: error.message, script });
+  });
+  void record("update-process-started", { pid: child.pid, script });
+  await new Promise((resolve) => {
+    child.once("spawn", resolve);
+    child.once("error", resolve);
+  });
+  // Let Windows finish creating the detached process before the Electron
+  // parent exits; otherwise the child can be torn down with the app process.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   child.unref();
   allowMainWindowClose = true;
   app.quit();
@@ -618,7 +648,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
   }
   if (method === "GET" && url === "/api/update/check") return jsonResponse(await checkForUpdate());
   if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate());
-  if (method === "POST" && url === "/api/update/apply") return jsonResponse(applyDownloadedUpdate());
+  if (method === "POST" && url === "/api/update/apply") return jsonResponse(await applyDownloadedUpdate());
   if (method === "POST" && url === "/api/capture/start") {
     const metadata = await openCapturePage(body.url, { show: true });
     activeCaptureSessionId = crypto.randomUUID();
