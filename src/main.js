@@ -433,13 +433,16 @@ async function loadAppInfo() {
 let availableUpdate = null;
 
 async function checkForApplicationUpdate({ quiet = false } = {}) {
+  ui.updateControls.hidden = false;
   setButtonProcessing(ui.checkUpdate, true);
   try {
     const response = await appFetch("/api/update/check", { cache: "no-store" });
     if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
     const update = await response.json();
-    if (!update.supported) return;
-    ui.updateControls.hidden = false;
+    if (!update.supported) {
+      ui.updateStatus.textContent = "この起動方法ではアプリ内更新を利用できません";
+      return;
+    }
     availableUpdate = update.available ? update : null;
     ui.downloadUpdate.hidden = !update.available;
     ui.applyUpdate.hidden = true;
@@ -2974,7 +2977,10 @@ window.addEventListener("beforeunload", (event) => {
 });
 
 loadAppInfo();
-if (globalThis.webRevisionDesktop?.request) void checkForApplicationUpdate({ quiet: true });
+if (globalThis.webRevisionDesktop?.request) {
+  ui.updateControls.hidden = false;
+  void checkForApplicationUpdate({ quiet: true });
+}
 ui.loginRequired.addEventListener("change", async () => {
   loginReady = false;
   syncLoginControls();
