@@ -22,10 +22,14 @@ try {
   }
   New-Item -ItemType Directory -Path $stage | Out-Null
   Expand-Archive -LiteralPath $ZipPath -DestinationPath $stage -Force
-  if (-not (Test-Path -LiteralPath (Join-Path $stage $ExecutableName))) { throw "更新ファイルに実行ファイルがありません。" }
+  # Current archives contain a stable WebRevisionDesk/ top-level directory.
+  # Accept the earlier root-level format too so upgrades from old releases work.
+  $payload = Join-Path $stage "WebRevisionDesk"
+  if (-not (Test-Path -LiteralPath (Join-Path $payload $ExecutableName))) { $payload = $stage }
+  if (-not (Test-Path -LiteralPath (Join-Path $payload $ExecutableName))) { throw "更新ファイルに実行ファイルがありません。" }
   Move-Item -LiteralPath $InstallDirectory -Destination $backup
   try {
-    Move-Item -LiteralPath $stage -Destination $InstallDirectory
+    Move-Item -LiteralPath $payload -Destination $InstallDirectory
   } catch {
     Move-Item -LiteralPath $backup -Destination $InstallDirectory
     throw

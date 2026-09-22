@@ -225,7 +225,7 @@ npm run build:electron:win
 - `SHA256SUMS.txt`：配布物のSHA-256
 - `release.json`：バージョンと配布ZIPのSHA-256を含む更新用メタデータ
 
-ZIPを展開し、`Start-WebRevisionDesk.cmd`を実行すると起動します。Windowsのポータブル版では起動時または「更新を確認」からGitHub Releaseの最新版を確認できます。更新ZIPはSHA-256を照合してからダウンロードされ、「再起動して更新」を選ぶと終了後に置換・再起動します。更新失敗時は既存フォルダを復元するため、元のバージョンを維持します。GitHub ReleaseにはZIP、`SHA256SUMS.txt`、`release.json`を添付します。
+ZIPには固定名の `WebRevisionDesk` フォルダが1つ含まれます。これを任意の場所へ展開し、`Start-WebRevisionDesk.cmd`を実行すると起動します。Windowsのポータブル版では起動時または「更新を確認」からGitHub Releaseの最新版を確認できます。更新ZIPはSHA-256を照合してからダウンロードされ、「再起動して更新」を選ぶと終了後に置換・再起動します。更新失敗時は既存フォルダを復元するため、元のバージョンを維持します。GitHub ReleaseにはZIP、`SHA256SUMS.txt`、`release.json`を添付します。
 
 ## 安全性と制約
 

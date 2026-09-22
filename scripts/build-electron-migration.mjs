@@ -17,7 +17,9 @@ const releaseRoot = path.join(root, formalRelease ? "release-electron" : "releas
 const directoryName = formalRelease
   ? `WebRevisionDesk-${packageJson.version}-electron-win-x64`
   : `WebRevisionDesk-${packageJson.version}-electron-migration-win-x64`;
-const stage = path.join(releaseRoot, directoryName);
+// The archive filename remains versioned, while its contents use this stable
+// directory name so extracted installations and their shortcuts keep a fixed path.
+const stage = path.join(releaseRoot, "WebRevisionDesk");
 const application = path.join(stage, "resources", "app");
 const zipPath = path.join(releaseRoot, `${directoryName}.zip`);
 const electronDistribution = path.join(root, "node_modules", "electron", "dist");
@@ -63,7 +65,7 @@ await rename(path.join(stage, "electron.exe"), path.join(stage, executableName))
 const quotePowerShell = (value) => `'${String(value).replaceAll("'", "''")}'`;
 await run("powershell.exe", [
   "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
-  `Compress-Archive -Path (Join-Path ${quotePowerShell(stage)} '*') -DestinationPath ${quotePowerShell(zipPath)} -CompressionLevel Optimal -Force`,
+  `Compress-Archive -Path ${quotePowerShell(stage)} -DestinationPath ${quotePowerShell(zipPath)} -CompressionLevel Optimal -Force`,
 ], { cwd: root });
 
 const digest = createHash("sha256").update(await readFile(zipPath)).digest("hex");
