@@ -28,6 +28,8 @@ test("updater records progress and displays failures", async () => {
   assert.match(source, /TemporaryScriptPath/);
   assert.match(source, /uninstallerBackup/);
   assert.match(source, /Filter "unins\*"/);
+  assert.match(source, /Remove-Item -LiteralPath \$ZipPath -Force/);
+  assert.match(source, /\$ZipPath\.retry/);
 });
 
 test("Windows installer is per-user and installs the portable payload", async () => {
@@ -44,6 +46,8 @@ test("macOS updater verifies, replaces, and relaunches the app bundle", async ()
   assert.match(source, /open -n/);
   assert.match(source, /Library\/Logs\/WebRevisionDesk/);
   assert.match(source, /osascript/);
+  assert.match(source, /ZIP_PATH\.retry/);
+  assert.match(source, /rm -f "\$ZIP_PATH" "\$ZIP_PATH\.retry"/);
 });
 
 test("Electron selects macOS update ZIPs and starts the shell updater", async () => {
@@ -53,6 +57,8 @@ test("Electron selects macOS update ZIPs and starts the shell updater", async ()
   assert.match(source, /spawn\("\/bin\/sh"/);
   assert.match(source, /macInstallPath/);
   assert.match(source, /path\.resolve\(app\.getAppPath\(\), "\.\.", "\.\.", "\.\."\)/);
+  assert.match(source, /cleanupUpdateArtifacts/);
+  assert.match(source, /stale-update-archive/);
 });
 
 test("BOM-prefixed updater parses in Windows PowerShell", { skip: process.platform !== "win32" }, async () => {

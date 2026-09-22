@@ -88,14 +88,31 @@ try {
   Remove-Item -LiteralPath $backup -Recurse -Force
   Write-UpdaterLog "更新ファイルをインストール先へ配置しました。"
   Start-Process -FilePath (Join-Path $InstallDirectory $ExecutableName) -WorkingDirectory $InstallDirectory
+  try {
+    Remove-Item -LiteralPath $ZipPath -Force -ErrorAction Stop
+    Remove-Item -LiteralPath "$ZipPath.retry" -Force -ErrorAction SilentlyContinue
+    Write-UpdaterLog "適用済みの更新ファイルを削除しました。"
+  } catch {
+    Write-UpdaterLog "適用済みの更新ファイルを削除できませんでした: $($_.Exception.Message)"
+  }
   Write-UpdaterLog "更新後のアプリケーションを起動しました。"
 } catch {
   $message = "Web Revision Desk の更新に失敗しました: $($_.Exception.Message)"
+  try {
+    if (Test-Path -LiteralPath $ZipPath) {
+      Set-Content -LiteralPath "$ZipPath.retry" -Encoding UTF8 -Value "retry"
+    }
+  } catch {
+    Write-UpdaterLog "再試行用の更新ファイルを記録できませんでした: $($_.Exception.Message)"
+  }
   Write-UpdaterLog $message
   Show-UpdateError "$message`n`nログ: $logPath"
   Write-Error $message
 } finally {
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+  if ((Test-Path -LiteralPath $backup) -and (Test-Path -LiteralPath $InstallDirectory)) {
+    Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue
+  }
   if ($TemporaryScriptPath -and (Test-Path -LiteralPath $TemporaryScriptPath)) {
     Remove-Item -LiteralPath $TemporaryScriptPath -Force -ErrorAction SilentlyContinue
   }

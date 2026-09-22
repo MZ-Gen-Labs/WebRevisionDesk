@@ -25,6 +25,9 @@ BACKUP="${INSTALL_PATH}.backup-$$"
 
 log() { mkdir -p "$LOG_DIRECTORY"; printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$1" >> "$LOG_PATH"; }
 fail() {
+  if [ -n "$ZIP_PATH" ] && [ -f "$ZIP_PATH" ]; then
+    : > "$ZIP_PATH.retry" 2>/dev/null || true
+  fi
   log "更新に失敗しました: $1"
   osascript -e "display alert \"Web Revision Desk\" message \"更新に失敗しました: $1\\n\\nログ: $LOG_PATH\" as critical" >/dev/null 2>&1 || true
   exit 1
@@ -52,3 +55,8 @@ fi
 rm -rf "$BACKUP"
 log "更新を適用しました。再起動します。"
 open -n "$INSTALL_PATH" || fail "更新後のアプリを起動できません。"
+if ! rm -f "$ZIP_PATH" "$ZIP_PATH.retry"; then
+  log "適用済みの更新ファイルを削除できませんでした。"
+else
+  log "適用済みの更新ファイルを削除しました。"
+fi

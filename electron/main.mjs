@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, writeFile, stat, rm } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile, stat, rm, readdir } from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -527,6 +527,91 @@ function updateInstallPath() {
   return process.platform === "darwin" ? macInstallPath() : portableInstallDirectory();
 }
 
+const updateZipPattern = /^WebRevisionDesk-\d+\.\d+\.\d+-(?:mac-(?:arm64|x64)|electron-win-x64)\.zip(?:\.part)?$/;
+
+async function removeUpdateArtifact(target, type) {
+  try {
+    await rm(target, { recursive: true, force: true });
+    await record("update-cleanup-removed", { type, target: path.basename(target) });
+  } catch (error) {
+    await record("update-cleanup-failed", { type, target: path.basename(target), message: error.message });
+  }
+}
+
+async function cleanupUpdatesDirectory() {
+  const directory = path.join(app.getPath("userData"), "updates");
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== "ENOENT") await record("update-cleanup-failed", { type: "updates-directory", message: error.message });
+    return;
+  }
+  const names = new Set(entries.map((entry) => entry.name));
+  await Promise.all(entries.map(async (entry) => {
+    const baseName = entry.name.replace(/\.retry$/, "");
+    if (!updateZipPattern.test(baseName)) return;
+    // A failed update keeps its archive so the user can retry without another
+    // download. Orphaned markers and all unmarked old archives are disposable.
+    if (entry.name.endsWith(".retry")) {
+      if (!names.has(baseName)) await removeUpdateArtifact(path.join(directory, entry.name), "orphaned-retry-marker");
+      return;
+    }
+    if (!names.has(`${entry.name}.retry`)) await removeUpdateArtifact(path.join(directory, entry.name), "stale-update-archive");
+  }));
+}
+
+async function cleanupInstallResidue(installPath) {
+  if (!installPath) return;
+  try {
+    await stat(installPath);
+  } catch {
+    return;
+  }
+  const parent = path.dirname(installPath);
+  const macBackup = `${path.basename(installPath)}.backup-`;
+  let entries;
+  try {
+    entries = await readdir(parent, { withFileTypes: true });
+  } catch (error) {
+    await record("update-cleanup-failed", { type: "install-directory", message: error.message });
+    return;
+  }
+  await Promise.all(entries
+    .filter((entry) => entry.name.startsWith(".WebRevisionDesk-update-")
+      || entry.name.startsWith(".WebRevisionDesk-backup-")
+      || (process.platform === "darwin" && entry.name.startsWith(macBackup)))
+    .map((entry) => removeUpdateArtifact(path.join(parent, entry.name), "stale-install-residue")));
+}
+
+async function cleanupTemporaryUpdaterFiles() {
+  const directory = path.join(app.getPath("temp"), "WebRevisionDesk");
+  let entries = [];
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code !== "ENOENT") await record("update-cleanup-failed", { type: "temporary-updater-directory", message: error.message });
+  }
+  await Promise.all(entries
+    .filter((entry) => /^(?:updater-[0-9a-f-]+\.(?:ps1|sh)|launch-[0-9a-f-]+\.cmd)$/i.test(entry.name))
+    .map((entry) => removeUpdateArtifact(path.join(directory, entry.name), "temporary-updater-script")));
+  if (process.platform === "darwin") {
+    const tempDirectory = app.getPath("temp");
+    try {
+      const tempEntries = await readdir(tempDirectory, { withFileTypes: true });
+      await Promise.all(tempEntries
+        .filter((entry) => entry.isDirectory() && /^WebRevisionDesk-update\./.test(entry.name))
+        .map((entry) => removeUpdateArtifact(path.join(tempDirectory, entry.name), "stale-macos-update-stage")));
+    } catch (error) {
+      if (error.code !== "ENOENT") await record("update-cleanup-failed", { type: "macos-update-stage", message: error.message });
+    }
+  }
+}
+
+async function cleanupUpdateArtifacts() {
+  await Promise.all([cleanupUpdatesDirectory(), cleanupInstallResidue(updateInstallPath()), cleanupTemporaryUpdaterFiles()]);
+}
+
 function updateAssetPattern() {
   if (process.platform === "darwin") {
     const arch = process.arch === "arm64" ? "arm64" : "x64";
@@ -568,6 +653,7 @@ async function downloadUpdate() {
   const updatesDirectory = path.join(app.getPath("userData"), "updates");
   await mkdir(updatesDirectory, { recursive: true });
   const zipPath = path.join(updatesDirectory, update.zipName);
+  await rm(`${zipPath}.retry`, { force: true });
   await writeFile(zipPath, body);
   downloadedUpdate = { ...update, zipPath, sha256: actual, installDirectory: updateInstallPath() };
   await record("update-downloaded", { version: update.version });
@@ -1030,6 +1116,7 @@ app.whenReady().then(async () => {
     return net.fetch(pathToFileURL(filePath).href);
   });
   registerIpc();
+  await cleanupUpdateArtifacts();
   await record("application-started", { version: packageJson.version, electron: process.versions.electron });
   if (process.argv.includes("--feasibility-smoke-test")) {
     await createMainWindow({ show: false });
