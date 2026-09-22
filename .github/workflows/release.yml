@@ -128,7 +128,7 @@ jobs:
       - name: Publish GitHub Release
         run: |
           find artifacts -name SHA256SUMS.txt -exec cat {} \; > SHA256SUMS.txt
-          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.dmg' \) -print)
+          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.dmg' -o -name '*-Setup.exe' \) -print)
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 && exists=true || exists=false
           if [ "$exists" = true ]; then
             gh release upload "$RELEASE_TAG" $files SHA256SUMS.txt --clobber

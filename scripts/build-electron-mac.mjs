@@ -28,8 +28,11 @@ try {
 }
 
 await rm(releaseRoot, { recursive: true, force: true });
+// `ditto` preserves the relative framework symlinks in Electron.app. Node's
+// `cp` rewrites them as absolute paths to the build workspace, which makes the
+// distributed application unloadable on another Mac.
+await run("ditto", [electronApp, appBundle]);
 await mkdir(path.join(application, "src"), { recursive: true });
-await cp(electronApp, appBundle, { recursive: true, verbatimSymlinks: true });
 await Promise.all([
   cp(path.join(root, "electron"), path.join(application, "electron"), { recursive: true }),
   cp(path.join(root, "dist"), path.join(application, "dist"), { recursive: true }),
@@ -48,9 +51,10 @@ await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleVersion ${packageJson.
 // Resource changes invalidate Electron's bundled signature. An ad-hoc signature
 // keeps the unsigned distribution runnable without an Apple Developer account.
 await run("codesign", ["--force", "--deep", "--sign", "-", appBundle]);
+await run("codesign", ["--verify", "--deep", "--strict", appBundle]);
 await run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appBundle, zipPath]);
 await mkdir(dmgRoot, { recursive: true });
-await cp(appBundle, path.join(dmgRoot, "WebRevisionDesk.app"), { recursive: true });
+await run("ditto", [appBundle, path.join(dmgRoot, "WebRevisionDesk.app")]);
 await run("ln", ["-s", "/Applications", path.join(dmgRoot, "Applications")]);
 await run("hdiutil", ["create", "-volname", "Web Revision Desk", "-srcfolder", dmgRoot, "-ov", "-format", "UDZO", dmgPath]);
 const lines = await Promise.all([zipPath, dmgPath].map(async (file) => `${createHash("sha256").update(await readFile(file)).digest("hex")}  ${path.basename(file)}`));
