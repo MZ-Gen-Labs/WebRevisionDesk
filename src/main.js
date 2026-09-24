@@ -15,6 +15,13 @@ import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
 import { LATEST_RELEASE_URL } from "./release-links.js";
 import {
+  DEFAULT_CANVAS_ZOOM,
+  MAX_CANVAS_ZOOM,
+  MIN_CANVAS_ZOOM,
+  normalizeCanvasZoom,
+  stepCanvasZoom,
+} from "./canvas-zoom.js";
+import {
   DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
   MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
   MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
@@ -25,7 +32,9 @@ const $ = (selector) => document.querySelector(selector);
 const ui = {
   loginRequired: $("#login-required"), loginOpen: $("#login-open"), loginDone: $("#login-done"),
   loginCancel: $("#login-cancel"), loginState: $("#login-state"),
-  file: $("#html-file"), htmlImportButton: $("#html-import-button"), frame: $("#page-frame"), empty: $("#empty-state"), status: $("#status"),
+  file: $("#html-file"), htmlImportButton: $("#html-import-button"), frame: $("#page-frame"), canvasViewport: $("#canvas-viewport"),
+  canvasZoomOut: $("#canvas-zoom-out"), canvasZoomReset: $("#canvas-zoom-reset"), canvasZoomIn: $("#canvas-zoom-in"),
+  empty: $("#empty-state"), status: $("#status"),
   fileName: $("#file-name"), badge: $("#mode-badge"), original: $("#show-original"),
   modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"),
   searchReplace: $("#search-replace"), download: $("#download"),
@@ -122,6 +131,7 @@ const state = {
   unavailableProjectUrls: new Set(),
   pipelineCancelled: false,
   resourceFailures: [],
+  canvasZoom: DEFAULT_CANVAS_ZOOM,
 };
 let captureSessionId = "";
 let loginSessionId = "";
@@ -455,6 +465,10 @@ function relaySearchDialogWheel(event) {
   editor.scrollBy(event.deltaX, event.deltaY);
 }
 
+window.addEventListener("wheel", (event) => {
+  if (!ui.canvasViewport.contains(event.target)) return;
+  handleCanvasWheel(event);
+}, { capture: true, passive: false });
 window.addEventListener("wheel", relaySearchDialogWheel, { capture: true, passive: false });
 
 async function loadAppInfo() {
@@ -906,6 +920,52 @@ function setMode(mode) {
   updateUndoControls();
 }
 
+function syncCanvasZoom() {
+  const zoom = normalizeCanvasZoom(state.canvasZoom);
+  state.canvasZoom = zoom;
+  const scale = zoom / 100;
+  ui.canvasZoomReset.textContent = `${zoom}%`;
+  ui.canvasZoomReset.dataset.zoomed = String(zoom !== DEFAULT_CANVAS_ZOOM);
+  ui.canvasZoomReset.setAttribute("aria-label", `表示倍率${zoom}%。クリックして100%に戻す`);
+  ui.canvasZoomOut.disabled = zoom <= MIN_CANVAS_ZOOM;
+  ui.canvasZoomIn.disabled = zoom >= MAX_CANVAS_ZOOM;
+  if (ui.canvasViewport.clientWidth > 0 && ui.canvasViewport.clientHeight > 0) {
+    ui.frame.style.width = `${ui.canvasViewport.clientWidth / scale}px`;
+    ui.frame.style.height = `${ui.canvasViewport.clientHeight / scale}px`;
+  }
+  ui.frame.style.zoom = String(scale);
+}
+
+function setCanvasZoom(value) {
+  state.canvasZoom = normalizeCanvasZoom(value);
+  syncCanvasZoom();
+}
+
+function handleCanvasWheel(event) {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  if (event.deltaY === 0) return;
+  setCanvasZoom(stepCanvasZoom(state.canvasZoom, event.deltaY < 0 ? 1 : -1));
+}
+
+function handleCanvasZoomShortcut(event) {
+  if ((!event.ctrlKey && !event.metaKey) || isTypingTarget(event.target)) return;
+  const zoomIn = event.key === "+" || event.key === "=" || event.code === "NumpadAdd";
+  const zoomOut = event.key === "-" || event.key === "_" || event.code === "NumpadSubtract";
+  const reset = event.key === "0" || event.code === "Numpad0";
+  if (!zoomIn && !zoomOut && !reset) return;
+  event.preventDefault();
+  if (reset) setCanvasZoom(DEFAULT_CANVAS_ZOOM);
+  else setCanvasZoom(stepCanvasZoom(state.canvasZoom, zoomIn ? 1 : -1));
+}
+
+const canvasViewportObserver = new ResizeObserver(syncCanvasZoom);
+canvasViewportObserver.observe(ui.canvasViewport);
+ui.canvasZoomOut.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, -1)));
+ui.canvasZoomIn.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, 1)));
+ui.canvasZoomReset.addEventListener("click", () => setCanvasZoom(DEFAULT_CANVAS_ZOOM));
+document.addEventListener("keydown", handleCanvasZoomShortcut);
+
 async function render(mode, { captureCurrent = true } = {}) {
   if (!state.originalHtml) return;
   if (state.previewOnly && mode === "modified") return;
@@ -922,7 +982,11 @@ async function render(mode, { captureCurrent = true } = {}) {
       ? createRedlineReport(state.modifiedHtml, changesFromOriginal(), state.fileName)
       : state.modifiedHtml;
   await editor.load(html, mode === "modified");
-  editor.getDocument()?.addEventListener("keydown", handleKeyboardShortcut);
+  const frameDocument = editor.getDocument();
+  frameDocument?.addEventListener("keydown", handleKeyboardShortcut);
+  frameDocument?.addEventListener("keydown", handleCanvasZoomShortcut);
+  frameDocument?.addEventListener("wheel", handleCanvasWheel, { capture: true, passive: false });
+  syncCanvasZoom();
   if (mode === "modified") refreshClassOptions();
   syncPageStructureFields();
   if (mode === "modified") renderHeadingOutline();
@@ -1150,6 +1214,7 @@ async function loadHtml(html, fileName, options = {}) {
   ui.fileName.textContent = state.fileName;
   ui.empty.hidden = true;
   ui.frame.hidden = false;
+  ui.canvasViewport.hidden = false;
   ui.importPreviewPage.hidden = true;
   ui.refreshPreview.hidden = true;
   setControls(true);
@@ -1352,6 +1417,7 @@ function showScreenshotPreview(preview) {
   ui.badge.dataset.mode = "preview";
   ui.empty.hidden = true;
   ui.frame.hidden = true;
+  ui.canvasViewport.hidden = true;
   ui.screenshotPreviewImage.src = preview.imageUrl;
   ui.screenshotPreview.hidden = false;
   ui.importPreviewPage.hidden = false;
@@ -1416,6 +1482,7 @@ function clearLoadedPage() {
   delete ui.badge.dataset.mode;
   ui.empty.hidden = false;
   ui.frame.hidden = true;
+  ui.canvasViewport.hidden = true;
   ui.importPreviewPage.hidden = true;
   ui.refreshPreview.hidden = true;
   showSelection(null);

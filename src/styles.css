@@ -230,6 +230,11 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .canvas-panel { display: flex; flex-direction: column; min-width: 0; padding: 1rem; }
 .canvas-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; min-height: 38px; color: #646578; font-size: .85rem; }
 .canvas-meta .hint { margin-left: auto; }
+.canvas-zoom-controls { display: inline-flex; align-items: center; gap: .2rem; flex: 0 0 auto; }
+.canvas-zoom-controls .small-button { min-width: 30px; padding: .3rem .45rem; font-size: .82rem; }
+.canvas-zoom-reset { min-width: 58px; padding: .3rem .45rem; border-color: transparent; background: transparent; color: #626376; font-size: .76rem; font-weight: 750; }
+.canvas-zoom-reset:hover, .canvas-zoom-reset:focus-visible { border-color: #b9b9f0; background: #f3f3ff; }
+.canvas-zoom-reset[data-zoomed="true"] { border-color: #aaaaf0; background: #e9e9ff; color: #4545b7; }
 .screenshot-preview { flex: 1; min-height: 0; overflow: auto; border: 1px solid #d8d9e2; border-radius: 12px; background: #e8e9ef; }
 .screenshot-preview img { display: block; width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .badge { display: inline-flex; border-radius: 999px; padding: .3rem .65rem; background: #e4e5eb; color: #55566a; font-weight: 700; }
@@ -243,7 +248,9 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .save-state { border-radius: 999px; padding: .25rem .55rem; color: #626376; background: #ebecf1; font-size: .72rem; font-weight: 700; }
 .save-state.dirty { color: #925514; background: #fff0cf; }
 .save-state.saved { color: #176142; background: #dff4e8; }
-#page-frame { width: 100%; flex: 1; border: 1px solid #d5d6df; border-radius: 12px; background: white; box-shadow: 0 8px 24px rgb(35 35 55 / 8%); }
+#canvas-viewport { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: auto; align-items: flex-start; justify-content: flex-start; border-radius: 12px; background: #e8e9ef; }
+#canvas-viewport[hidden] { display: none; }
+#page-frame { display: block; flex: none; border: 1px solid #d5d6df; border-radius: 12px; background: white; box-shadow: 0 8px 24px rgb(35 35 55 / 8%); }
 .empty-state { display: grid; place-content: center; flex: 1; gap: .45rem; border: 2px dashed #cfd0dc; border-radius: 12px; color: #77788b; text-align: center; background: #fafaff; }
 .empty-state strong { color: #343545; font-size: 1.15rem; }
 .inspector { overflow: auto; padding: 1.25rem; border-left: 1px solid #d8d9e2; background: #fff; }
