@@ -14,6 +14,12 @@ import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
 import { LATEST_RELEASE_URL } from "./release-links.js";
+import {
+  DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  normalizeUpdateDownloadTimeoutSeconds,
+} from "./update-timeout.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -25,6 +31,9 @@ const ui = {
   searchReplace: $("#search-replace"), download: $("#download"),
   updateControls: $("#update-controls"), updateStatus: $("#update-status"), checkUpdate: $("#check-update"),
   downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"), openLatestRelease: $("#open-latest-release"),
+  updateTimeoutDialog: $("#update-timeout-dialog"), updateTimeoutError: $("#update-timeout-error"),
+  updateTimeoutInput: $("#update-timeout-seconds"), updateTimeoutRetry: $("#update-timeout-retry"),
+  updateTimeoutOpenRelease: $("#update-timeout-open-release"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -462,19 +471,33 @@ async function loadAppInfo() {
 }
 
 let availableUpdate = null;
+const UPDATE_TIMEOUT_STORAGE_KEY = "webRevisionDesk.updateDownloadTimeoutSeconds";
+
+function getUpdateDownloadTimeoutSeconds() {
+  try {
+    const saved = localStorage.getItem(UPDATE_TIMEOUT_STORAGE_KEY);
+    return saved === null
+      ? DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS
+      : normalizeUpdateDownloadTimeoutSeconds(saved);
+  } catch {
+    return DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS;
+  }
+}
 
 function showLatestReleaseAction(visible) {
   ui.openLatestRelease.hidden = !visible;
 }
 
-ui.openLatestRelease.addEventListener("click", async () => {
+async function openLatestRelease() {
   try {
     if (window.webRevisionDesktop?.openExternal) await window.webRevisionDesktop.openExternal(LATEST_RELEASE_URL);
     else window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
   } catch (error) {
     setStatus(`GitHub Releaseを開けませんでした: ${error.message}`, "error");
   }
-});
+}
+ui.openLatestRelease.addEventListener("click", () => { void openLatestRelease(); });
+ui.updateTimeoutOpenRelease.addEventListener("click", () => { void openLatestRelease(); });
 
 async function checkForApplicationUpdate({ quiet = false } = {}) {
   ui.updateControls.hidden = false;
@@ -502,11 +525,20 @@ async function checkForApplicationUpdate({ quiet = false } = {}) {
 }
 
 ui.checkUpdate.addEventListener("click", () => { void checkForApplicationUpdate(); });
-ui.downloadUpdate.addEventListener("click", async () => {
+function showUpdateDownloadFailure(error) {
+  const timeoutSeconds = getUpdateDownloadTimeoutSeconds();
+  ui.updateTimeoutInput.value = String(timeoutSeconds);
+  ui.updateTimeoutError.textContent = error.message || "通信状態を確認して、タイムアウト値を調整して再試行してください。";
+  ui.updateStatus.textContent = "更新のダウンロードに失敗しました";
+  if (!ui.updateTimeoutDialog.open) ui.updateTimeoutDialog.showModal();
+  showLatestReleaseAction(true);
+  setStatus(`更新をダウンロードできませんでした: ${ui.updateTimeoutError.textContent}`, "error");
+}
+
+async function downloadApplicationUpdate(timeoutSeconds = getUpdateDownloadTimeoutSeconds()) {
   setButtonProcessing(ui.downloadUpdate, true);
   try {
-    const response = await appFetch("/api/update/download", { method: "POST" });
-    if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+    const response = await postJson("/api/update/download", { timeoutSeconds });
     const update = await response.json();
     if (!update.downloaded) return checkForApplicationUpdate();
     availableUpdate = update;
@@ -516,11 +548,31 @@ ui.downloadUpdate.addEventListener("click", async () => {
     ui.updateStatus.textContent = `v${update.version} を準備しました`;
     setStatus("更新をダウンロードし、SHA-256を確認しました。", "success");
   } catch (error) {
-    showLatestReleaseAction(true);
-    setStatus(`更新をダウンロードできませんでした: ${error.message}`, "error");
+    showUpdateDownloadFailure(error);
   } finally {
     setButtonProcessing(ui.downloadUpdate, false);
   }
+}
+
+ui.downloadUpdate.addEventListener("click", () => { void downloadApplicationUpdate(); });
+ui.updateTimeoutRetry.addEventListener("click", () => {
+  const timeoutSeconds = Number(ui.updateTimeoutInput.value);
+  if (!Number.isInteger(timeoutSeconds)
+      || timeoutSeconds < MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS
+      || timeoutSeconds > MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS) {
+    ui.updateTimeoutInput.setCustomValidity(`タイムアウト値は${MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS}〜${MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS}秒で入力してください。`);
+    ui.updateTimeoutInput.reportValidity();
+    return;
+  }
+  ui.updateTimeoutInput.setCustomValidity("");
+  try {
+    localStorage.setItem(UPDATE_TIMEOUT_STORAGE_KEY, String(timeoutSeconds));
+  } catch (error) {
+    setStatus(`タイムアウト設定を保存できませんでした: ${error.message}`, "error");
+    return;
+  }
+  ui.updateTimeoutDialog.close();
+  void downloadApplicationUpdate(timeoutSeconds);
 });
 ui.applyUpdate.addEventListener("click", async () => {
   if (!availableUpdate || !window.confirm(`v${availableUpdate.version} を適用するため、アプリを再起動します。`)) return;

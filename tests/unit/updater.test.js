@@ -37,6 +37,14 @@ test("Windows installer is per-user and installs the portable payload", async ()
   assert.match(source, /DefaultDirName=\{localappdata\}\\Programs\\WebRevisionDesk/);
   assert.match(source, /PrivilegesRequired=lowest/);
   assert.match(source, /release-electron\\WebRevisionDesk\\\*/);
+  assert.match(source, /CloseApplications=force/);
+  assert.match(source, /function InitializeSetup: Boolean;/);
+  assert.match(source, /function InitializeUninstall: Boolean;/);
+  assert.match(source, /taskkill\.exe/);
+  assert.match(source, /\/F \/T \/IM WebRevisionDesk\.exe/);
+  assert.match(source, /for Attempt := 1 to 40 do/);
+  assert.match(source, /WizardSilent/);
+  assert.match(source, /UninstallSilent/);
 });
 
 test("macOS updater verifies, replaces, and relaunches the app bundle", async () => {

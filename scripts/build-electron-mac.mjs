@@ -41,6 +41,7 @@ await Promise.all([
   cp(path.join(root, "src", "browser-task-queue.js"), path.join(application, "src", "browser-task-queue.js")),
   cp(path.join(root, "src", "tracking-resource-filter.js"), path.join(application, "src", "tracking-resource-filter.js")),
   cp(path.join(root, "src", "release-links.js"), path.join(application, "src", "release-links.js")),
+  cp(path.join(root, "src", "update-timeout.js"), path.join(application, "src", "update-timeout.js")),
   cp(path.join(root, "LICENSE"), path.join(application, "LICENSE")),
   cp(path.join(root, "THIRD_PARTY_NOTICES.md"), path.join(application, "THIRD_PARTY_NOTICES.md")),
   writeFile(path.join(application, "package.json"), `${JSON.stringify({ name: packageJson.name, version: packageJson.version, type: "module", main: "electron/main.mjs" }, null, 2)}\n`),

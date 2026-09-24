@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
 import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
+import { normalizeUpdateDownloadTimeoutSeconds } from "../src/update-timeout.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -640,23 +641,41 @@ async function checkForUpdate() {
   return { supported: true, currentVersion: packageJson.version, available: compareVersions(release.version, packageJson.version) > 0, ...release };
 }
 
-async function downloadUpdate() {
+async function fetchUpdateAsset(url, timeoutSeconds) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+  try {
+    const response = await net.fetch(url, {
+      headers: { "User-Agent": "WebRevisionDesk" },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    if (controller.signal.aborted || error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new Error(`更新ファイルのダウンロードがタイムアウトしました（設定時間: ${timeoutSeconds}秒）。`);
+    }
+    throw new Error(`更新ファイルをダウンロードできませんでした: ${error.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadUpdate(body = {}) {
+  const timeoutSeconds = normalizeUpdateDownloadTimeoutSeconds(body.timeoutSeconds);
   const update = await checkForUpdate();
   if (!update.available) return { ...update, downloaded: false };
-  const sumsResponse = await net.fetch(update.sumsUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
-  const zipResponse = await net.fetch(update.zipUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
-  if (!sumsResponse.ok || !zipResponse.ok) throw new Error("更新ファイルをダウンロードできませんでした。");
-  const sums = await sumsResponse.text();
+  const sums = (await fetchUpdateAsset(update.sumsUrl, timeoutSeconds)).toString("utf8");
   const expected = sums.match(new RegExp(`^([a-fA-F0-9]{64})\\s+${update.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
   if (!expected) throw new Error("公開されたSHA-256チェックサムが見つかりません。");
-  const body = Buffer.from(await zipResponse.arrayBuffer());
-  const actual = createHash("sha256").update(body).digest("hex");
+  const archive = await fetchUpdateAsset(update.zipUrl, timeoutSeconds);
+  const actual = createHash("sha256").update(archive).digest("hex");
   if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("更新ファイルのSHA-256が一致しません。");
   const updatesDirectory = path.join(app.getPath("userData"), "updates");
   await mkdir(updatesDirectory, { recursive: true });
   const zipPath = path.join(updatesDirectory, update.zipName);
   await rm(`${zipPath}.retry`, { force: true });
-  await writeFile(zipPath, body);
+  await writeFile(zipPath, archive);
   downloadedUpdate = { ...update, zipPath, sha256: actual, installDirectory: updateInstallPath() };
   await record("update-downloaded", { version: update.version });
   return { ...update, downloaded: true };
@@ -779,7 +798,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
     return jsonResponse({ version: packageJson.version });
   }
   if (method === "GET" && url === "/api/update/check") return jsonResponse(await checkForUpdate());
-  if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate());
+  if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate(body));
   if (method === "POST" && url === "/api/update/apply") return jsonResponse(await applyDownloadedUpdate());
   if (method === "POST" && url === "/api/capture/start") {
     const metadata = await openCapturePage(body.url, { show: true });

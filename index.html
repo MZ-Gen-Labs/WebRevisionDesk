@@ -434,6 +434,29 @@
       </form>
     </dialog>
 
+    <dialog id="update-timeout-dialog" class="package-dialog update-timeout-dialog">
+      <form method="dialog">
+        <div class="package-dialog-heading">
+          <div>
+            <p class="eyebrow">Application Update</p>
+            <h2>更新のダウンロードに失敗しました</h2>
+          </div>
+          <button value="cancel" type="submit" aria-label="閉じる">閉じる</button>
+        </div>
+        <p id="update-timeout-error" class="update-timeout-error" role="alert"></p>
+        <label class="update-timeout-field" for="update-timeout-seconds">
+          再試行時のタイムアウト
+          <span><input id="update-timeout-seconds" type="number" min="30" max="1800" step="1" required /> 秒</span>
+        </label>
+        <p class="update-timeout-advice">社内プロキシやセキュリティ検査で時間がかかる場合は、300〜600秒に延ばして再試行してください。この設定は次回以降も保存されます。</p>
+        <div class="package-dialog-actions">
+          <button value="cancel" type="submit">キャンセル</button>
+          <button id="update-timeout-open-release" type="button">ブラウザで最新Releaseを開く</button>
+          <button id="update-timeout-retry" class="button-primary" type="button">設定を保存して再試行</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="package-dialog" class="package-dialog">
       <form method="dialog">
         <div class="package-dialog-heading">

@@ -156,6 +156,12 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .package-structure-options input { width: auto; }
 .package-number-padding select { width: auto; margin-left: .2rem; }
 .package-dialog-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1rem; }
+.update-timeout-dialog { width: min(620px, calc(100vw - 48px)); }
+.update-timeout-error { margin: .8rem 0; padding: .7rem; border: 1px solid #e1aaaa; border-radius: 8px; color: #922828; background: #fff2f2; overflow-wrap: anywhere; }
+.update-timeout-field { display: grid; gap: .4rem; font-weight: 650; }
+.update-timeout-field span { display: flex; align-items: center; gap: .45rem; }
+.update-timeout-field input { width: 9rem; padding: .5rem; border: 1px solid #d4d5df; border-radius: 8px; }
+.update-timeout-advice { margin: .75rem 0 0; color: #55566c; font-size: .85rem; line-height: 1.5; }
 .search-replace-dialog { width: min(1050px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #d8d9e2; border-radius: 14px; color: #20202b; background: #fff; box-shadow: 0 24px 80px rgb(24 24 45 / 30%); transition: width .16s ease; }
 .search-replace-dialog.reviewing { width: min(680px, calc(100vw - 40px)); }
 .search-replace-dialog::backdrop { background: rgb(25 26 42 / 45%); }
