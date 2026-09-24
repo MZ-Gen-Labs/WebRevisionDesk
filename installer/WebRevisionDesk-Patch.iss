@@ -29,6 +29,9 @@ CloseApplications=force
 [Files]
 Source: "..\release-electron\WebRevisionDesk\resources\app\*"; DestDir: "{app}\resources\app"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\resources\app\*"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
