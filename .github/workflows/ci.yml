@@ -41,11 +41,37 @@ jobs:
       - name: Smoke test packaged Electron editor
         shell: pwsh
         run: |
-          $archive = Get-ChildItem release-electron -Filter *.zip | Select-Object -First 1
+          $archive = Get-ChildItem release-electron -Filter *-electron-win-x64.zip | Select-Object -First 1
           if (-not $archive) { throw "Electron release ZIP was not created." }
+          $patch = Get-ChildItem release-electron -Filter *-patch.zip | Select-Object -First 1
+          if (-not $patch) { throw "Electron app-only patch ZIP was not created." }
+          if ($patch.Length -ge $archive.Length) { throw "The app-only patch is not smaller than the full ZIP." }
+          $metadata = Get-Content -Raw release-electron/release.json | ConvertFrom-Json
+          if ($metadata.assets.patch.name -ne $patch.Name) { throw "Patch metadata does not match the patch asset." }
+          if ($metadata.assets.patch.targetElectronVersion -ne $metadata.electronVersion) { throw "Patch Electron compatibility metadata is inconsistent." }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $patchZip = [System.IO.Compression.ZipFile]::OpenRead($patch.FullName)
+          try {
+            $entries = @($patchZip.Entries)
+            if (-not ($entries | Where-Object FullName -eq "resources/app/package.json")) { throw "Patch ZIP is missing resources/app/package.json." }
+            if ($entries | Where-Object { $_.FullName -and -not $_.FullName.StartsWith("resources/app/") }) { throw "Patch ZIP contains files outside resources/app." }
+          } finally {
+            $patchZip.Dispose()
+          }
+          $hashes = Get-Content release-electron/SHA256SUMS.txt
+          foreach ($asset in @($archive, $patch)) {
+            $actualHash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (-not ($hashes | Where-Object { $_ -match "^$actualHash\s+$([regex]::Escape($asset.Name))$" })) {
+              throw "SHA256SUMS.txt is missing the correct checksum for $($asset.Name)."
+            }
+          }
           $target = Join-Path $env:RUNNER_TEMP "electron-ci-smoke"
           Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
           $executable = Get-ChildItem $target -Filter WebRevisionDesk.exe -Recurse | Select-Object -First 1
           if (-not $executable) { throw "Packaged Electron executable was not found." }
           $process = Start-Process -FilePath $executable.FullName -ArgumentList "--editor-smoke-test" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Electron editor smoke test failed with exit code $($process.ExitCode)." }
+      - name: Smoke test app-only patch application
+        shell: pwsh
+        run: |
+          ./tests/windows/update-patch-smoke.ps1 -UpdaterPath ./electron/updater.ps1 -ScratchDirectory $env:RUNNER_TEMP

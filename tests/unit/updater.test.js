@@ -32,6 +32,38 @@ test("updater records progress and displays failures", async () => {
   assert.match(source, /\$ZipPath\.retry/);
 });
 
+test("Windows updater replaces only resources/app for verified patch packages", async () => {
+  const source = await readFile(path.join(root, "electron", "updater.ps1"), "utf8");
+  assert.match(source, /\[switch\]\$Patch/);
+  assert.match(source, /Join-Path \$stage "resources\\app"/);
+  assert.match(source, /Join-Path \$InstallDirectory "resources\\app"/);
+  assert.match(source, /差分更新ファイルのバージョンが一致しません/);
+  assert.match(source, /if \(-not \$Patch -and \(Test-Path -LiteralPath \$uninstallerBackup\)\)/);
+  const main = await readFile(path.join(root, "electron", "main.mjs"), "utf8");
+  assert.match(main, /updaterArguments\.push\("-Patch", "-ExpectedVersion", downloadedUpdate\.version\)/);
+  assert.match(main, /canApplyWindowsPatch\(installDirectory\)/);
+  assert.match(main, /patch-checksum-mismatch/);
+  assert.match(main, /fullExpectedSha256/);
+});
+
+test("release build publishes app-only patch metadata and both checksums", async () => {
+  const builder = await readFile(path.join(root, "scripts", "build-electron-migration.mjs"), "utf8");
+  assert.match(builder, /WebRevisionDesk-\$\{packageJson\.version\}-patch\.zip/);
+  assert.match(builder, /targetElectronVersion: electronPackage\.version/);
+  assert.match(builder, /assets: \{ full, patch \}/);
+  assert.match(builder, /cp\(application, path\.join\(patchResources, "app"\), \{ recursive: true \}\)/);
+  const workflow = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+  assert.match(workflow, /release-electron\/release\.json/);
+  assert.match(workflow, /-name 'release\.json'/);
+  assert.match(workflow, /Get-ChildItem release-electron -Filter \*-electron-win-x64\.zip/);
+  const ciWorkflow = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
+  assert.match(ciWorkflow, /update-patch-smoke\.ps1/);
+  for (const script of ["build-electron-mac.mjs", "build-electron-feasibility.mjs"]) {
+    const source = await readFile(path.join(root, "scripts", script), "utf8");
+    assert.match(source, /update-package\.js/);
+  }
+});
+
 test("Windows installer is per-user and installs the portable payload", async () => {
   const source = await readFile(path.join(root, "installer", "WebRevisionDesk.iss"), "utf8");
   assert.match(source, /DefaultDirName=\{localappdata\}\\Programs\\WebRevisionDesk/);

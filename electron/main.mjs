@@ -9,6 +9,7 @@ import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
 import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
 import { normalizeUpdateDownloadTimeoutSeconds } from "../src/update-timeout.js";
+import { selectWindowsUpdatePackage } from "../src/update-package.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -530,7 +531,21 @@ function updateInstallPath() {
   return process.platform === "darwin" ? macInstallPath() : portableInstallDirectory();
 }
 
-const updateZipPattern = /^WebRevisionDesk-\d+\.\d+\.\d+-(?:mac-(?:arm64|x64)|electron-win-x64)\.zip(?:\.part)?$/;
+async function canApplyWindowsPatch(installDirectory) {
+  if (process.platform !== "win32") return false;
+  try {
+    const appDirectory = path.join(installDirectory, "resources", "app");
+    const [appManifest, updaterScript] = await Promise.all([
+      stat(path.join(appDirectory, "package.json")),
+      readFile(path.join(appDirectory, "electron", "updater.ps1"), "utf8"),
+    ]);
+    return appManifest.isFile() && /\[switch\]\$Patch/i.test(updaterScript);
+  } catch {
+    return false;
+  }
+}
+
+const updateZipPattern = /^WebRevisionDesk-\d+\.\d+\.\d+-(?:mac-(?:arm64|x64)|electron-win-x64|patch)\.zip(?:\.part)?$/;
 
 async function removeUpdateArtifact(target, type) {
   try {
@@ -623,21 +638,64 @@ function updateAssetPattern() {
   return /^WebRevisionDesk-\d+\.\d+\.\d+-electron-win-x64\.zip$/;
 }
 
-async function fetchLatestRelease() {
+async function fetchLatestRelease({ patchSupported = false } = {}) {
   const response = await net.fetch(RELEASE_API_URL, { headers: { Accept: "application/vnd.github+json", "User-Agent": "WebRevisionDesk" } });
   if (!response.ok) throw new Error(`更新情報を取得できませんでした（HTTP ${response.status}）。`);
   const release = await response.json();
   const version = String(release.tag_name || "").replace(/^v/, "");
-  const zip = release.assets?.find((asset) => updateAssetPattern().test(asset.name));
+  const fullZip = release.assets?.find((asset) => updateAssetPattern().test(asset.name));
   const sums = release.assets?.find((asset) => asset.name === "SHA256SUMS.txt");
-  if (!zip || !sums || !VERSION_TAG.test(version)) throw new Error("更新リリースの配布ファイルが見つかりません。");
-  return { version, zipUrl: zip.browser_download_url, zipName: zip.name, sumsUrl: sums.browser_download_url, notes: String(release.body || "") };
+  if (!fullZip || !sums || !VERSION_TAG.test(version)) throw new Error("更新リリースの配布ファイルが見つかりません。");
+
+  let selected = { asset: fullZip, packageType: "full", expectedSha256: "" };
+  let fullExpectedSha256 = "";
+  if (process.platform === "win32" && patchSupported) {
+    const metadataAsset = release.assets?.find((asset) => asset.name === "release.json");
+    if (metadataAsset) {
+      try {
+        const [metadataResponse, checksumsResponse] = await Promise.all([
+          net.fetch(metadataAsset.browser_download_url, { headers: { "User-Agent": "WebRevisionDesk" }, signal: AbortSignal.timeout(15_000) }),
+          net.fetch(sums.browser_download_url, { headers: { "User-Agent": "WebRevisionDesk" }, signal: AbortSignal.timeout(15_000) }),
+        ]);
+        if (!metadataResponse.ok || !checksumsResponse.ok) throw new Error("リリースメタデータを取得できませんでした。");
+        const checksums = await checksumsResponse.text();
+        const metadata = await metadataResponse.json();
+        selected = selectWindowsUpdatePackage({
+          version,
+          assets: release.assets,
+          metadata,
+          electronVersion: process.versions.electron,
+          checksums,
+        }) || selected;
+        fullExpectedSha256 = selectWindowsUpdatePackage({
+          version,
+          assets: release.assets,
+          electronVersion: process.versions.electron,
+          checksums,
+        })?.expectedSha256 || "";
+      } catch (error) {
+        await record("update-patch-metadata-fallback", { message: error.message });
+      }
+    }
+  }
+  return {
+    version,
+    zipUrl: selected.asset.browser_download_url,
+    zipName: selected.asset.name,
+    packageType: selected.packageType,
+    expectedSha256: selected.expectedSha256,
+    fullZipUrl: fullZip.browser_download_url,
+    fullZipName: fullZip.name,
+    fullExpectedSha256,
+    sumsUrl: sums.browser_download_url,
+    notes: String(release.body || ""),
+  };
 }
 
 async function checkForUpdate() {
   const installDirectory = updateInstallPath();
   if (!installDirectory) return { supported: false, currentVersion: packageJson.version };
-  const release = await fetchLatestRelease();
+  const release = await fetchLatestRelease({ patchSupported: await canApplyWindowsPatch(installDirectory) });
   return { supported: true, currentVersion: packageJson.version, available: compareVersions(release.version, packageJson.version) > 0, ...release };
 }
 
@@ -665,18 +723,47 @@ async function downloadUpdate(body = {}) {
   const timeoutSeconds = normalizeUpdateDownloadTimeoutSeconds(body.timeoutSeconds);
   const update = await checkForUpdate();
   if (!update.available) return { ...update, downloaded: false };
-  const sums = (await fetchUpdateAsset(update.sumsUrl, timeoutSeconds)).toString("utf8");
-  const expected = sums.match(new RegExp(`^([a-fA-F0-9]{64})\\s+${update.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
+  const sums = update.expectedSha256 ? "" : (await fetchUpdateAsset(update.sumsUrl, timeoutSeconds)).toString("utf8");
+  let expected = update.expectedSha256
+    || sums.match(new RegExp(`^([a-fA-F0-9]{64})\\s+${update.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
   if (!expected) throw new Error("公開されたSHA-256チェックサムが見つかりません。");
-  const archive = await fetchUpdateAsset(update.zipUrl, timeoutSeconds);
-  const actual = createHash("sha256").update(archive).digest("hex");
-  if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("更新ファイルのSHA-256が一致しません。");
+  let selected = update;
+  const switchToFullPackage = async (reason) => {
+    await record("update-patch-fallback", { version: selected.version, reason });
+    selected = {
+      ...selected,
+      zipUrl: selected.fullZipUrl,
+      zipName: selected.fullZipName,
+      packageType: "full",
+      expectedSha256: selected.fullExpectedSha256 || "",
+    };
+    expected = selected.expectedSha256
+      || (await fetchUpdateAsset(selected.sumsUrl, timeoutSeconds)).toString("utf8")
+        .match(new RegExp(`^([a-fA-F0-9]{64})\\s+${selected.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
+    if (!expected) throw new Error("公開されたSHA-256チェックサムが見つかりません。");
+    archive = await fetchUpdateAsset(selected.zipUrl, timeoutSeconds);
+  };
+  let archive;
+  try {
+    archive = await fetchUpdateAsset(selected.zipUrl, timeoutSeconds);
+  } catch (error) {
+    if (selected.packageType !== "patch" || !/HTTP (?:404|410)/.test(error.message)) throw error;
+    await switchToFullPackage("patch-unavailable");
+  }
+  let actual = createHash("sha256").update(archive).digest("hex");
+  if (actual.toLowerCase() !== expected.toLowerCase() && selected.packageType === "patch") {
+    await switchToFullPackage("patch-checksum-mismatch");
+    actual = createHash("sha256").update(archive).digest("hex");
+  }
+  if (actual.toLowerCase() !== expected.toLowerCase()) {
+    throw new Error("更新ファイルのSHA-256が一致しません。");
+  }
   const updatesDirectory = path.join(app.getPath("userData"), "updates");
   await mkdir(updatesDirectory, { recursive: true });
-  const zipPath = path.join(updatesDirectory, update.zipName);
+  const zipPath = path.join(updatesDirectory, selected.zipName);
   await rm(`${zipPath}.retry`, { force: true });
   await writeFile(zipPath, archive);
-  downloadedUpdate = { ...update, zipPath, sha256: actual, installDirectory: updateInstallPath() };
+  downloadedUpdate = { ...selected, zipPath, sha256: actual, installDirectory: updateInstallPath() };
   await record("update-downloaded", { version: update.version });
   return { ...update, downloaded: true };
 }
@@ -702,6 +789,9 @@ async function applyDownloadedUpdate() {
     "-ZipPath", downloadedUpdate.zipPath, "-Sha256", downloadedUpdate.sha256,
     "-ExecutableName", path.basename(process.execPath), "-TemporaryScriptPath", script,
     "-TemporaryLauncherPath", launcherScript];
+  if (downloadedUpdate.packageType === "patch") {
+    updaterArguments.push("-Patch", "-ExpectedVersion", downloadedUpdate.version);
+  }
   const updaterCommand = updaterArguments.map(quoteWindowsArg).join(" ");
   await writeFile(launcherScript, `@echo off\r\nstart "" /b ${quoteWindowsArg(powershell)} ${updaterCommand}\r\n`, "ascii");
   const launcher = process.env.ComSpec || "cmd.exe";
