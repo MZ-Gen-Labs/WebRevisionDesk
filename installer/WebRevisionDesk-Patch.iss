@@ -187,7 +187,7 @@ begin
   if not WizardSilent then MsgBox('Web Revision Desk の終了を確認できませんでした。差分更新を中止します。', mbError, MB_OK);
 end;
 
-function InitializeSetup: Boolean;
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   InstalledVersion: String;
   PackagePath: String;
@@ -195,7 +195,7 @@ var
   MinimumVersion: String;
   Reason: String;
 begin
-  Result := False;
+  NeedsRestart := False;
   Reason := '';
   TargetVersion := '{#MyAppVersion}';
   MinimumVersion := '{#MyMinimumVersion}';
@@ -214,11 +214,14 @@ begin
     Reason := '既存アプリのバージョン情報を確認できません。';
 
   if Reason <> '' then begin
-    MsgBox(Reason + #13#10#13#10 +
+    Result := Reason + #13#10#13#10 +
       'この差分インストーラーは v' + MinimumVersion + ' 以降、v' + TargetVersion + ' 未満が対象です。' + #13#10 +
-      '新規インストールまたはフル版インストーラー（WebRevisionDesk-' + TargetVersion + '-Setup.exe）をご利用ください。',
-      mbError, MB_OK);
+      '新規インストールまたはフル版インストーラー（WebRevisionDesk-' + TargetVersion + '-Setup.exe）をご利用ください。';
     Exit;
   end;
-  Result := StopRunningApplication;
+  if not StopRunningApplication then begin
+    Result := '差分更新を開始できませんでした。';
+    Exit;
+  end;
+  Result := '';
 end;
