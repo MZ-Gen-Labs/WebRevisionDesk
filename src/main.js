@@ -2,7 +2,7 @@ import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR, sanitizeImportedHtml } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { createProjectPackages, createProjectPackagesAsync, downloadProjectPackage } from "./project-package.js";
-import { desktopFileSystemAvailable, saveDesktopOutput } from "./desktop-file-system.js";
+import { chooseDesktopOutput, desktopFileSystemAvailable, saveDesktopOutput, writeDesktopOutput } from "./desktop-file-system.js";
 import {
   DEFAULT_SEARCH_REPLACE_RULE,
   MAX_SEARCH_REPLACE_RULES,
@@ -13,6 +13,7 @@ import {
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
+import { LATEST_RELEASE_URL } from "./release-links.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -23,7 +24,7 @@ const ui = {
   modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"),
   searchReplace: $("#search-replace"), download: $("#download"),
   updateControls: $("#update-controls"), updateStatus: $("#update-status"), checkUpdate: $("#check-update"),
-  downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"),
+  downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"), openLatestRelease: $("#open-latest-release"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -436,6 +437,19 @@ async function loadAppInfo() {
 
 let availableUpdate = null;
 
+function showLatestReleaseAction(visible) {
+  ui.openLatestRelease.hidden = !visible;
+}
+
+ui.openLatestRelease.addEventListener("click", async () => {
+  try {
+    if (window.webRevisionDesktop?.openExternal) await window.webRevisionDesktop.openExternal(LATEST_RELEASE_URL);
+    else window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    setStatus(`GitHub Releaseを開けませんでした: ${error.message}`, "error");
+  }
+});
+
 async function checkForApplicationUpdate({ quiet = false } = {}) {
   ui.updateControls.hidden = false;
   setButtonProcessing(ui.checkUpdate, true);
@@ -450,9 +464,11 @@ async function checkForApplicationUpdate({ quiet = false } = {}) {
     availableUpdate = update.available ? update : null;
     ui.downloadUpdate.hidden = !update.available;
     ui.applyUpdate.hidden = true;
+    showLatestReleaseAction(update.available);
     ui.updateStatus.textContent = update.available ? `v${update.version} を利用できます` : "最新版です";
     if (!quiet) setStatus(update.available ? `v${update.version} をダウンロードできます。` : "このアプリは最新版です。", "success");
   } catch (error) {
+    showLatestReleaseAction(true);
     if (!quiet) setStatus(`更新を確認できませんでした: ${error.message}`, "error");
   } finally {
     setButtonProcessing(ui.checkUpdate, false);
@@ -470,9 +486,11 @@ ui.downloadUpdate.addEventListener("click", async () => {
     availableUpdate = update;
     ui.downloadUpdate.hidden = true;
     ui.applyUpdate.hidden = false;
+    showLatestReleaseAction(true);
     ui.updateStatus.textContent = `v${update.version} を準備しました`;
     setStatus("更新をダウンロードし、SHA-256を確認しました。", "success");
   } catch (error) {
+    showLatestReleaseAction(true);
     setStatus(`更新をダウンロードできませんでした: ${error.message}`, "error");
   } finally {
     setButtonProcessing(ui.downloadUpdate, false);
@@ -2045,6 +2063,34 @@ async function saveOutput(blob, suggestedName, filters) {
   return Boolean(saved);
 }
 
+async function choosePackageOutput(suggestedName, filters) {
+  if (desktopFileSystemAvailable()) {
+    const target = await chooseDesktopOutput({ suggestedName, filters });
+    return target ? { save: (blob) => writeDesktopOutput(target.token, blob) } : null;
+  }
+  if (typeof window.showSaveFilePicker === "function") {
+    const types = filters.map((filter) => ({
+      description: filter.name,
+      accept: { "application/zip": filter.extensions.map((extension) => `.${extension}`) },
+    }));
+    const handle = await window.showSaveFilePicker({ suggestedName, types });
+    return {
+      save: async (blob) => {
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(blob);
+          await writable.close();
+          return true;
+        } catch (error) {
+          try { await writable.abort?.(); } catch {}
+          throw error;
+        }
+      },
+    };
+  }
+  return { save: async (blob) => { downloadBlob(blob, suggestedName); return true; } };
+}
+
 ui.download.addEventListener("click", async () => {
   const html = state.mode === "modified" ? editor.getExportHtml() : cleanHtmlString(state.modifiedHtml);
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
@@ -2700,11 +2746,12 @@ function showPackageDialog() {
   ui.packageDialog.showModal();
 }
 
-async function packagePagesForDownload() {
+async function packagePagesForDownload(onProgress = () => {}) {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
   const selected = selectedSavedPackagePages();
   if (!selected.length) {
     if (!state.originalHtml) throw new Error("保存するページがありません。");
+    onProgress({ phase: "loading", completed: 1, total: 1 });
     return [{
       fileName: state.fileName,
       originalHtml: state.originalHtml,
@@ -2713,27 +2760,34 @@ async function packagePagesForDownload() {
       sourceUrl: state.sourceUrl,
     }];
   }
-  return Promise.all(selected.map(async (page) => {
+  const pages = [];
+  for (let index = 0; index < selected.length; index += 1) {
+    const page = selected[index];
+    onProgress({ phase: "loading", completed: index, total: selected.length });
     if (page.id === state.activeProjectPageId && state.originalHtml) {
-      return {
+      pages.push({
         ...page,
         fileName: state.fileName,
         originalHtml: state.originalHtml,
         modifiedHtml: state.modifiedHtml,
         changes: changesFromOriginal(),
         sourceUrl: state.sourceUrl,
-      };
-    }
-    const saved = await projectStore.loadPage(page.id);
-    return {
-      ...saved.page,
-      originalHtml: saved.originalHtml,
-      modifiedHtml: saved.workingHtml,
+      });
+    } else {
+      const saved = await projectStore.loadPage(page.id);
+      pages.push({
+        ...saved.page,
+        originalHtml: saved.originalHtml,
+        modifiedHtml: saved.workingHtml,
         changes: normalizedChangesFromOriginal(saved.changes, saved.workingHtml),
         resourceFailures: saved.page.resourceFailures,
-      sourceUrl: saved.page.url,
-    };
-  }));
+        sourceUrl: saved.page.url,
+      });
+    }
+    onProgress({ phase: "loading", completed: index + 1, total: selected.length });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return pages;
 }
 
 ui.downloadPackage.addEventListener("click", showPackageDialog);
@@ -2748,8 +2802,20 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
   localStorage.setItem(PACKAGE_NUMBER_PADDING_KEY, numberPadding);
   setButtonProcessing(ui.confirmPackageDownload, true);
   try {
+    const pageCount = Math.max(1, selectedSavedPackagePages().length);
+    const packageName = pageCount > 1
+      ? `${(projectStore.project?.projectName || "selected-pages").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
+      : "page-revision-package.zip";
+    const outputTarget = await choosePackageOutput(packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    if (!outputTarget) {
+      ui.packageDialog.close();
+      setStatus("共有用ZIPの保存をキャンセルしました。", "info");
+      return;
+    }
     await flushAutoSave();
-    const pages = await packagePagesForDownload();
+    const pages = await packagePagesForDownload(({ phase, completed, total }) => {
+      if (phase === "loading") setStatus(`保存するページを準備中… ${completed}/${total}ページ`, "info");
+    });
     const packageInput = {
       pages,
       files,
@@ -2757,14 +2823,22 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
       numberPadding,
       packageName: pages.length > 1 ? projectStore.project?.projectName || "selected-pages" : undefined,
     };
-    const packageName = packageInput.packageName
-      ? `${packageInput.packageName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
-      : pages.length > 1 ? "selected-pages-revision-package.zip" : "page-revision-package.zip";
-    const packageBlob = await createProjectPackagesAsync(packageInput);
-    const saved = await saveOutput(packageBlob, packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    const packageBlob = await createProjectPackagesAsync({
+      ...packageInput,
+      onProgress: ({ phase, completed, total }) => {
+        if (phase === "generating") setStatus(`ZIPの内容を生成中… ${completed}/${total}ページ`, "info");
+        else if (phase === "compressing") setStatus(`ZIPを圧縮中… ${total}ページ`, "info");
+      },
+    });
+    const saved = await outputTarget.save(packageBlob);
     ui.packageDialog.close();
     setStatus(saved ? `${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。` : "共有用ZIPの保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
+    if (error.name === "AbortError") {
+      ui.packageDialog.close();
+      setStatus("共有用ZIPの保存をキャンセルしました。", "info");
+      return;
+    }
     setStatus(`共有用ZIPを保存できませんでした: ${error.message}`, "error");
   } finally {
     setButtonProcessing(ui.confirmPackageDownload, false);

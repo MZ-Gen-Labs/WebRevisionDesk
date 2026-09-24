@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile, stat, rm, readdir } from "node:fs/promises";
@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
+import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -27,6 +28,7 @@ const MAX_RESOURCE_BYTES = 15 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 60 * 1024 * 1024;
 const navigationTimeoutMs = 45_000;
 const browserTaskQueue = new BrowserTaskQueue();
+const pendingOutputTargets = new Map();
 
 let mainWindow;
 let pageWindow;
@@ -840,7 +842,7 @@ function fileResultError(error) {
   return { ok: false, errorName, message: error.message };
 }
 
-async function handleFileSystem({ operation, parts = [], create = false, content = "", contentBase64 = "", suggestedName = "", filters = [], recursive = false }) {
+async function handleFileSystem({ operation, parts = [], create = false, content = "", contentBase64 = "", suggestedName = "", filters = [], recursive = false, token = "" }) {
   try {
     if (operation === "select") {
       const settings = await readEditorSettings();
@@ -882,6 +884,27 @@ async function handleFileSystem({ operation, parts = [], create = false, content
         : settings.lastProjectDirectory;
       await writeEditorSettings({ ...settings, lastProjectDirectory, recentProjects });
       return { ok: true, value: recentProjects };
+    }
+    if (operation === "choose-output") {
+      const selected = await dialog.showSaveDialog(mainWindow, {
+        title: "保存先を選択",
+        defaultPath: path.basename(String(suggestedName || "web-revision-output")),
+        filters: Array.isArray(filters) ? filters : [],
+      });
+      if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+      for (const [key, target] of pendingOutputTargets) {
+        if (target.expiresAt < Date.now()) pendingOutputTargets.delete(key);
+      }
+      const outputToken = randomUUID();
+      pendingOutputTargets.set(outputToken, { filePath: selected.filePath, expiresAt: Date.now() + 5 * 60_000 });
+      return { ok: true, value: { token: outputToken } };
+    }
+    if (operation === "write-output") {
+      const target = pendingOutputTargets.get(token);
+      pendingOutputTargets.delete(token);
+      if (!target || target.expiresAt < Date.now()) throw new Error("保存先の選択が期限切れです。もう一度保存してください。");
+      await writeFile(target.filePath, Buffer.from(String(contentBase64), "base64"));
+      return { ok: true, value: { path: target.filePath } };
     }
     if (operation === "save-output") {
       const selected = await dialog.showSaveDialog(mainWindow, {
@@ -929,6 +952,12 @@ function registerIpc() {
   ipcMain.handle("editor:file-system", async (event, request) => {
     assertTrustedSender(event);
     return handleFileSystem(request);
+  });
+  ipcMain.handle("editor:open-external", async (event, url) => {
+    assertTrustedSender(event);
+    if (!isAllowedReleaseUrl(url)) throw new Error("許可されていない外部URLです。");
+    await shell.openExternal(LATEST_RELEASE_URL);
+    return { ok: true };
   });
   ipcMain.handle("feasibility:get-info", async (event) => {
     assertTrustedSender(event);
@@ -1130,7 +1159,7 @@ app.whenReady().then(async () => {
     await createMainWindow({ show: false });
     const title = await mainWindow.webContents.executeJavaScript("document.title");
     if (title !== "Web Revision Desk") throw new Error(`Unexpected editor page title: ${title}`);
-    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.fileSystem)");
+    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.openExternal && window.webRevisionDesktop?.fileSystem?.chooseOutput && window.webRevisionDesktop?.fileSystem?.writeOutput)");
     if (!desktopApi) throw new Error("Electron editor bridge was not exposed.");
     const appInfo = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request({ url: "/api/app-info", method: "GET", headers: {}, bodyBase64: "" })`);
     const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));

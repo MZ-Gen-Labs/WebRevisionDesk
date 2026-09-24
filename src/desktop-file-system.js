@@ -71,14 +71,25 @@ function base64FromBytes(bytes) {
   return btoa(text);
 }
 
+async function base64FromBlob(blob) {
+  return base64FromBytes(new Uint8Array(await blob.arrayBuffer()));
+}
+
 export async function saveDesktopOutput(blob, { suggestedName, filters = [] } = {}) {
   if (!desktopFileSystemAvailable()) return null;
-  const bytes = new Uint8Array(await blob.arrayBuffer());
   return unwrap(desktop().saveOutput({
     suggestedName,
-    contentBase64: base64FromBytes(bytes),
+    contentBase64: await base64FromBlob(blob),
     filters,
   }));
+}
+
+export async function chooseDesktopOutput({ suggestedName, filters = [] } = {}) {
+  return unwrap(desktop().chooseOutput({ suggestedName, filters }));
+}
+
+export async function writeDesktopOutput(token, blob) {
+  return unwrap(desktop().writeOutput({ token, contentBase64: await base64FromBlob(blob) }));
 }
 
 export async function selectDesktopProjectDirectory() {

@@ -89,12 +89,37 @@ test("createProjectPackages emits numbered flat page folders in input order with
   assert.ok(unzipped["002_about-company/modified.html"]);
 });
 
-test("createProjectPackages uses two digit auto numbering through 99 pages", async () => {
-  const pages = Array.from({ length: 3 }, (_, index) => ({
+test("createProjectPackages uses two digits up to 99 pages and three digits from 100", async () => {
+  const pages99 = Array.from({ length: 99 }, (_, index) => ({
     fileName: `page-${index + 1}.html`, originalHtml: "<html></html>", modifiedHtml: "<html></html>", changes: [],
   }));
-  const blob = await createProjectPackagesAsync({ pages, files: ["modified"], structureMode: "flat" });
-  const unzipped = unzipSync(new Uint8Array(await blob.arrayBuffer()));
-  assert.ok(unzipped["01_page-1/modified.html"]);
-  assert.ok(unzipped["03_page-3/modified.html"]);
+  const zip99 = await createProjectPackagesAsync({ pages: pages99, files: ["modified"], structureMode: "flat" });
+  const unzipped99 = unzipSync(new Uint8Array(await zip99.arrayBuffer()));
+  assert.ok(unzipped99["01_page-1/modified.html"]);
+  assert.ok(unzipped99["99_page-99/modified.html"]);
+
+  const pages100 = [...pages99, {
+    fileName: "page-100.html", originalHtml: "<html></html>", modifiedHtml: "<html></html>", changes: [],
+  }];
+  const zip100 = await createProjectPackagesAsync({ pages: pages100, files: ["modified"], structureMode: "flat" });
+  const unzipped100 = unzipSync(new Uint8Array(await zip100.arrayBuffer()));
+  assert.ok(unzipped100["001_page-1/modified.html"]);
+  assert.ok(unzipped100["100_page-100/modified.html"]);
+});
+
+test("createProjectPackagesAsync reports per-page generation and compression progress", async () => {
+  const progress = [];
+  const pages = [1, 2].map((index) => ({
+    fileName: `page-${index}.html`, originalHtml: "<html></html>", modifiedHtml: "<html></html>", changes: [],
+  }));
+  await createProjectPackagesAsync({
+    pages,
+    files: ["modified"],
+    onProgress: (value) => progress.push(value),
+  });
+  assert.deepEqual(progress, [
+    { phase: "generating", completed: 1, total: 2 },
+    { phase: "generating", completed: 2, total: 2 },
+    { phase: "compressing", completed: 2, total: 2 },
+  ]);
 });
