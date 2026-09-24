@@ -77,6 +77,29 @@ test("Windows installer is per-user and installs the portable payload", async ()
   assert.match(source, /for Attempt := 1 to 40 do/);
   assert.match(source, /WizardSilent/);
   assert.match(source, /UninstallSilent/);
+  assert.equal((source.match(/^AppVersion=/gm) || []).length, 1);
+});
+
+test("Windows patch installer targets compatible installs only and publishes checksums", async () => {
+  const source = await readFile(path.join(root, "installer", "WebRevisionDesk-Patch.iss"), "utf8");
+  assert.match(source, /AppId=\{\{0D4F9CE2-C8DB-4A38-95A4-AEA5C81D22D1\}/);
+  assert.match(source, /AppVersion=\{#MyAppVersion\}/);
+  assert.match(source, /DisableDirPage=yes/);
+  assert.match(source, /resources\\app\\\*/);
+  assert.match(source, /CompareVersions\(InstalledVersion, MinimumVersion\) < 0/);
+  assert.match(source, /CompareVersions\(InstalledVersion, TargetVersion\) >= 0/);
+  assert.match(source, /InitializeSetup/);
+  assert.match(source, /StopRunningApplication/);
+  const baseline = JSON.parse(await readFile(path.join(root, "installer", "windows-patch-baseline.json"), "utf8"));
+  assert.equal(baseline.minimumAppVersion, "0.7.10");
+  assert.equal(baseline.electronVersion, "44.4.3");
+  const builder = await readFile(path.join(root, "scripts", "build-windows-patch-installer.mjs"), "utf8");
+  assert.match(builder, /electronPackage\.version !== baseline\.electronVersion/);
+  assert.match(builder, /Patch-from-\$\{baseline\.minimumAppVersion\}\+/);
+  assert.match(builder, /10 \* 1024 \* 1024/);
+  const workflow = await readFile(path.join(root, ".github", "workflows", "release.yml"), "utf8");
+  assert.match(workflow, /build:windows:installer:patch/);
+  assert.match(workflow, /update-patch-installer-smoke\.ps1/);
 });
 
 test("macOS updater verifies, replaces, and relaunches the app bundle", async () => {

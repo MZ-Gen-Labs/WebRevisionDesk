@@ -75,3 +75,24 @@ jobs:
         shell: pwsh
         run: |
           ./tests/windows/update-patch-smoke.ps1 -UpdaterPath ./electron/updater.ps1 -ScratchDirectory $env:RUNNER_TEMP
+      - name: Build and smoke test Windows installers
+        shell: pwsh
+        run: |
+          npm run build:windows:installer
+          npm run build:windows:installer:patch
+          $full = Get-Item release-electron/WebRevisionDesk-$((Get-Content -Raw package.json | ConvertFrom-Json).version)-Setup.exe
+          $patch = Get-ChildItem release-electron -Filter *-Patch-from-*-Setup.exe | Select-Object -First 1
+          if (-not $patch -or $patch.Length -gt 10MB -or $patch.Length -ge $full.Length) {
+            throw "Windows patch installer is missing or too large."
+          }
+          $hashes = Get-Content release-electron/SHA256SUMS.txt
+          foreach ($asset in @($full, $patch)) {
+            $actualHash = (Get-FileHash -LiteralPath $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (-not ($hashes | Where-Object { $_ -match "^$actualHash\s+$([regex]::Escape($asset.Name))$" })) {
+              throw "SHA256SUMS.txt is missing the correct checksum for $($asset.Name)."
+            }
+          }
+          ./tests/windows/update-patch-installer-smoke.ps1 `
+            -InstallerPath $patch.FullName `
+            -ReleaseAppPath ./release-electron/WebRevisionDesk `
+            -ScratchDirectory $env:RUNNER_TEMP
