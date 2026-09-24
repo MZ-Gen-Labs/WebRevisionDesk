@@ -93,6 +93,20 @@ jobs:
       - run: npm run test:unit
       - name: Build macOS Electron archive and DMG
         run: npm run build:electron:mac
+      - name: Verify macOS DMG
+        run: |
+          dmg=$(find release-electron-mac -name '*.dmg' -type f -print -quit)
+          test -n "$dmg"
+          hdiutil verify "$dmg"
+          mount_point="$RUNNER_TEMP/dmg-mount"
+          mkdir -p "$mount_point"
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_point" "$dmg"
+          trap 'hdiutil detach "$mount_point" -quiet || true' EXIT
+          test -d "$mount_point/WebRevisionDesk.app"
+          test -L "$mount_point/Applications"
+          test "$(readlink "$mount_point/Applications")" = "/Applications"
+          hdiutil detach "$mount_point" -quiet
+          trap - EXIT
       - name: Smoke test macOS Electron archive
         run: |
           archive=$(find release-electron-mac -name '*.zip' -type f | head -n 1)

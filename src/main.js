@@ -40,6 +40,8 @@ const ui = {
   captureSessionActions: $("#capture-session-actions"), finishCapture: $("#capture-current-page"),
   cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
   selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
+  setupPanelSummary: $("#setup-panel-summary"), setupSummaryProject: $("#setup-summary-project"),
+  setupSummaryUrl: $("#setup-summary-url"), setupSummaryPath: $("#setup-summary-path"), projectSavePath: $("#project-save-path"),
   recentProjects: $("#recent-projects"), recentProjectList: $("#recent-project-list"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
@@ -754,6 +756,7 @@ function syncTableToolsVisibility(tableContext = editor.getTableContext()) {
 
 function syncProjectControls() {
   const hasProject = Boolean(projectStore.project);
+  updateProjectSummary();
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
@@ -766,6 +769,29 @@ function syncProjectControls() {
   ui.file.disabled = !hasProject;
   ui.htmlImportButton.setAttribute("aria-disabled", String(!hasProject));
   updateBatchControls();
+}
+
+function updateProjectSummary() {
+  const directory = projectStore.directory;
+  const hasProject = Boolean(projectStore.project && directory);
+  const projectName = hasProject ? (ui.projectName.value.trim() || directory.name) : "案件フォルダ未選択";
+  const baseUrl = hasProject ? (ui.projectBaseUrl.value.trim() || "未設定") : "未設定";
+  const projectPath = hasProject
+    ? (directory.path || `ブラウザ参照: ${directory.name}`)
+    : "未選択";
+  const fullSummary = hasProject
+    ? `案件名: ${projectName}\n基準URL: ${baseUrl}\n保存パス: ${projectPath}`
+    : "案件フォルダ未選択";
+
+  ui.setupSummaryProject.textContent = projectName;
+  ui.setupSummaryUrl.textContent = baseUrl;
+  ui.setupSummaryPath.textContent = projectPath;
+  ui.setupPanelSummary.title = fullSummary;
+  ui.setupSummaryProject.title = projectName;
+  ui.setupSummaryUrl.title = baseUrl;
+  ui.setupSummaryPath.title = projectPath;
+  ui.projectSavePath.textContent = projectPath;
+  ui.projectSavePath.title = projectPath;
 }
 
 function updateBatchControls() {
@@ -3166,7 +3192,8 @@ async function finishLogin(completed) {
 }
 ui.loginDone.addEventListener("click", () => finishLogin(true));
 ui.loginCancel.addEventListener("click", () => finishLogin(false));
-ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
+ui.projectName.addEventListener("input", updateProjectSummary);
+ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); updateProjectSummary(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
 initializeProjectSidebarResize();
 initializeInspectorResize();

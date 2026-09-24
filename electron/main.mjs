@@ -854,7 +854,7 @@ async function handleFileSystem({ operation, parts = [], create = false, content
       if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: null };
       projectDirectory = path.resolve(selected.filePaths[0]);
       await rememberRecentProject(projectDirectory);
-      return { ok: true, value: { name: path.basename(projectDirectory) } };
+      return { ok: true, value: { name: path.basename(projectDirectory), path: projectDirectory } };
     }
     if (operation === "recent-list") {
       const settings = await readEditorSettings();
@@ -873,7 +873,7 @@ async function handleFileSystem({ operation, parts = [], create = false, content
       if (!(await stat(requested)).isDirectory()) throw Object.assign(new Error("案件フォルダが見つかりません。"), { code: "ENOENT" });
       projectDirectory = requested;
       await rememberRecentProject(projectDirectory);
-      return { ok: true, value: { name: path.basename(projectDirectory) } };
+      return { ok: true, value: { name: path.basename(projectDirectory), path: projectDirectory } };
     }
     if (operation === "remove-recent") {
       const settings = await readEditorSettings();

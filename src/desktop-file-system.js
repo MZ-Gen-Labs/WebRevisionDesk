@@ -33,9 +33,10 @@ class DesktopFileHandle {
 }
 
 class DesktopDirectoryHandle {
-  constructor(parts = [], name = "") {
+  constructor(parts = [], name = "", path = "") {
     this.parts = parts;
     this.name = name;
+    this.path = path;
     this.kind = "directory";
   }
 
@@ -99,7 +100,7 @@ export async function selectDesktopProjectDirectory() {
     error.name = "AbortError";
     throw error;
   }
-  return new DesktopDirectoryHandle([], selected.name);
+  return new DesktopDirectoryHandle([], selected.name, selected.path);
 }
 
 export async function listRecentDesktopProjectDirectories() {
@@ -108,7 +109,7 @@ export async function listRecentDesktopProjectDirectories() {
 
 export async function openRecentDesktopProjectDirectory(projectPath) {
   const selected = await unwrap(desktop().openRecentProjectDirectory(projectPath));
-  return new DesktopDirectoryHandle([], selected.name);
+  return new DesktopDirectoryHandle([], selected.name, selected.path);
 }
 
 export async function removeRecentDesktopProjectDirectory(projectPath) {

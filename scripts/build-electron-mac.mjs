@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const appOnly = process.argv.includes("--app-only");
 if (process.platform !== "darwin") throw new Error("macOS版はmacOSまたはGitHub Actions上で作成してください。");
 const arch = process.arch === "arm64" ? "arm64" : "x64";
 const releaseRoot = path.join(root, "release-electron-mac");
@@ -54,11 +55,15 @@ await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleVersion ${packageJson.
 // keeps the unsigned distribution runnable without an Apple Developer account.
 await run("codesign", ["--force", "--deep", "--sign", "-", appBundle]);
 await run("codesign", ["--verify", "--deep", "--strict", appBundle]);
-await run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appBundle, zipPath]);
-await mkdir(dmgRoot, { recursive: true });
-await run("ditto", [appBundle, path.join(dmgRoot, "WebRevisionDesk.app")]);
-await run("ln", ["-s", "/Applications", path.join(dmgRoot, "Applications")]);
-await run("hdiutil", ["create", "-volname", "Web Revision Desk", "-srcfolder", dmgRoot, "-ov", "-format", "UDZO", dmgPath]);
-const lines = await Promise.all([zipPath, dmgPath].map(async (file) => `${createHash("sha256").update(await readFile(file)).digest("hex")}  ${path.basename(file)}`));
-await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${lines.join("\n")}\n`, "ascii");
-console.log(`Created ${zipPath}\nCreated ${dmgPath}`);
+if (appOnly) {
+  console.log(`Created ${appBundle}`);
+} else {
+  await run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appBundle, zipPath]);
+  await mkdir(dmgRoot, { recursive: true });
+  await run("ditto", [appBundle, path.join(dmgRoot, "WebRevisionDesk.app")]);
+  await run("ln", ["-s", "/Applications", path.join(dmgRoot, "Applications")]);
+  await run("hdiutil", ["create", "-volname", "Web Revision Desk", "-srcfolder", dmgRoot, "-ov", "-format", "UDZO", dmgPath]);
+  const lines = await Promise.all([zipPath, dmgPath].map(async (file) => `${createHash("sha256").update(await readFile(file)).digest("hex")}  ${path.basename(file)}`));
+  await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${lines.join("\n")}\n`, "ascii");
+  console.log(`Created ${zipPath}\nCreated ${dmgPath}`);
+}

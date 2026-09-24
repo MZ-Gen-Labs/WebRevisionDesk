@@ -45,12 +45,18 @@
     </div>
 
     <details id="setup-panel" class="setup-panel" open>
-      <summary>取り込み・案件設定 <span>案件フォルダ／ログイン／その他</span></summary>
+      <summary id="setup-panel-summary" title="案件フォルダ未選択">
+        <strong>取り込み・案件設定</strong>
+        <span class="setup-summary-item setup-summary-project"><small>案件</small><span id="setup-summary-project">案件フォルダ未選択</span></span>
+        <span class="setup-summary-item setup-summary-url"><small>基準URL</small><span id="setup-summary-url">未設定</span></span>
+        <span class="setup-summary-item setup-summary-path"><small>保存パス</small><span id="setup-summary-path">未選択</span></span>
+      </summary>
       <div class="setup-content">
     <section class="project-bar" aria-label="案件フォルダ管理">
       <button id="select-project-folder" class="button-primary" type="button">案件フォルダを選択</button>
       <label class="project-name-input">案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
       <label class="project-base-url-input">基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
+      <div class="project-storage-path"><span>保存パス</span><code id="project-save-path" title="">未選択</code></div>
       <button id="crawl-project-pages" type="button" disabled>関連ページ</button>
       <div class="pipeline-options" aria-label="関連ページの連動処理">
         <label class="pipeline-option"><input id="crawl-capture-pages" type="checkbox" disabled /> ページ取得</label>
