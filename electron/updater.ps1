@@ -68,8 +68,7 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $InstallDirectory $ExecutableName))) {
       throw "差分更新の対象となるインストール先を確認できません。"
     }
-    if (-not (Test-Path -LiteralPath $packagePath)
-        -or -not (Test-Path -LiteralPath (Join-Path $payload "electron\main.mjs"))) {
+    if ((-not (Test-Path -LiteralPath $packagePath)) -or (-not (Test-Path -LiteralPath (Join-Path $payload "electron\main.mjs")))) {
       throw "差分更新ファイルにアプリケーション本体がありません。"
     }
     $patchPackage = [System.IO.File]::ReadAllText($packagePath) | ConvertFrom-Json
