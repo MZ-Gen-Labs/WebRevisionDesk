@@ -58,30 +58,39 @@ function createPageEntries({ fileName, originalHtml, modifiedHtml, changes = [],
   return entries;
 }
 
-function collectEntries({ pages, files = DEFAULT_FILES }) {
+function collectEntries({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
   if (!pages?.length) throw new Error("保存するページがありません。");
   const selectedFiles = new Set(files);
   if (!selectedFiles.size) throw new Error("保存するファイルを1つ以上選択してください。");
   const multiple = pages.length > 1;
+  const padding = numberPadding === "auto"
+    ? (pages.length <= 99 ? 2 : 3)
+    : Math.max(2, Math.min(4, Number(numberPadding) || 2));
   const entries = {};
   pages.forEach((page, index) => {
-    const path = multiple
-      ? page.path || `pages/${baseName(page.fileName)}-${index + 1}`
-      : "";
+    let path = "";
+    if (multiple && structureMode === "flat") {
+      const folderName = baseName(page.fileName)
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+        .replace(/\.+$/g, "") || "page";
+      path = `${String(index + 1).padStart(padding, "0")}_${folderName}`;
+    } else if (multiple) {
+      path = page.path || `pages/${baseName(page.fileName)}-${index + 1}`;
+    }
     Object.assign(entries, createPageEntries({ ...page, path }, selectedFiles));
   });
   return entries;
 }
 
-export function createProjectPackages({ pages, files = DEFAULT_FILES }) {
-  const entries = collectEntries({ pages, files });
+export function createProjectPackages({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
+  const entries = collectEntries({ pages, files, structureMode, numberPadding });
   return new Blob([zipSync(entries, { level: 6 })], { type: "application/zip" });
 }
 
-export function createProjectPackagesAsync({ pages, files = DEFAULT_FILES }) {
+export function createProjectPackagesAsync({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
   return new Promise((resolve, reject) => {
     try {
-      const entries = collectEntries({ pages, files });
+      const entries = collectEntries({ pages, files, structureMode, numberPadding });
       zip(entries, { level: 6 }, (err, data) => {
         if (err) reject(err);
         else resolve(new Blob([data], { type: "application/zip" }));

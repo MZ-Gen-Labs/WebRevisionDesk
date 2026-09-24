@@ -435,14 +435,28 @@
         <p id="package-target-summary" class="package-target-summary"></p>
         <fieldset class="package-file-options">
           <legend>ZIPに含めるファイル</legend>
-          <label><input name="package-file" type="checkbox" value="original" checked /> original.html（修正前）</label>
+          <label><input name="package-file" type="checkbox" value="original" /> original.html（修正前）</label>
           <label><input name="package-file" type="checkbox" value="modified" checked /> modified.html（修正後）</label>
-          <label><input name="package-file" type="checkbox" value="diff" checked /> diff.html（修正内容一覧）</label>
+          <label><input name="package-file" type="checkbox" value="diff" /> diff.html（修正内容一覧）</label>
           <label><input name="package-file" type="checkbox" value="redline" checked /> redline.html（変更箇所ページ）</label>
-          <label><input name="package-file" type="checkbox" value="project" checked /> project.json（変更履歴データ）</label>
-          <label><input name="package-file" type="checkbox" value="readme" checked /> README.txt（内容説明）</label>
+          <label><input name="package-file" type="checkbox" value="project" /> project.json（変更履歴データ）</label>
+          <label><input name="package-file" type="checkbox" value="readme" /> README.txt（内容説明）</label>
+        </fieldset>
+        <fieldset id="package-structure-options" class="package-structure-options" hidden>
+          <legend>ページフォルダの構成</legend>
+          <label><input name="package-structure" type="radio" value="flat" checked /> 連番フォルダ（並列）</label>
+          <label><input name="package-structure" type="radio" value="hierarchical" /> 元の階層構造を維持</label>
+          <label class="package-number-padding">連番の桁数
+            <select id="package-number-padding" name="package-number-padding">
+              <option value="auto">自動</option>
+              <option value="2">2桁（01〜）</option>
+              <option value="3">3桁（001〜）</option>
+              <option value="4">4桁（0001〜）</option>
+            </select>
+          </label>
         </fieldset>
         <div class="package-dialog-actions">
+          <button id="package-default-selection" type="button" title="modified.html と redline.html の標準セットを選択します">標準選択に戻す</button>
           <button value="cancel" type="submit">キャンセル</button>
           <button id="confirm-package-download" class="button-primary" type="button">ZIPを保存</button>
         </div>

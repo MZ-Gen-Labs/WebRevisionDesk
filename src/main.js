@@ -76,6 +76,8 @@ const ui = {
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
   inspectorResizer: $("#inspector-resizer"), collapseInspector: $("#collapse-inspector"), showInspector: $("#show-inspector"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
+  packageStructureOptions: $("#package-structure-options"), packageNumberPadding: $("#package-number-padding"),
+  packageDefaultSelection: $("#package-default-selection"),
   confirmPackageDownload: $("#confirm-package-download"),
   searchReplaceDialog: $("#search-replace-dialog"), searchReplaceConfig: $("#search-replace-config"),
   searchReplaceDragHandle: $("#search-replace-drag-handle"),
@@ -135,6 +137,8 @@ const INSPECTOR_WIDTH_KEY = "web-revision-inspector-width";
 const INSPECTOR_COLLAPSED_KEY = "web-revision-inspector-collapsed";
 const DEFAULT_INSPECTOR_WIDTH = 300;
 const PACKAGE_FILE_SELECTION_KEY = "web-revision-package-file-selection";
+const PACKAGE_STRUCTURE_KEY = "web-revision-package-structure";
+const PACKAGE_NUMBER_PADDING_KEY = "web-revision-package-number-padding";
 const SEARCH_REPLACE_RULES_KEY = "web-revision-search-replace-rules";
 const AUTO_SAVE_DELAY_MS = 1200;
 let editRevision = 0;
@@ -2641,6 +2645,11 @@ function packageFileInputs() {
   return [...ui.packageDialog.querySelectorAll('input[name="package-file"]')];
 }
 
+function syncPackageNumberPaddingVisibility() {
+  const flat = ui.packageDialog.querySelector('input[name="package-structure"][value="flat"]').checked;
+  ui.packageNumberPadding.closest("label").hidden = !flat;
+}
+
 function savePackageFileSelection() {
   const selected = packageFileInputs().filter((input) => input.checked).map((input) => input.value);
   localStorage.setItem(PACKAGE_FILE_SELECTION_KEY, JSON.stringify(selected));
@@ -2657,10 +2666,34 @@ function initializePackageFileSelection() {
     }
   }
   packageFileInputs().forEach((input) => input.addEventListener("change", savePackageFileSelection));
+  ui.packageDefaultSelection.addEventListener("click", () => {
+    const defaults = new Set(["modified", "redline"]);
+    packageFileInputs().forEach((input) => { input.checked = defaults.has(input.value); });
+    savePackageFileSelection();
+  });
+  const savedStructure = localStorage.getItem(PACKAGE_STRUCTURE_KEY);
+  if (["flat", "hierarchical"].includes(savedStructure)) {
+    const input = ui.packageDialog.querySelector(`input[name="package-structure"][value="${savedStructure}"]`);
+    if (input) input.checked = true;
+  }
+  const savedPadding = localStorage.getItem(PACKAGE_NUMBER_PADDING_KEY);
+  if (["auto", "2", "3", "4"].includes(savedPadding)) ui.packageNumberPadding.value = savedPadding;
+  ui.packageDialog.querySelectorAll('input[name="package-structure"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        localStorage.setItem(PACKAGE_STRUCTURE_KEY, input.value);
+        syncPackageNumberPaddingVisibility();
+      }
+    });
+  });
+  ui.packageNumberPadding.addEventListener("change", () => localStorage.setItem(PACKAGE_NUMBER_PADDING_KEY, ui.packageNumberPadding.value));
+  syncPackageNumberPaddingVisibility();
 }
 
 function showPackageDialog() {
   const selected = selectedSavedPackagePages();
+  ui.packageStructureOptions.hidden = selected.length < 2;
+  syncPackageNumberPaddingVisibility();
   ui.packageTargetSummary.textContent = selected.length
     ? `チェック済みの保存済みページ ${selected.length}件を、1つのZIPへまとめます。`
     : "現在表示しているページをZIPへ保存します。";
@@ -2709,6 +2742,10 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
     .map((input) => input.value);
   if (!files.length) return setStatus("保存するファイルを1つ以上選択してください。", "error");
   savePackageFileSelection();
+  const structureMode = ui.packageDialog.querySelector('input[name="package-structure"]:checked').value;
+  const numberPadding = ui.packageNumberPadding.value;
+  localStorage.setItem(PACKAGE_STRUCTURE_KEY, structureMode);
+  localStorage.setItem(PACKAGE_NUMBER_PADDING_KEY, numberPadding);
   setButtonProcessing(ui.confirmPackageDownload, true);
   try {
     await flushAutoSave();
@@ -2716,6 +2753,8 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
     const packageInput = {
       pages,
       files,
+      structureMode,
+      numberPadding,
       packageName: pages.length > 1 ? projectStore.project?.projectName || "selected-pages" : undefined,
     };
     const packageName = packageInput.packageName

@@ -140,6 +140,11 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .package-file-options legend { padding: 0 .35rem; color: #55566a; font-size: .8rem; font-weight: 700; }
 .package-file-options label { display: flex; align-items: center; gap: .5rem; }
 .package-file-options input { width: auto; }
+.package-structure-options { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem 1rem; margin-top: .8rem; padding: .85rem 1rem; border: 1px solid #dedfe7; border-radius: 10px; }
+.package-structure-options legend { padding: 0 .35rem; color: #55566a; font-size: .8rem; font-weight: 700; }
+.package-structure-options label { display: inline-flex; align-items: center; gap: .4rem; }
+.package-structure-options input { width: auto; }
+.package-number-padding select { width: auto; margin-left: .2rem; }
 .package-dialog-actions { display: flex; justify-content: flex-end; gap: .55rem; margin-top: 1rem; }
 .search-replace-dialog { width: min(1050px, calc(100vw - 40px)); max-height: calc(100vh - 40px); padding: 0; border: 1px solid #d8d9e2; border-radius: 14px; color: #20202b; background: #fff; box-shadow: 0 24px 80px rgb(24 24 45 / 30%); transition: width .16s ease; }
 .search-replace-dialog.reviewing { width: min(680px, calc(100vw - 40px)); }

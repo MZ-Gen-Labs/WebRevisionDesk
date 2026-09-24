@@ -67,7 +67,7 @@ test("createProjectPackages handles multiple pages with subdirectories", async (
     },
   ];
 
-  const blob = await createProjectPackagesAsync({ pages, files: ["original", "modified"] });
+  const blob = await createProjectPackagesAsync({ pages, files: ["original", "modified"], structureMode: "hierarchical" });
   const arrayBuffer = await blob.arrayBuffer();
   const unzipped = unzipSync(new Uint8Array(arrayBuffer));
 
@@ -76,4 +76,25 @@ test("createProjectPackages handles multiple pages with subdirectories", async (
   assert.ok(unzipped["pages/page2/original.html"]);
   assert.ok(unzipped["pages/page2/modified.html"]);
   assert.equal(unzipped["pages/page1/diff.html"], undefined, "diff.html should be excluded when not selected");
+});
+
+test("createProjectPackages emits numbered flat page folders in input order with configured padding", async () => {
+  const pages = [
+    { fileName: "top.html", originalHtml: "<html>1</html>", modifiedHtml: "<html>1</html>", changes: [] },
+    { fileName: "about-company.html", originalHtml: "<html>2</html>", modifiedHtml: "<html>2</html>", changes: [] },
+  ];
+  const blob = await createProjectPackagesAsync({ pages, files: ["modified"], structureMode: "flat", numberPadding: "3" });
+  const unzipped = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+  assert.ok(unzipped["001_top/modified.html"]);
+  assert.ok(unzipped["002_about-company/modified.html"]);
+});
+
+test("createProjectPackages uses two digit auto numbering through 99 pages", async () => {
+  const pages = Array.from({ length: 3 }, (_, index) => ({
+    fileName: `page-${index + 1}.html`, originalHtml: "<html></html>", modifiedHtml: "<html></html>", changes: [],
+  }));
+  const blob = await createProjectPackagesAsync({ pages, files: ["modified"], structureMode: "flat" });
+  const unzipped = unzipSync(new Uint8Array(await blob.arrayBuffer()));
+  assert.ok(unzipped["01_page-1/modified.html"]);
+  assert.ok(unzipped["03_page-3/modified.html"]);
 });
