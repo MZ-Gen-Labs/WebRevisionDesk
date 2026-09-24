@@ -88,7 +88,7 @@ test("Windows patch installer targets compatible installs only and publishes che
   assert.match(source, /resources\\app\\\*/);
   assert.match(source, /CompareVersions\(InstalledVersion, MinimumVersion\) < 0/);
   assert.match(source, /CompareVersions\(InstalledVersion, TargetVersion\) >= 0/);
-  assert.match(source, /InitializeSetup/);
+  assert.match(source, /function PrepareToInstall\(var NeedsRestart: Boolean\): String;/);
   assert.match(source, /StopRunningApplication/);
   const baseline = JSON.parse(await readFile(path.join(root, "installer", "windows-patch-baseline.json"), "utf8"));
   assert.equal(baseline.minimumAppVersion, "0.7.10");
