@@ -66,7 +66,7 @@ begin
       PartText := '';
       PartIndex := PartIndex + 1;
     end else begin
-      if not (Version[I] in ['0'..'9']) then Exit;
+      if (Version[I] < '0') or (Version[I] > '9') then Exit;
       PartText := PartText + Version[I];
     end;
   end;
