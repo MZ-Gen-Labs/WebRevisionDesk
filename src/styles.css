@@ -73,6 +73,9 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .alternative-import span { flex: 1; color: #6b6c7d; font-size: .75rem; }
 .workspace { --project-sidebar-width: 210px; --inspector-width: 300px; display: grid; grid-template-columns: var(--project-sidebar-width) 7px minmax(0, 1fr) 7px var(--inspector-width); flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .project-sidebar { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 1rem; background: #f8f9fc; }
+.sidebar-header { display: flex; flex: 0 0 auto; align-items: flex-start; gap: .25rem; }
+.sidebar-header .sidebar-tabs { flex: 1; min-width: 0; }
+.sidebar-header > .icon-button { flex: 0 0 28px; }
 .sidebar-tabs { flex: 0 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: .3rem; padding-bottom: .65rem; background: #f8f9fc; }
 .sidebar-tabs button { display: flex; align-items: center; justify-content: center; gap: .35rem; padding: .48rem .35rem; color: #656679; background: #fff; font-size: .76rem; font-weight: 700; }
 .sidebar-tabs button.active { color: #4141b4; border-color: #9f9fe6; background: #eeeeff; }
@@ -90,6 +93,10 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .workspace.inspector-collapsed { grid-template-columns: var(--project-sidebar-width) 7px minmax(0, 1fr) 0 0; }
 .workspace.inspector-collapsed .inspector, .workspace.inspector-collapsed .inspector-resizer { visibility: hidden; overflow: hidden; }
 .show-inspector { position: absolute; z-index: 3; top: .65rem; right: .65rem; padding: .42rem .6rem; color: #4141b4; border-color: #a6a7ec; background: #f7f7ff; font-size: .74rem; font-weight: 750; }
+.workspace.sidebar-collapsed { grid-template-columns: 0 0 minmax(0, 1fr) 7px var(--inspector-width); }
+.workspace.sidebar-collapsed .project-sidebar, .workspace.sidebar-collapsed .project-sidebar-resizer { visibility: hidden; overflow: hidden; }
+.workspace.sidebar-collapsed.inspector-collapsed { grid-template-columns: 0 0 minmax(0, 1fr) 0 0; }
+.show-project-sidebar { position: absolute; z-index: 3; top: .65rem; left: .65rem; padding: .42rem .6rem; color: #4141b4; border-color: #a6a7ec; background: #f7f7ff; font-size: .74rem; font-weight: 750; }
 .project-heading { padding-bottom: .7rem; border-bottom: 1px solid #dedfe7; }
 .project-heading h2 span { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 999px; color: #fff; background: #5b5bd6; font-size: .75rem; }
 #project-list-panel, #heading-outline-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; }

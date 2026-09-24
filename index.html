@@ -88,14 +88,17 @@
       </div>
     </details>
     <main id="workspace" class="workspace">
-      <aside class="project-sidebar" aria-label="案件ページ一覧">
-        <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
-          <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
-            <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
-          </button>
-          <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
-            <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
-          </button>
+      <aside id="project-sidebar" class="project-sidebar" aria-label="案件ページ一覧">
+        <div class="sidebar-header">
+          <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
+            <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
+              <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
+            </button>
+            <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
+              <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
+            </button>
+          </div>
+          <button id="collapse-project-sidebar" class="icon-button" type="button" aria-label="サイドバーを閉じる" aria-controls="project-sidebar" aria-expanded="true" title="サイドバーを閉じる（Alt + 4）">×</button>
         </div>
         <div id="project-list-panel">
           <div class="project-heading">
@@ -338,6 +341,7 @@
         </div>
       </aside>
       <button id="show-inspector" class="show-inspector" type="button" hidden aria-label="編集メニューを表示" title="編集メニューを表示（Alt + 3）">◀ 編集メニュー</button>
+      <button id="show-project-sidebar" class="show-project-sidebar" type="button" hidden aria-controls="project-sidebar" aria-label="サイドバーを表示" title="サイドバーを表示（Alt + 4）">▶ サイドバー</button>
     </main>
 
     <dialog id="search-replace-dialog" class="search-replace-dialog">

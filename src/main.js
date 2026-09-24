@@ -75,6 +75,7 @@ const ui = {
   resourceFailures: $("#resource-failures"), resourceFailureList: $("#resource-failure-list"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
+  collapseProjectSidebar: $("#collapse-project-sidebar"), showProjectSidebar: $("#show-project-sidebar"),
   inspectorResizer: $("#inspector-resizer"), collapseInspector: $("#collapse-inspector"), showInspector: $("#show-inspector"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
   packageStructureOptions: $("#package-structure-options"), packageNumberPadding: $("#package-number-padding"),
@@ -134,6 +135,7 @@ function syncLoginControls() {
 }
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
+const SIDEBAR_COLLAPSED_KEY = "web-revision-sidebar-collapsed";
 const INSPECTOR_WIDTH_KEY = "web-revision-inspector-width";
 const INSPECTOR_COLLAPSED_KEY = "web-revision-inspector-collapsed";
 const DEFAULT_INSPECTOR_WIDTH = 300;
@@ -211,6 +213,7 @@ function initializeProjectSidebarResize() {
   const savedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
   if (Number.isFinite(savedWidth) && savedWidth > 0) setProjectSidebarWidth(savedWidth, { persist: false });
   else ui.projectSidebarResizer.setAttribute("aria-valuenow", String(Math.round(ui.projectSidebar.getBoundingClientRect().width)));
+  setProjectSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true", { persist: false });
 
   ui.projectSidebarResizer.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -218,13 +221,21 @@ function initializeProjectSidebarResize() {
     const startWidth = ui.projectSidebar.getBoundingClientRect().width;
     ui.workspace.classList.add("resizing-sidebar");
     ui.projectSidebarResizer.setPointerCapture(event.pointerId);
-    const move = (moveEvent) => setProjectSidebarWidth(startWidth + moveEvent.clientX - startX, { persist: false });
+    const move = (moveEvent) => {
+      const nextWidth = startWidth + moveEvent.clientX - startX;
+      if (nextWidth < 140) setProjectSidebarCollapsed(true, { persist: false });
+      else {
+        setProjectSidebarCollapsed(false, { persist: false });
+        setProjectSidebarWidth(nextWidth, { persist: false });
+      }
+    };
     const finish = () => {
       ui.workspace.classList.remove("resizing-sidebar");
       ui.projectSidebarResizer.removeEventListener("pointermove", move);
       ui.projectSidebarResizer.removeEventListener("pointerup", finish);
       ui.projectSidebarResizer.removeEventListener("pointercancel", finish);
-      setProjectSidebarWidth(ui.projectSidebar.getBoundingClientRect().width);
+      if (!ui.workspace.classList.contains("sidebar-collapsed")) setProjectSidebarWidth(ui.projectSidebar.getBoundingClientRect().width);
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(ui.workspace.classList.contains("sidebar-collapsed")));
     };
     ui.projectSidebarResizer.addEventListener("pointermove", move);
     ui.projectSidebarResizer.addEventListener("pointerup", finish);
@@ -242,6 +253,19 @@ function initializeProjectSidebarResize() {
     setProjectSidebarWidth(next);
   });
   ui.projectSidebarResizer.addEventListener("dblclick", () => setProjectSidebarWidth(210));
+  ui.collapseProjectSidebar.addEventListener("click", () => setProjectSidebarCollapsed(true));
+  ui.showProjectSidebar.addEventListener("click", () => setProjectSidebarCollapsed(false));
+}
+
+function setProjectSidebarCollapsed(collapsed, { persist = true } = {}) {
+  ui.workspace.classList.toggle("sidebar-collapsed", collapsed);
+  ui.projectSidebar.setAttribute("aria-hidden", String(collapsed));
+  ui.projectSidebarResizer.setAttribute("aria-hidden", String(collapsed));
+  ui.projectSidebarResizer.tabIndex = collapsed ? -1 : 0;
+  ui.collapseProjectSidebar.setAttribute("aria-expanded", String(!collapsed));
+  ui.collapseProjectSidebar.tabIndex = collapsed ? -1 : 0;
+  ui.showProjectSidebar.hidden = !collapsed;
+  if (persist) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
 }
 
 function setInspectorWidth(width, { persist = true } = {}) {
@@ -2901,17 +2925,24 @@ function handleKeyboardShortcut(event) {
   if (event.altKey && !event.ctrlKey && !event.metaKey) {
     if (event.code === "Digit1" || event.key === "ArrowLeft") {
       event.preventDefault();
+      setProjectSidebarCollapsed(false);
       setSidebarPanel("pages");
       return;
     }
     if ((event.code === "Digit2" || event.key === "ArrowRight") && !ui.showHeadingOutline.disabled) {
       event.preventDefault();
+      setProjectSidebarCollapsed(false);
       setSidebarPanel("outline");
       return;
     }
     if (event.code === "Digit3") {
       event.preventDefault();
       setInspectorCollapsed(!ui.workspace.classList.contains("inspector-collapsed"));
+      return;
+    }
+    if (event.code === "Digit4") {
+      event.preventDefault();
+      setProjectSidebarCollapsed(!ui.workspace.classList.contains("sidebar-collapsed"));
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
