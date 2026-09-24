@@ -58,7 +58,7 @@ function createPageEntries({ fileName, originalHtml, modifiedHtml, changes = [],
   return entries;
 }
 
-function collectEntries({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
+function packageOptions({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
   if (!pages?.length) throw new Error("保存するページがありません。");
   const selectedFiles = new Set(files);
   if (!selectedFiles.size) throw new Error("保存するファイルを1つ以上選択してください。");
@@ -66,17 +66,26 @@ function collectEntries({ pages, files = DEFAULT_FILES, structureMode = "flat", 
   const padding = numberPadding === "auto"
     ? (pages.length <= 99 ? 2 : 3)
     : Math.max(2, Math.min(4, Number(numberPadding) || 2));
+  return { pages, selectedFiles, multiple, structureMode, padding };
+}
+
+function pageOutputPath(page, index, { multiple, structureMode, padding }) {
+  if (!multiple) return "";
+  if (structureMode === "flat") {
+    const folderName = baseName(page.fileName)
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+      .replace(/\.+$/g, "") || "page";
+    return `${String(index + 1).padStart(padding, "0")}_${folderName}`;
+  }
+  return page.path || `pages/${baseName(page.fileName)}-${index + 1}`;
+}
+
+function collectEntries(options) {
+  const packageConfig = packageOptions(options);
+  const { pages, selectedFiles } = packageConfig;
   const entries = {};
   pages.forEach((page, index) => {
-    let path = "";
-    if (multiple && structureMode === "flat") {
-      const folderName = baseName(page.fileName)
-        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
-        .replace(/\.+$/g, "") || "page";
-      path = `${String(index + 1).padStart(padding, "0")}_${folderName}`;
-    } else if (multiple) {
-      path = page.path || `pages/${baseName(page.fileName)}-${index + 1}`;
-    }
+    const path = pageOutputPath(page, index, packageConfig);
     Object.assign(entries, createPageEntries({ ...page, path }, selectedFiles));
   });
   return entries;
@@ -87,17 +96,24 @@ export function createProjectPackages({ pages, files = DEFAULT_FILES, structureM
   return new Blob([zipSync(entries, { level: 6 })], { type: "application/zip" });
 }
 
-export function createProjectPackagesAsync({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto" }) {
+export async function createProjectPackagesAsync({ pages, files = DEFAULT_FILES, structureMode = "flat", numberPadding = "auto", onProgress }) {
+  const options = { pages, files, structureMode, numberPadding };
+  const packageConfig = packageOptions(options);
+  const { selectedFiles } = packageConfig;
+  const entries = {};
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index];
+    const path = pageOutputPath(page, index, packageConfig);
+    Object.assign(entries, createPageEntries({ ...page, path }, selectedFiles));
+    onProgress?.({ phase: "generating", completed: index + 1, total: pages.length });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  onProgress?.({ phase: "compressing", completed: pages.length, total: pages.length });
   return new Promise((resolve, reject) => {
-    try {
-      const entries = collectEntries({ pages, files, structureMode, numberPadding });
-      zip(entries, { level: 6 }, (err, data) => {
-        if (err) reject(err);
-        else resolve(new Blob([data], { type: "application/zip" }));
-      });
-    } catch (error) {
-      reject(error);
-    }
+    zip(entries, { level: 6 }, (err, data) => {
+      if (err) reject(err);
+      else resolve(new Blob([data], { type: "application/zip" }));
+    });
   });
 }
 

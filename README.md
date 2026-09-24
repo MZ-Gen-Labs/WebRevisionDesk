@@ -16,6 +16,8 @@ npm ci
 npm run electron:dev
 ```
 
+macOSでの開発ビルド・起動方法と、このMacで起きた起動時の注意点は [`docs/macos-development.md`](docs/macos-development.md) に記録しています。
+
 元の機能検証画面は`npm run electron:feasibility`で残しています。検証結果は[`docs/05-electron-feasibility.md`](docs/05-electron-feasibility.md)、移行内容は[`docs/06-electron-migration.md`](docs/06-electron-migration.md)を参照してください。
 
 ## できること

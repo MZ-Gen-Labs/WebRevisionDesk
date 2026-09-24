@@ -1,6 +1,6 @@
 {
   "name": "web-revision-desk",
-  "version": "0.7.11",
+  "version": "0.7.15",
   "main": "electron/main.mjs",
   "private": true,
   "description": "Capture, edit, compare, and create clear revision instructions for existing web pages.",
@@ -24,6 +24,7 @@
     "electron:migration:package:win": "npm run build && node scripts/build-electron-migration.mjs",
     "build:electron:win": "npm run build && node scripts/build-electron-migration.mjs",
     "build:windows:installer": "node scripts/build-windows-installer.mjs",
+    "build:electron:mac:app": "npm run build && node scripts/build-electron-mac.mjs --app-only",
     "build:electron:mac": "npm run build && node scripts/build-electron-mac.mjs",
     "build": "vite build",
     "version:check": "node scripts/check-version.mjs",

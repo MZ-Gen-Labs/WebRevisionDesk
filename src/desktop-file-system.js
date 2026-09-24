@@ -33,9 +33,10 @@ class DesktopFileHandle {
 }
 
 class DesktopDirectoryHandle {
-  constructor(parts = [], name = "") {
+  constructor(parts = [], name = "", path = "") {
     this.parts = parts;
     this.name = name;
+    this.path = path;
     this.kind = "directory";
   }
 
@@ -71,14 +72,25 @@ function base64FromBytes(bytes) {
   return btoa(text);
 }
 
+async function base64FromBlob(blob) {
+  return base64FromBytes(new Uint8Array(await blob.arrayBuffer()));
+}
+
 export async function saveDesktopOutput(blob, { suggestedName, filters = [] } = {}) {
   if (!desktopFileSystemAvailable()) return null;
-  const bytes = new Uint8Array(await blob.arrayBuffer());
   return unwrap(desktop().saveOutput({
     suggestedName,
-    contentBase64: base64FromBytes(bytes),
+    contentBase64: await base64FromBlob(blob),
     filters,
   }));
+}
+
+export async function chooseDesktopOutput({ suggestedName, filters = [] } = {}) {
+  return unwrap(desktop().chooseOutput({ suggestedName, filters }));
+}
+
+export async function writeDesktopOutput(token, blob) {
+  return unwrap(desktop().writeOutput({ token, contentBase64: await base64FromBlob(blob) }));
 }
 
 export async function selectDesktopProjectDirectory() {
@@ -88,7 +100,7 @@ export async function selectDesktopProjectDirectory() {
     error.name = "AbortError";
     throw error;
   }
-  return new DesktopDirectoryHandle([], selected.name);
+  return new DesktopDirectoryHandle([], selected.name, selected.path);
 }
 
 export async function listRecentDesktopProjectDirectories() {
@@ -97,7 +109,7 @@ export async function listRecentDesktopProjectDirectories() {
 
 export async function openRecentDesktopProjectDirectory(projectPath) {
   const selected = await unwrap(desktop().openRecentProjectDirectory(projectPath));
-  return new DesktopDirectoryHandle([], selected.name);
+  return new DesktopDirectoryHandle([], selected.name, selected.path);
 }
 
 export async function removeRecentDesktopProjectDirectory(projectPath) {

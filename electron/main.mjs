@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, session } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, protocol, session, shell } from "electron";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile, stat, rm, readdir } from "node:fs/promises";
@@ -7,6 +7,8 @@ import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
+import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
+import { normalizeUpdateDownloadTimeoutSeconds } from "../src/update-timeout.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -27,6 +29,7 @@ const MAX_RESOURCE_BYTES = 15 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 60 * 1024 * 1024;
 const navigationTimeoutMs = 45_000;
 const browserTaskQueue = new BrowserTaskQueue();
+const pendingOutputTargets = new Map();
 
 let mainWindow;
 let pageWindow;
@@ -638,23 +641,41 @@ async function checkForUpdate() {
   return { supported: true, currentVersion: packageJson.version, available: compareVersions(release.version, packageJson.version) > 0, ...release };
 }
 
-async function downloadUpdate() {
+async function fetchUpdateAsset(url, timeoutSeconds) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
+  try {
+    const response = await net.fetch(url, {
+      headers: { "User-Agent": "WebRevisionDesk" },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    if (controller.signal.aborted || error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new Error(`更新ファイルのダウンロードがタイムアウトしました（設定時間: ${timeoutSeconds}秒）。`);
+    }
+    throw new Error(`更新ファイルをダウンロードできませんでした: ${error.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function downloadUpdate(body = {}) {
+  const timeoutSeconds = normalizeUpdateDownloadTimeoutSeconds(body.timeoutSeconds);
   const update = await checkForUpdate();
   if (!update.available) return { ...update, downloaded: false };
-  const sumsResponse = await net.fetch(update.sumsUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
-  const zipResponse = await net.fetch(update.zipUrl, { headers: { "User-Agent": "WebRevisionDesk" } });
-  if (!sumsResponse.ok || !zipResponse.ok) throw new Error("更新ファイルをダウンロードできませんでした。");
-  const sums = await sumsResponse.text();
+  const sums = (await fetchUpdateAsset(update.sumsUrl, timeoutSeconds)).toString("utf8");
   const expected = sums.match(new RegExp(`^([a-fA-F0-9]{64})\\s+${update.zipName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"))?.[1];
   if (!expected) throw new Error("公開されたSHA-256チェックサムが見つかりません。");
-  const body = Buffer.from(await zipResponse.arrayBuffer());
-  const actual = createHash("sha256").update(body).digest("hex");
+  const archive = await fetchUpdateAsset(update.zipUrl, timeoutSeconds);
+  const actual = createHash("sha256").update(archive).digest("hex");
   if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("更新ファイルのSHA-256が一致しません。");
   const updatesDirectory = path.join(app.getPath("userData"), "updates");
   await mkdir(updatesDirectory, { recursive: true });
   const zipPath = path.join(updatesDirectory, update.zipName);
   await rm(`${zipPath}.retry`, { force: true });
-  await writeFile(zipPath, body);
+  await writeFile(zipPath, archive);
   downloadedUpdate = { ...update, zipPath, sha256: actual, installDirectory: updateInstallPath() };
   await record("update-downloaded", { version: update.version });
   return { ...update, downloaded: true };
@@ -777,7 +798,7 @@ async function handleEditorApi({ url, method, bodyBase64 }) {
     return jsonResponse({ version: packageJson.version });
   }
   if (method === "GET" && url === "/api/update/check") return jsonResponse(await checkForUpdate());
-  if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate());
+  if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate(body));
   if (method === "POST" && url === "/api/update/apply") return jsonResponse(await applyDownloadedUpdate());
   if (method === "POST" && url === "/api/capture/start") {
     const metadata = await openCapturePage(body.url, { show: true });
@@ -840,7 +861,7 @@ function fileResultError(error) {
   return { ok: false, errorName, message: error.message };
 }
 
-async function handleFileSystem({ operation, parts = [], create = false, content = "", contentBase64 = "", suggestedName = "", filters = [], recursive = false }) {
+async function handleFileSystem({ operation, parts = [], create = false, content = "", contentBase64 = "", suggestedName = "", filters = [], recursive = false, token = "" }) {
   try {
     if (operation === "select") {
       const settings = await readEditorSettings();
@@ -852,7 +873,7 @@ async function handleFileSystem({ operation, parts = [], create = false, content
       if (selected.canceled || !selected.filePaths[0]) return { ok: true, value: null };
       projectDirectory = path.resolve(selected.filePaths[0]);
       await rememberRecentProject(projectDirectory);
-      return { ok: true, value: { name: path.basename(projectDirectory) } };
+      return { ok: true, value: { name: path.basename(projectDirectory), path: projectDirectory } };
     }
     if (operation === "recent-list") {
       const settings = await readEditorSettings();
@@ -871,7 +892,7 @@ async function handleFileSystem({ operation, parts = [], create = false, content
       if (!(await stat(requested)).isDirectory()) throw Object.assign(new Error("案件フォルダが見つかりません。"), { code: "ENOENT" });
       projectDirectory = requested;
       await rememberRecentProject(projectDirectory);
-      return { ok: true, value: { name: path.basename(projectDirectory) } };
+      return { ok: true, value: { name: path.basename(projectDirectory), path: projectDirectory } };
     }
     if (operation === "remove-recent") {
       const settings = await readEditorSettings();
@@ -882,6 +903,27 @@ async function handleFileSystem({ operation, parts = [], create = false, content
         : settings.lastProjectDirectory;
       await writeEditorSettings({ ...settings, lastProjectDirectory, recentProjects });
       return { ok: true, value: recentProjects };
+    }
+    if (operation === "choose-output") {
+      const selected = await dialog.showSaveDialog(mainWindow, {
+        title: "保存先を選択",
+        defaultPath: path.basename(String(suggestedName || "web-revision-output")),
+        filters: Array.isArray(filters) ? filters : [],
+      });
+      if (selected.canceled || !selected.filePath) return { ok: true, value: null };
+      for (const [key, target] of pendingOutputTargets) {
+        if (target.expiresAt < Date.now()) pendingOutputTargets.delete(key);
+      }
+      const outputToken = randomUUID();
+      pendingOutputTargets.set(outputToken, { filePath: selected.filePath, expiresAt: Date.now() + 5 * 60_000 });
+      return { ok: true, value: { token: outputToken } };
+    }
+    if (operation === "write-output") {
+      const target = pendingOutputTargets.get(token);
+      pendingOutputTargets.delete(token);
+      if (!target || target.expiresAt < Date.now()) throw new Error("保存先の選択が期限切れです。もう一度保存してください。");
+      await writeFile(target.filePath, Buffer.from(String(contentBase64), "base64"));
+      return { ok: true, value: { path: target.filePath } };
     }
     if (operation === "save-output") {
       const selected = await dialog.showSaveDialog(mainWindow, {
@@ -929,6 +971,12 @@ function registerIpc() {
   ipcMain.handle("editor:file-system", async (event, request) => {
     assertTrustedSender(event);
     return handleFileSystem(request);
+  });
+  ipcMain.handle("editor:open-external", async (event, url) => {
+    assertTrustedSender(event);
+    if (!isAllowedReleaseUrl(url)) throw new Error("許可されていない外部URLです。");
+    await shell.openExternal(LATEST_RELEASE_URL);
+    return { ok: true };
   });
   ipcMain.handle("feasibility:get-info", async (event) => {
     assertTrustedSender(event);
@@ -1130,7 +1178,7 @@ app.whenReady().then(async () => {
     await createMainWindow({ show: false });
     const title = await mainWindow.webContents.executeJavaScript("document.title");
     if (title !== "Web Revision Desk") throw new Error(`Unexpected editor page title: ${title}`);
-    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.fileSystem)");
+    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.openExternal && window.webRevisionDesktop?.fileSystem?.chooseOutput && window.webRevisionDesktop?.fileSystem?.writeOutput)");
     if (!desktopApi) throw new Error("Electron editor bridge was not exposed.");
     const appInfo = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request({ url: "/api/app-info", method: "GET", headers: {}, bodyBase64: "" })`);
     const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));

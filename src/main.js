@@ -2,7 +2,7 @@ import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR, sanitizeImportedHtml } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { createProjectPackages, createProjectPackagesAsync, downloadProjectPackage } from "./project-package.js";
-import { desktopFileSystemAvailable, saveDesktopOutput } from "./desktop-file-system.js";
+import { chooseDesktopOutput, desktopFileSystemAvailable, saveDesktopOutput, writeDesktopOutput } from "./desktop-file-system.js";
 import {
   DEFAULT_SEARCH_REPLACE_RULE,
   MAX_SEARCH_REPLACE_RULES,
@@ -13,6 +13,13 @@ import {
 import { pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
+import { LATEST_RELEASE_URL } from "./release-links.js";
+import {
+  DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+  normalizeUpdateDownloadTimeoutSeconds,
+} from "./update-timeout.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -23,7 +30,10 @@ const ui = {
   modified: $("#show-modified"), redline: $("#show-redline"), undo: $("#undo"), redo: $("#redo"), reset: $("#reset"),
   searchReplace: $("#search-replace"), download: $("#download"),
   updateControls: $("#update-controls"), updateStatus: $("#update-status"), checkUpdate: $("#check-update"),
-  downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"),
+  downloadUpdate: $("#download-update"), applyUpdate: $("#apply-update"), openLatestRelease: $("#open-latest-release"),
+  updateTimeoutDialog: $("#update-timeout-dialog"), updateTimeoutError: $("#update-timeout-error"),
+  updateTimeoutInput: $("#update-timeout-seconds"), updateTimeoutRetry: $("#update-timeout-retry"),
+  updateTimeoutOpenRelease: $("#update-timeout-open-release"),
   downloadDiff: $("#download-diff"),
   downloadRedline: $("#download-redline"),
   downloadPackage: $("#download-package"),
@@ -39,6 +49,8 @@ const ui = {
   captureSessionActions: $("#capture-session-actions"), finishCapture: $("#capture-current-page"),
   cancelCapture: $("#cancel-capture"), captureState: $("#capture-state"),
   selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
+  setupPanelSummary: $("#setup-panel-summary"), setupSummaryProject: $("#setup-summary-project"),
+  setupSummaryUrl: $("#setup-summary-url"), setupSummaryPath: $("#setup-summary-path"), projectSavePath: $("#project-save-path"),
   recentProjects: $("#recent-projects"), recentProjectList: $("#recent-project-list"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
@@ -74,6 +86,7 @@ const ui = {
   resourceFailures: $("#resource-failures"), resourceFailureList: $("#resource-failure-list"),
   advancedMode: $("#advanced-mode"), inspector: $(".inspector"),
   workspace: $("#workspace"), projectSidebar: $(".project-sidebar"), projectSidebarResizer: $("#project-sidebar-resizer"),
+  collapseProjectSidebar: $("#collapse-project-sidebar"), showProjectSidebar: $("#show-project-sidebar"),
   inspectorResizer: $("#inspector-resizer"), collapseInspector: $("#collapse-inspector"), showInspector: $("#show-inspector"),
   packageDialog: $("#package-dialog"), packageTargetSummary: $("#package-target-summary"),
   packageStructureOptions: $("#package-structure-options"), packageNumberPadding: $("#package-number-padding"),
@@ -133,6 +146,7 @@ function syncLoginControls() {
 }
 const projectStore = new ProjectStore();
 const SIDEBAR_WIDTH_KEY = "web-revision-project-sidebar-width";
+const SIDEBAR_COLLAPSED_KEY = "web-revision-sidebar-collapsed";
 const INSPECTOR_WIDTH_KEY = "web-revision-inspector-width";
 const INSPECTOR_COLLAPSED_KEY = "web-revision-inspector-collapsed";
 const DEFAULT_INSPECTOR_WIDTH = 300;
@@ -210,6 +224,7 @@ function initializeProjectSidebarResize() {
   const savedWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
   if (Number.isFinite(savedWidth) && savedWidth > 0) setProjectSidebarWidth(savedWidth, { persist: false });
   else ui.projectSidebarResizer.setAttribute("aria-valuenow", String(Math.round(ui.projectSidebar.getBoundingClientRect().width)));
+  setProjectSidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true", { persist: false });
 
   ui.projectSidebarResizer.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -217,13 +232,21 @@ function initializeProjectSidebarResize() {
     const startWidth = ui.projectSidebar.getBoundingClientRect().width;
     ui.workspace.classList.add("resizing-sidebar");
     ui.projectSidebarResizer.setPointerCapture(event.pointerId);
-    const move = (moveEvent) => setProjectSidebarWidth(startWidth + moveEvent.clientX - startX, { persist: false });
+    const move = (moveEvent) => {
+      const nextWidth = startWidth + moveEvent.clientX - startX;
+      if (nextWidth < 140) setProjectSidebarCollapsed(true, { persist: false });
+      else {
+        setProjectSidebarCollapsed(false, { persist: false });
+        setProjectSidebarWidth(nextWidth, { persist: false });
+      }
+    };
     const finish = () => {
       ui.workspace.classList.remove("resizing-sidebar");
       ui.projectSidebarResizer.removeEventListener("pointermove", move);
       ui.projectSidebarResizer.removeEventListener("pointerup", finish);
       ui.projectSidebarResizer.removeEventListener("pointercancel", finish);
-      setProjectSidebarWidth(ui.projectSidebar.getBoundingClientRect().width);
+      if (!ui.workspace.classList.contains("sidebar-collapsed")) setProjectSidebarWidth(ui.projectSidebar.getBoundingClientRect().width);
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(ui.workspace.classList.contains("sidebar-collapsed")));
     };
     ui.projectSidebarResizer.addEventListener("pointermove", move);
     ui.projectSidebarResizer.addEventListener("pointerup", finish);
@@ -241,6 +264,19 @@ function initializeProjectSidebarResize() {
     setProjectSidebarWidth(next);
   });
   ui.projectSidebarResizer.addEventListener("dblclick", () => setProjectSidebarWidth(210));
+  ui.collapseProjectSidebar.addEventListener("click", () => setProjectSidebarCollapsed(true));
+  ui.showProjectSidebar.addEventListener("click", () => setProjectSidebarCollapsed(false));
+}
+
+function setProjectSidebarCollapsed(collapsed, { persist = true } = {}) {
+  ui.workspace.classList.toggle("sidebar-collapsed", collapsed);
+  ui.projectSidebar.setAttribute("aria-hidden", String(collapsed));
+  ui.projectSidebarResizer.setAttribute("aria-hidden", String(collapsed));
+  ui.projectSidebarResizer.tabIndex = collapsed ? -1 : 0;
+  ui.collapseProjectSidebar.setAttribute("aria-expanded", String(!collapsed));
+  ui.collapseProjectSidebar.tabIndex = collapsed ? -1 : 0;
+  ui.showProjectSidebar.hidden = !collapsed;
+  if (persist) localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed));
 }
 
 function setInspectorWidth(width, { persist = true } = {}) {
@@ -435,6 +471,33 @@ async function loadAppInfo() {
 }
 
 let availableUpdate = null;
+const UPDATE_TIMEOUT_STORAGE_KEY = "webRevisionDesk.updateDownloadTimeoutSeconds";
+
+function getUpdateDownloadTimeoutSeconds() {
+  try {
+    const saved = localStorage.getItem(UPDATE_TIMEOUT_STORAGE_KEY);
+    return saved === null
+      ? DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS
+      : normalizeUpdateDownloadTimeoutSeconds(saved);
+  } catch {
+    return DEFAULT_UPDATE_DOWNLOAD_TIMEOUT_SECONDS;
+  }
+}
+
+function showLatestReleaseAction(visible) {
+  ui.openLatestRelease.hidden = !visible;
+}
+
+async function openLatestRelease() {
+  try {
+    if (window.webRevisionDesktop?.openExternal) await window.webRevisionDesktop.openExternal(LATEST_RELEASE_URL);
+    else window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
+  } catch (error) {
+    setStatus(`GitHub Releaseを開けませんでした: ${error.message}`, "error");
+  }
+}
+ui.openLatestRelease.addEventListener("click", () => { void openLatestRelease(); });
+ui.updateTimeoutOpenRelease.addEventListener("click", () => { void openLatestRelease(); });
 
 async function checkForApplicationUpdate({ quiet = false } = {}) {
   ui.updateControls.hidden = false;
@@ -450,9 +513,11 @@ async function checkForApplicationUpdate({ quiet = false } = {}) {
     availableUpdate = update.available ? update : null;
     ui.downloadUpdate.hidden = !update.available;
     ui.applyUpdate.hidden = true;
+    showLatestReleaseAction(update.available);
     ui.updateStatus.textContent = update.available ? `v${update.version} を利用できます` : "最新版です";
     if (!quiet) setStatus(update.available ? `v${update.version} をダウンロードできます。` : "このアプリは最新版です。", "success");
   } catch (error) {
+    showLatestReleaseAction(true);
     if (!quiet) setStatus(`更新を確認できませんでした: ${error.message}`, "error");
   } finally {
     setButtonProcessing(ui.checkUpdate, false);
@@ -460,23 +525,54 @@ async function checkForApplicationUpdate({ quiet = false } = {}) {
 }
 
 ui.checkUpdate.addEventListener("click", () => { void checkForApplicationUpdate(); });
-ui.downloadUpdate.addEventListener("click", async () => {
+function showUpdateDownloadFailure(error) {
+  const timeoutSeconds = getUpdateDownloadTimeoutSeconds();
+  ui.updateTimeoutInput.value = String(timeoutSeconds);
+  ui.updateTimeoutError.textContent = error.message || "通信状態を確認して、タイムアウト値を調整して再試行してください。";
+  ui.updateStatus.textContent = "更新のダウンロードに失敗しました";
+  if (!ui.updateTimeoutDialog.open) ui.updateTimeoutDialog.showModal();
+  showLatestReleaseAction(true);
+  setStatus(`更新をダウンロードできませんでした: ${ui.updateTimeoutError.textContent}`, "error");
+}
+
+async function downloadApplicationUpdate(timeoutSeconds = getUpdateDownloadTimeoutSeconds()) {
   setButtonProcessing(ui.downloadUpdate, true);
   try {
-    const response = await appFetch("/api/update/download", { method: "POST" });
-    if (!response.ok) throw new Error((await response.json()).error || `HTTP ${response.status}`);
+    const response = await postJson("/api/update/download", { timeoutSeconds });
     const update = await response.json();
     if (!update.downloaded) return checkForApplicationUpdate();
     availableUpdate = update;
     ui.downloadUpdate.hidden = true;
     ui.applyUpdate.hidden = false;
+    showLatestReleaseAction(true);
     ui.updateStatus.textContent = `v${update.version} を準備しました`;
     setStatus("更新をダウンロードし、SHA-256を確認しました。", "success");
   } catch (error) {
-    setStatus(`更新をダウンロードできませんでした: ${error.message}`, "error");
+    showUpdateDownloadFailure(error);
   } finally {
     setButtonProcessing(ui.downloadUpdate, false);
   }
+}
+
+ui.downloadUpdate.addEventListener("click", () => { void downloadApplicationUpdate(); });
+ui.updateTimeoutRetry.addEventListener("click", () => {
+  const timeoutSeconds = Number(ui.updateTimeoutInput.value);
+  if (!Number.isInteger(timeoutSeconds)
+      || timeoutSeconds < MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS
+      || timeoutSeconds > MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS) {
+    ui.updateTimeoutInput.setCustomValidity(`タイムアウト値は${MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS}〜${MAX_UPDATE_DOWNLOAD_TIMEOUT_SECONDS}秒で入力してください。`);
+    ui.updateTimeoutInput.reportValidity();
+    return;
+  }
+  ui.updateTimeoutInput.setCustomValidity("");
+  try {
+    localStorage.setItem(UPDATE_TIMEOUT_STORAGE_KEY, String(timeoutSeconds));
+  } catch (error) {
+    setStatus(`タイムアウト設定を保存できませんでした: ${error.message}`, "error");
+    return;
+  }
+  ui.updateTimeoutDialog.close();
+  void downloadApplicationUpdate(timeoutSeconds);
 });
 ui.applyUpdate.addEventListener("click", async () => {
   if (!availableUpdate || !window.confirm(`v${availableUpdate.version} を適用するため、アプリを再起動します。`)) return;
@@ -712,6 +808,7 @@ function syncTableToolsVisibility(tableContext = editor.getTableContext()) {
 
 function syncProjectControls() {
   const hasProject = Boolean(projectStore.project);
+  updateProjectSummary();
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
   ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
@@ -724,6 +821,29 @@ function syncProjectControls() {
   ui.file.disabled = !hasProject;
   ui.htmlImportButton.setAttribute("aria-disabled", String(!hasProject));
   updateBatchControls();
+}
+
+function updateProjectSummary() {
+  const directory = projectStore.directory;
+  const hasProject = Boolean(projectStore.project && directory);
+  const projectName = hasProject ? (ui.projectName.value.trim() || directory.name) : "案件フォルダ未選択";
+  const baseUrl = hasProject ? (ui.projectBaseUrl.value.trim() || "未設定") : "未設定";
+  const projectPath = hasProject
+    ? (directory.path || `ブラウザ参照: ${directory.name}`)
+    : "未選択";
+  const fullSummary = hasProject
+    ? `案件名: ${projectName}\n基準URL: ${baseUrl}\n保存パス: ${projectPath}`
+    : "案件フォルダ未選択";
+
+  ui.setupSummaryProject.textContent = projectName;
+  ui.setupSummaryUrl.textContent = baseUrl;
+  ui.setupSummaryPath.textContent = projectPath;
+  ui.setupPanelSummary.title = fullSummary;
+  ui.setupSummaryProject.title = projectName;
+  ui.setupSummaryUrl.title = baseUrl;
+  ui.setupSummaryPath.title = projectPath;
+  ui.projectSavePath.textContent = projectPath;
+  ui.projectSavePath.title = projectPath;
 }
 
 function updateBatchControls() {
@@ -2045,6 +2165,34 @@ async function saveOutput(blob, suggestedName, filters) {
   return Boolean(saved);
 }
 
+async function choosePackageOutput(suggestedName, filters) {
+  if (desktopFileSystemAvailable()) {
+    const target = await chooseDesktopOutput({ suggestedName, filters });
+    return target ? { save: (blob) => writeDesktopOutput(target.token, blob) } : null;
+  }
+  if (typeof window.showSaveFilePicker === "function") {
+    const types = filters.map((filter) => ({
+      description: filter.name,
+      accept: { "application/zip": filter.extensions.map((extension) => `.${extension}`) },
+    }));
+    const handle = await window.showSaveFilePicker({ suggestedName, types });
+    return {
+      save: async (blob) => {
+        const writable = await handle.createWritable();
+        try {
+          await writable.write(blob);
+          await writable.close();
+          return true;
+        } catch (error) {
+          try { await writable.abort?.(); } catch {}
+          throw error;
+        }
+      },
+    };
+  }
+  return { save: async (blob) => { downloadBlob(blob, suggestedName); return true; } };
+}
+
 ui.download.addEventListener("click", async () => {
   const html = state.mode === "modified" ? editor.getExportHtml() : cleanHtmlString(state.modifiedHtml);
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
@@ -2700,11 +2848,12 @@ function showPackageDialog() {
   ui.packageDialog.showModal();
 }
 
-async function packagePagesForDownload() {
+async function packagePagesForDownload(onProgress = () => {}) {
   if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
   const selected = selectedSavedPackagePages();
   if (!selected.length) {
     if (!state.originalHtml) throw new Error("保存するページがありません。");
+    onProgress({ phase: "loading", completed: 1, total: 1 });
     return [{
       fileName: state.fileName,
       originalHtml: state.originalHtml,
@@ -2713,27 +2862,34 @@ async function packagePagesForDownload() {
       sourceUrl: state.sourceUrl,
     }];
   }
-  return Promise.all(selected.map(async (page) => {
+  const pages = [];
+  for (let index = 0; index < selected.length; index += 1) {
+    const page = selected[index];
+    onProgress({ phase: "loading", completed: index, total: selected.length });
     if (page.id === state.activeProjectPageId && state.originalHtml) {
-      return {
+      pages.push({
         ...page,
         fileName: state.fileName,
         originalHtml: state.originalHtml,
         modifiedHtml: state.modifiedHtml,
         changes: changesFromOriginal(),
         sourceUrl: state.sourceUrl,
-      };
-    }
-    const saved = await projectStore.loadPage(page.id);
-    return {
-      ...saved.page,
-      originalHtml: saved.originalHtml,
-      modifiedHtml: saved.workingHtml,
+      });
+    } else {
+      const saved = await projectStore.loadPage(page.id);
+      pages.push({
+        ...saved.page,
+        originalHtml: saved.originalHtml,
+        modifiedHtml: saved.workingHtml,
         changes: normalizedChangesFromOriginal(saved.changes, saved.workingHtml),
         resourceFailures: saved.page.resourceFailures,
-      sourceUrl: saved.page.url,
-    };
-  }));
+        sourceUrl: saved.page.url,
+      });
+    }
+    onProgress({ phase: "loading", completed: index + 1, total: selected.length });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return pages;
 }
 
 ui.downloadPackage.addEventListener("click", showPackageDialog);
@@ -2748,8 +2904,20 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
   localStorage.setItem(PACKAGE_NUMBER_PADDING_KEY, numberPadding);
   setButtonProcessing(ui.confirmPackageDownload, true);
   try {
+    const pageCount = Math.max(1, selectedSavedPackagePages().length);
+    const packageName = pageCount > 1
+      ? `${(projectStore.project?.projectName || "selected-pages").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
+      : "page-revision-package.zip";
+    const outputTarget = await choosePackageOutput(packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    if (!outputTarget) {
+      ui.packageDialog.close();
+      setStatus("共有用ZIPの保存をキャンセルしました。", "info");
+      return;
+    }
     await flushAutoSave();
-    const pages = await packagePagesForDownload();
+    const pages = await packagePagesForDownload(({ phase, completed, total }) => {
+      if (phase === "loading") setStatus(`保存するページを準備中… ${completed}/${total}ページ`, "info");
+    });
     const packageInput = {
       pages,
       files,
@@ -2757,14 +2925,22 @@ ui.confirmPackageDownload.addEventListener("click", async () => {
       numberPadding,
       packageName: pages.length > 1 ? projectStore.project?.projectName || "selected-pages" : undefined,
     };
-    const packageName = packageInput.packageName
-      ? `${packageInput.packageName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")}-revision-package.zip`
-      : pages.length > 1 ? "selected-pages-revision-package.zip" : "page-revision-package.zip";
-    const packageBlob = await createProjectPackagesAsync(packageInput);
-    const saved = await saveOutput(packageBlob, packageName, [{ name: "ZIP", extensions: ["zip"] }]);
+    const packageBlob = await createProjectPackagesAsync({
+      ...packageInput,
+      onProgress: ({ phase, completed, total }) => {
+        if (phase === "generating") setStatus(`ZIPの内容を生成中… ${completed}/${total}ページ`, "info");
+        else if (phase === "compressing") setStatus(`ZIPを圧縮中… ${total}ページ`, "info");
+      },
+    });
+    const saved = await outputTarget.save(packageBlob);
     ui.packageDialog.close();
     setStatus(saved ? `${pages.length}ページ分の選択ファイルを共有用ZIPへ保存しました。` : "共有用ZIPの保存をキャンセルしました。", saved ? "success" : "info");
   } catch (error) {
+    if (error.name === "AbortError") {
+      ui.packageDialog.close();
+      setStatus("共有用ZIPの保存をキャンセルしました。", "info");
+      return;
+    }
     setStatus(`共有用ZIPを保存できませんでした: ${error.message}`, "error");
   } finally {
     setButtonProcessing(ui.confirmPackageDownload, false);
@@ -2827,17 +3003,24 @@ function handleKeyboardShortcut(event) {
   if (event.altKey && !event.ctrlKey && !event.metaKey) {
     if (event.code === "Digit1" || event.key === "ArrowLeft") {
       event.preventDefault();
+      setProjectSidebarCollapsed(false);
       setSidebarPanel("pages");
       return;
     }
     if ((event.code === "Digit2" || event.key === "ArrowRight") && !ui.showHeadingOutline.disabled) {
       event.preventDefault();
+      setProjectSidebarCollapsed(false);
       setSidebarPanel("outline");
       return;
     }
     if (event.code === "Digit3") {
       event.preventDefault();
       setInspectorCollapsed(!ui.workspace.classList.contains("inspector-collapsed"));
+      return;
+    }
+    if (event.code === "Digit4") {
+      event.preventDefault();
+      setProjectSidebarCollapsed(!ui.workspace.classList.contains("sidebar-collapsed"));
       return;
     }
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
@@ -3061,7 +3244,8 @@ async function finishLogin(completed) {
 }
 ui.loginDone.addEventListener("click", () => finishLogin(true));
 ui.loginCancel.addEventListener("click", () => finishLogin(false));
-ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); });
+ui.projectName.addEventListener("input", updateProjectSummary);
+ui.projectBaseUrl.addEventListener("input", () => { loginReady = false; syncLoginControls(); updateProjectSummary(); });
 ui.manualPageUrl.addEventListener("input", syncProjectControls);
 initializeProjectSidebarResize();
 initializeInspectorResize();

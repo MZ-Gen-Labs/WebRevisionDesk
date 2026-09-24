@@ -15,6 +15,7 @@
       <div class="toolbar" aria-label="編集・保存操作">
         <div id="update-controls" class="update-controls" hidden>
           <span id="update-status"></span>
+          <button id="open-latest-release" class="button-subtle" type="button" hidden>GitHubで見る</button>
           <button id="check-update" class="button-subtle" type="button">更新を確認</button>
           <button id="download-update" class="button-primary" type="button" hidden>更新をダウンロード</button>
           <button id="apply-update" class="button-primary" type="button" hidden>再起動して更新</button>
@@ -44,12 +45,18 @@
     </div>
 
     <details id="setup-panel" class="setup-panel" open>
-      <summary>取り込み・案件設定 <span>案件フォルダ／ログイン／その他</span></summary>
+      <summary id="setup-panel-summary" title="案件フォルダ未選択">
+        <strong>取り込み・案件設定</strong>
+        <span class="setup-summary-item setup-summary-project"><small>案件</small><span id="setup-summary-project">案件フォルダ未選択</span></span>
+        <span class="setup-summary-item setup-summary-url"><small>基準URL</small><span id="setup-summary-url">未設定</span></span>
+        <span class="setup-summary-item setup-summary-path"><small>保存パス</small><span id="setup-summary-path">未選択</span></span>
+      </summary>
       <div class="setup-content">
     <section class="project-bar" aria-label="案件フォルダ管理">
       <button id="select-project-folder" class="button-primary" type="button">案件フォルダを選択</button>
       <label class="project-name-input">案件名<input id="project-name" type="text" placeholder="例：製品サイト修正" disabled /></label>
       <label class="project-base-url-input">基準URL<input id="project-base-url" type="url" placeholder="https://example.com/product/" disabled /></label>
+      <div class="project-storage-path"><span>保存パス</span><code id="project-save-path" title="">未選択</code></div>
       <button id="crawl-project-pages" type="button" disabled>関連ページ</button>
       <div class="pipeline-options" aria-label="関連ページの連動処理">
         <label class="pipeline-option"><input id="crawl-capture-pages" type="checkbox" disabled /> ページ取得</label>
@@ -87,14 +94,17 @@
       </div>
     </details>
     <main id="workspace" class="workspace">
-      <aside class="project-sidebar" aria-label="案件ページ一覧">
-        <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
-          <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
-            <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
-          </button>
-          <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
-            <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
-          </button>
+      <aside id="project-sidebar" class="project-sidebar" aria-label="案件ページ一覧">
+        <div class="sidebar-header">
+          <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
+            <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
+              <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
+            </button>
+            <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
+              <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
+            </button>
+          </div>
+          <button id="collapse-project-sidebar" class="icon-button" type="button" aria-label="サイドバーを閉じる" aria-controls="project-sidebar" aria-expanded="true" title="サイドバーを閉じる（Alt + 4）">×</button>
         </div>
         <div id="project-list-panel">
           <div class="project-heading">
@@ -337,6 +347,7 @@
         </div>
       </aside>
       <button id="show-inspector" class="show-inspector" type="button" hidden aria-label="編集メニューを表示" title="編集メニューを表示（Alt + 3）">◀ 編集メニュー</button>
+      <button id="show-project-sidebar" class="show-project-sidebar" type="button" hidden aria-controls="project-sidebar" aria-label="サイドバーを表示" title="サイドバーを表示（Alt + 4）">▶ サイドバー</button>
     </main>
 
     <dialog id="search-replace-dialog" class="search-replace-dialog">
@@ -420,6 +431,29 @@
             <button value="cancel" type="submit">閉じる</button>
           </div>
         </section>
+      </form>
+    </dialog>
+
+    <dialog id="update-timeout-dialog" class="package-dialog update-timeout-dialog">
+      <form method="dialog">
+        <div class="package-dialog-heading">
+          <div>
+            <p class="eyebrow">Application Update</p>
+            <h2>更新のダウンロードに失敗しました</h2>
+          </div>
+          <button value="cancel" type="submit" aria-label="閉じる">閉じる</button>
+        </div>
+        <p id="update-timeout-error" class="update-timeout-error" role="alert"></p>
+        <label class="update-timeout-field" for="update-timeout-seconds">
+          再試行時のタイムアウト
+          <span><input id="update-timeout-seconds" type="number" min="30" max="1800" step="1" required /> 秒</span>
+        </label>
+        <p class="update-timeout-advice">社内プロキシやセキュリティ検査で時間がかかる場合は、300〜600秒に延ばして再試行してください。この設定は次回以降も保存されます。</p>
+        <div class="package-dialog-actions">
+          <button value="cancel" type="submit">キャンセル</button>
+          <button id="update-timeout-open-release" type="button">ブラウザで最新Releaseを開く</button>
+          <button id="update-timeout-retry" class="button-primary" type="button">設定を保存して再試行</button>
+        </div>
       </form>
     </dialog>
 
