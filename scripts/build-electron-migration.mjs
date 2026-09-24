@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -39,6 +39,7 @@ await Promise.all([
   cp(path.join(root, "src", "tracking-resource-filter.js"), path.join(application, "src", "tracking-resource-filter.js")),
   cp(path.join(root, "src", "release-links.js"), path.join(application, "src", "release-links.js")),
   cp(path.join(root, "src", "update-timeout.js"), path.join(application, "src", "update-timeout.js")),
+  cp(path.join(root, "src", "update-package.js"), path.join(application, "src", "update-package.js")),
   cp(path.join(root, "LICENSE"), path.join(application, "LICENSE")),
   cp(path.join(root, "THIRD_PARTY_NOTICES.md"), path.join(application, "THIRD_PARTY_NOTICES.md")),
   writeFile(path.join(application, "package.json"), `${JSON.stringify({
@@ -72,13 +73,46 @@ await run("powershell.exe", [
 ], { cwd: root });
 
 const digest = createHash("sha256").update(await readFile(zipPath)).digest("hex");
-await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${digest}  ${path.basename(zipPath)}\n`, "ascii");
-await writeFile(path.join(releaseRoot, "release.json"), `${JSON.stringify({
-  version: packageJson.version,
-  channel: "stable",
-  asset: path.basename(zipPath),
-  sha256: digest,
-  publishedAt: new Date().toISOString(),
-}, null, 2)}\n`, "utf8");
+const fullSize = (await stat(zipPath)).size;
+let checksums = [`${digest}  ${path.basename(zipPath)}`];
+if (formalRelease) {
+  const patchRoot = path.join(releaseRoot, "patch");
+  const patchResources = path.join(patchRoot, "resources");
+  const patchZipName = `WebRevisionDesk-${packageJson.version}-patch.zip`;
+  const patchZipPath = path.join(releaseRoot, patchZipName);
+  await mkdir(patchResources, { recursive: true });
+  await cp(application, path.join(patchResources, "app"), { recursive: true });
+  await run("powershell.exe", [
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+    `Compress-Archive -Path ${quotePowerShell(patchResources)} -DestinationPath ${quotePowerShell(patchZipPath)} -CompressionLevel Optimal -Force`,
+  ], { cwd: root });
+  const patchDigest = createHash("sha256").update(await readFile(patchZipPath)).digest("hex");
+  const patchSize = (await stat(patchZipPath)).size;
+  const full = { name: path.basename(zipPath), sha256: digest, size: fullSize };
+  const patch = {
+    name: patchZipName,
+    sha256: patchDigest,
+    size: patchSize,
+    targetElectronVersion: electronPackage.version,
+  };
+  checksums.push(`${patchDigest}  ${patchZipName}`);
+  await rm(patchRoot, { recursive: true, force: true });
+  await writeFile(path.join(releaseRoot, "release.json"), `${JSON.stringify({
+    version: packageJson.version,
+    channel: "stable",
+    electronVersion: electronPackage.version,
+    assets: { full, patch },
+    publishedAt: new Date().toISOString(),
+  }, null, 2)}\n`, "utf8");
+} else {
+  await writeFile(path.join(releaseRoot, "release.json"), `${JSON.stringify({
+    version: packageJson.version,
+    channel: "stable",
+    asset: path.basename(zipPath),
+    sha256: digest,
+    publishedAt: new Date().toISOString(),
+  }, null, 2)}\n`, "utf8");
+}
+await writeFile(path.join(releaseRoot, "SHA256SUMS.txt"), `${checksums.join("\n")}\n`, "ascii");
 
-console.log(`Created ${zipPath}\nSHA-256 ${digest}`);
+console.log(`Created ${zipPath}\nSHA-256 ${digest}${formalRelease ? `\nCreated ${path.join(releaseRoot, `WebRevisionDesk-${packageJson.version}-patch.zip`)}` : ""}`);

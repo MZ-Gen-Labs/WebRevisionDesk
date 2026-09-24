@@ -49,7 +49,7 @@ jobs:
       - name: Smoke test Windows Electron archive
         shell: pwsh
         run: |
-          $archive = Get-ChildItem release-electron -Filter *.zip | Select-Object -First 1
+          $archive = Get-ChildItem release-electron -Filter *-electron-win-x64.zip | Select-Object -First 1
           if (-not $archive) { throw "Electron release ZIP was not created." }
           $target = Join-Path $env:RUNNER_TEMP "electron-release-smoke"
           Expand-Archive -LiteralPath $archive.FullName -DestinationPath $target -Force
@@ -70,6 +70,7 @@ jobs:
           path: |
             release-electron/*.zip
             release-electron/*-Setup.exe
+            release-electron/release.json
             release-electron/SHA256SUMS.txt
           if-no-files-found: error
   macos:
@@ -142,7 +143,7 @@ jobs:
       - name: Publish GitHub Release
         run: |
           find artifacts -name SHA256SUMS.txt -exec cat {} \; > SHA256SUMS.txt
-          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.dmg' -o -name '*-Setup.exe' \) -print)
+          files=$(find artifacts -type f \( -name '*.zip' -o -name '*.dmg' -o -name '*-Setup.exe' -o -name 'release.json' \) -print)
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 && exists=true || exists=false
           if [ "$exists" = true ]; then
             gh release upload "$RELEASE_TAG" $files SHA256SUMS.txt --clobber
