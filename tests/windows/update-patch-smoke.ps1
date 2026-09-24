@@ -10,6 +10,7 @@ $patchRoot = Join-Path $testRoot "patch"
 $patchResources = Join-Path $patchRoot "resources"
 $patchApp = Join-Path $patchResources "app"
 $zipPath = Join-Path $testRoot "patch.zip"
+$stagedUpdaterPath = Join-Path $testRoot "updater.ps1"
 
 try {
   $installedApp = Join-Path $installDirectory "resources\app"
@@ -28,7 +29,9 @@ try {
 
   $completedProcess = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /c exit 0" -PassThru -Wait
   $sha256 = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $UpdaterPath `
+  $updaterSource = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $UpdaterPath).Path)
+  [System.IO.File]::WriteAllText($stagedUpdaterPath, $updaterSource, [System.Text.UTF8Encoding]::new($true))
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $stagedUpdaterPath `
     -ProcessId $completedProcess.Id `
     -InstallDirectory $installDirectory `
     -ZipPath $zipPath `
