@@ -45,8 +45,8 @@ var
   Line: String;
 begin
   Result := False;
-  if not ExecAndCaptureOutputWithNativeSysDir(
-    ExpandConstant('{sys}\tasklist.exe'),
+  if not ExecAndCaptureOutput(
+    ExpandConstant('{sysnative}\tasklist.exe'),
     '/FI "IMAGENAME eq WebRevisionDesk.exe" /FO CSV /NH',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode, Output) then
     RaiseException('起動中の Web Revision Desk を確認できませんでした。');
@@ -80,8 +80,8 @@ begin
     if MsgBox(Prompt, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then Exit;
   end;
 
-  if not ExecWithNativeSysDir(
-    ExpandConstant('{sys}\taskkill.exe'),
+  if not Exec(
+    ExpandConstant('{sysnative}\taskkill.exe'),
     '/F /T /IM WebRevisionDesk.exe',
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
     if not IsWebRevisionDeskRunning then begin
