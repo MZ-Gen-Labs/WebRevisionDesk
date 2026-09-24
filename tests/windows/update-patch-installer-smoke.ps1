@@ -27,7 +27,10 @@ try {
   Set-Content -LiteralPath (Join-Path $appDirectory "package.json") -Encoding ASCII -Value '{"version":"0.7.16"}'
 
   $install = Invoke-PatchInstaller $installerLog
-  if ($install.ExitCode -ne 0) { throw "Compatible patch installation failed with exit code $($install.ExitCode)." }
+  if ($install.ExitCode -ne 0) {
+    $details = if (Test-Path -LiteralPath $installerLog) { Get-Content -Raw -LiteralPath $installerLog } else { "Installer log was not created." }
+    throw "Compatible patch installation failed with exit code $($install.ExitCode).`n$details"
+  }
   $installedVersion = (Get-Content -Raw -LiteralPath (Join-Path $appDirectory "package.json") | ConvertFrom-Json).version
   if ($installedVersion -ne $version) { throw "Expected app version $version after patch install; got $installedVersion." }
   if (-not (Test-Path -LiteralPath (Join-Path $appDirectory "dist\index.html"))) { throw "The new application payload was not installed." }
