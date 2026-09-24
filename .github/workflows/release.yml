@@ -61,8 +61,21 @@ jobs:
         shell: pwsh
         run: |
           npm run build:windows:installer
-          $installer = Get-ChildItem release-electron -Filter *-Setup.exe | Select-Object -First 1
-          if (-not $installer) { throw "Windows Setup.exe was not created." }
+          npm run build:windows:installer:patch
+          $installers = Get-ChildItem release-electron -Filter *-Setup.exe
+          if ($installers.Count -ne 2) { throw "Expected full and patch Windows Setup.exe installers." }
+          $patch = $installers | Where-Object Name -Like '*-Patch-from-*-Setup.exe' | Select-Object -First 1
+          if (-not $patch -or $patch.Length -gt 10MB) { throw "The patch installer is missing or exceeds 10 MiB." }
+          ./tests/windows/update-patch-installer-smoke.ps1 `
+            -InstallerPath $patch.FullName `
+            -ReleaseAppPath ./release-electron/WebRevisionDesk `
+            -ScratchDirectory $env:RUNNER_TEMP
+          $checksums = Get-Content release-electron/SHA256SUMS.txt
+          foreach ($installer in $installers) {
+            if (-not ($checksums | Where-Object { $_ -match [regex]::Escape($installer.Name) })) {
+              throw "SHA256SUMS.txt is missing $($installer.Name)."
+            }
+          }
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
