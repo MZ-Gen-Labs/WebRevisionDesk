@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectWindowsUpdatePackage } from "../../src/update-package.js";
+import { selectMacUpdatePackage, selectWindowsUpdatePackage } from "../../src/update-package.js";
 
 const version = "0.8.0";
 const electronVersion = "44.4.3";
 const fullName = `WebRevisionDesk-${version}-electron-win-x64.zip`;
+const macArm64Name = `WebRevisionDesk-${version}-mac-arm64.zip`;
+const macX64Name = `WebRevisionDesk-${version}-mac-x64.zip`;
 const patchName = `WebRevisionDesk-${version}-patch.zip`;
 const fullSha = "a".repeat(64);
+const macArm64Sha = "c".repeat(64);
+const macX64Sha = "d".repeat(64);
 const patchSha = "b".repeat(64);
 const assets = [
   { name: fullName, size: 80_000_000, browser_download_url: `https://example.test/${fullName}` },
+  { name: macArm64Name, size: 90_000_000, browser_download_url: `https://example.test/${macArm64Name}` },
+  { name: macX64Name, size: 92_000_000, browser_download_url: `https://example.test/${macX64Name}` },
   { name: patchName, size: 2_000_000, browser_download_url: `https://example.test/${patchName}` },
 ];
 const metadata = {
@@ -20,7 +26,7 @@ const metadata = {
     patch: { name: patchName, sha256: patchSha, size: 2_000_000, targetElectronVersion: electronVersion },
   },
 };
-const checksums = `${fullSha}  ${fullName}\n${patchSha}  ${patchName}\n`;
+const checksums = `${fullSha}  ${fullName}\n${macArm64Sha}  ${macArm64Name}\n${macX64Sha}  ${macX64Name}\n${patchSha}  ${patchName}\n`;
 
 test("selects the app-only patch when metadata, checksum, and Electron version match", () => {
   const selected = selectWindowsUpdatePackage({ version, assets, metadata, electronVersion, checksums });
@@ -55,3 +61,35 @@ test("keeps older releases on the full ZIP when release metadata is absent or st
   assert.equal(noMetadata.packageType, "full");
   assert.equal(staleMetadata.packageType, "full");
 });
+
+test("macOS selects the app-only patch for both arm64 and x64 when compatible", () => {
+  const armSelected = selectMacUpdatePackage({ version, assets, metadata, electronVersion, checksums, arch: "arm64" });
+  assert.equal(armSelected.packageType, "patch");
+  assert.equal(armSelected.asset.name, patchName);
+  assert.equal(armSelected.expectedSha256, patchSha);
+
+  const x64Selected = selectMacUpdatePackage({ version, assets, metadata, electronVersion, checksums, arch: "x64" });
+  assert.equal(x64Selected.packageType, "patch");
+  assert.equal(x64Selected.asset.name, patchName);
+  assert.equal(x64Selected.expectedSha256, patchSha);
+});
+
+test("macOS falls back to the architecture-specific full ZIP when Electron changes or patch is missing", () => {
+  const electronMismatch = selectMacUpdatePackage({ version, assets, metadata, electronVersion: "45.0.0", checksums, arch: "arm64" });
+  assert.equal(electronMismatch.packageType, "full");
+  assert.equal(electronMismatch.asset.name, macArm64Name);
+  assert.equal(electronMismatch.expectedSha256, macArm64Sha);
+
+  const noPatch = selectMacUpdatePackage({
+    version,
+    assets: assets.filter((asset) => asset.name !== patchName),
+    metadata,
+    electronVersion,
+    checksums,
+    arch: "x64",
+  });
+  assert.equal(noPatch.packageType, "full");
+  assert.equal(noPatch.asset.name, macX64Name);
+  assert.equal(noPatch.expectedSha256, macX64Sha);
+});
+

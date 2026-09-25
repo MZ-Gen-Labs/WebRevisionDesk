@@ -9,7 +9,7 @@ import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
 import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
 import { normalizeUpdateDownloadTimeoutSeconds } from "../src/update-timeout.js";
-import { selectWindowsUpdatePackage } from "../src/update-package.js";
+import { selectMacUpdatePackage, selectWindowsUpdatePackage } from "../src/update-package.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -545,6 +545,26 @@ async function canApplyWindowsPatch(installDirectory) {
   }
 }
 
+async function canApplyMacPatch(installPath) {
+  if (process.platform !== "darwin" || !installPath) return false;
+  try {
+    const appDirectory = path.join(installPath, "Contents", "Resources", "app");
+    const [appManifest, updaterScript] = await Promise.all([
+      stat(path.join(appDirectory, "package.json")),
+      readFile(path.join(appDirectory, "electron", "updater.sh"), "utf8"),
+    ]);
+    return appManifest.isFile() && /--patch/i.test(updaterScript);
+  } catch {
+    return false;
+  }
+}
+
+async function canApplyPatch(installPath) {
+  if (process.platform === "win32") return canApplyWindowsPatch(installPath);
+  if (process.platform === "darwin") return canApplyMacPatch(installPath);
+  return false;
+}
+
 const updateZipPattern = /^WebRevisionDesk-\d+\.\d+\.\d+-(?:mac-(?:arm64|x64)|electron-win-x64|patch)\.zip(?:\.part)?$/;
 
 async function removeUpdateArtifact(target, type) {
@@ -600,6 +620,18 @@ async function cleanupInstallResidue(installPath) {
       || entry.name.startsWith(".WebRevisionDesk-backup-")
       || (process.platform === "darwin" && entry.name.startsWith(macBackup)))
     .map((entry) => removeUpdateArtifact(path.join(parent, entry.name), "stale-install-residue")));
+  if (process.platform === "darwin") {
+    const resourcesDirectory = path.join(installPath, "Contents", "Resources");
+    let resourceEntries = [];
+    try {
+      resourceEntries = await readdir(resourcesDirectory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code !== "ENOENT") await record("update-cleanup-failed", { type: "macos-resources-directory", message: error.message });
+    }
+    await Promise.all(resourceEntries
+      .filter((entry) => entry.name.startsWith("app.backup-"))
+      .map((entry) => removeUpdateArtifact(path.join(resourcesDirectory, entry.name), "stale-install-residue")));
+  }
 }
 
 async function cleanupTemporaryUpdaterFiles() {
@@ -649,7 +681,7 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
 
   let selected = { asset: fullZip, packageType: "full", expectedSha256: "" };
   let fullExpectedSha256 = "";
-  if (process.platform === "win32" && patchSupported) {
+  if (patchSupported && (process.platform === "win32" || process.platform === "darwin")) {
     const metadataAsset = release.assets?.find((asset) => asset.name === "release.json");
     if (metadataAsset) {
       try {
@@ -660,18 +692,21 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
         if (!metadataResponse.ok || !checksumsResponse.ok) throw new Error("リリースメタデータを取得できませんでした。");
         const checksums = await checksumsResponse.text();
         const metadata = await metadataResponse.json();
-        selected = selectWindowsUpdatePackage({
+        const selector = process.platform === "darwin" ? selectMacUpdatePackage : selectWindowsUpdatePackage;
+        selected = selector({
           version,
           assets: release.assets,
           metadata,
           electronVersion: process.versions.electron,
           checksums,
+          arch: process.arch,
         }) || selected;
-        fullExpectedSha256 = selectWindowsUpdatePackage({
+        fullExpectedSha256 = selector({
           version,
           assets: release.assets,
           electronVersion: process.versions.electron,
           checksums,
+          arch: process.arch,
         })?.expectedSha256 || "";
       } catch (error) {
         await record("update-patch-metadata-fallback", { message: error.message });
@@ -695,7 +730,7 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
 async function checkForUpdate() {
   const installDirectory = updateInstallPath();
   if (!installDirectory) return { supported: false, currentVersion: packageJson.version };
-  const release = await fetchLatestRelease({ patchSupported: await canApplyWindowsPatch(installDirectory) });
+  const release = await fetchLatestRelease({ patchSupported: await canApplyPatch(installDirectory) });
   return { supported: true, currentVersion: packageJson.version, available: compareVersions(release.version, packageJson.version) > 0, ...release };
 }
 
@@ -822,11 +857,17 @@ async function applyMacDownloadedUpdate() {
   const script = path.join(updaterDirectory, `updater-${randomUUID()}.sh`);
   await mkdir(updaterDirectory, { recursive: true });
   await writeFile(script, await readFile(sourceScript, "utf8"), { mode: 0o700 });
-  const child = spawn("/bin/sh", [script,
-    "--process-id", String(process.pid), "--install-path", downloadedUpdate.installDirectory,
-    "--zip-path", downloadedUpdate.zipPath, "--sha256", downloadedUpdate.sha256,
+  const scriptArguments = [
+    "--process-id", String(process.pid),
+    "--install-path", downloadedUpdate.installDirectory,
+    "--zip-path", downloadedUpdate.zipPath,
+    "--sha256", downloadedUpdate.sha256,
     "--temporary-script-path", script,
-  ], { cwd: updaterDirectory, detached: true, stdio: "ignore" });
+  ];
+  if (downloadedUpdate.packageType === "patch") {
+    scriptArguments.push("--patch", "--expected-version", downloadedUpdate.version);
+  }
+  const child = spawn("/bin/sh", [script, ...scriptArguments], { cwd: updaterDirectory, detached: true, stdio: "ignore" });
   child.once("error", (error) => void record("update-process-error", { message: error.message, script }));
   void record("update-process-started", { pid: child.pid, script });
   await new Promise((resolve) => { child.once("spawn", resolve); child.once("error", resolve); });

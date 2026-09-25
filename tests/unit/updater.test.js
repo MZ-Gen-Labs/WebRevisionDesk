@@ -56,6 +56,7 @@ test("release build publishes app-only patch metadata and both checksums", async
   assert.match(workflow, /release-electron\/release\.json/);
   assert.match(workflow, /-name 'release\.json'/);
   assert.match(workflow, /Get-ChildItem release-electron -Filter \*-electron-win-x64\.zip/);
+  assert.match(workflow, /update-patch-smoke\.sh/);
   const ciWorkflow = await readFile(path.join(root, ".github", "workflows", "ci.yml"), "utf8");
   assert.match(ciWorkflow, /update-patch-smoke\.ps1/);
   for (const script of ["build-electron-mac.mjs", "build-electron-feasibility.mjs"]) {
@@ -111,6 +112,12 @@ test("macOS updater verifies, replaces, and relaunches the app bundle", async ()
   assert.match(source, /osascript/);
   assert.match(source, /ZIP_PATH\.retry/);
   assert.match(source, /rm -f "\$ZIP_PATH" "\$ZIP_PATH\.retry"/);
+  assert.match(source, /--patch\)/);
+  assert.match(source, /--expected-version\)/);
+  assert.match(source, /Contents\/Resources\/app/);
+  assert.match(source, /CFBundleShortVersionString/);
+  assert.match(source, /codesign --force --deep --sign -/);
+  assert.match(source, /codesign --verify --deep --strict/);
 });
 
 test("Electron selects macOS update ZIPs and starts the shell updater", async () => {
@@ -122,6 +129,10 @@ test("Electron selects macOS update ZIPs and starts the shell updater", async ()
   assert.match(source, /path\.resolve\(app\.getAppPath\(\), "\.\.", "\.\.", "\.\."\)/);
   assert.match(source, /cleanupUpdateArtifacts/);
   assert.match(source, /stale-update-archive/);
+  assert.match(source, /canApplyMacPatch/);
+  assert.match(source, /canApplyPatch/);
+  assert.match(source, /selectMacUpdatePackage/);
+  assert.match(source, /scriptArguments\.push\("--patch", "--expected-version", downloadedUpdate\.version\)/);
 });
 
 test("BOM-prefixed updater parses in Windows PowerShell", { skip: process.platform !== "win32" }, async () => {

@@ -16,13 +16,31 @@ function matchesMetadataAsset(metadataAsset, releaseAsset, checksums) {
 }
 
 /**
- * Choose the Windows update payload. Any missing, stale, or incompatible patch
- * metadata falls back to the full ZIP, which keeps older releases compatible.
+ * Select the update payload for the current platform (Windows or macOS).
+ * Any missing, stale, or incompatible patch metadata falls back to the full ZIP,
+ * which keeps older releases compatible.
  */
-export function selectWindowsUpdatePackage({ version, assets = [], metadata, electronVersion, checksums = "" }) {
+export function selectPlatformUpdatePackage({
+  platform = "win32",
+  arch = "arm64",
+  version,
+  assets = [],
+  metadata,
+  electronVersion,
+  checksums = "",
+}) {
   const normalizedVersion = String(version || "").replace(/^v/, "");
   const releaseAssets = Array.isArray(assets) ? assets : [];
-  const fullName = `WebRevisionDesk-${normalizedVersion}-electron-win-x64.zip`;
+  let fullName;
+  if (platform === "win32") {
+    fullName = `WebRevisionDesk-${normalizedVersion}-electron-win-x64.zip`;
+  } else if (platform === "darwin") {
+    const macArch = arch === "x64" ? "x64" : "arm64";
+    fullName = `WebRevisionDesk-${normalizedVersion}-mac-${macArch}.zip`;
+  } else {
+    return null;
+  }
+
   const fullAsset = releaseAssets.find((asset) => asset?.name === fullName);
   if (!fullAsset) return null;
 
@@ -41,9 +59,9 @@ export function selectWindowsUpdatePackage({ version, assets = [], metadata, ele
   const patchName = `WebRevisionDesk-${normalizedVersion}-patch.zip`;
   const patchAsset = releaseAssets.find((asset) => asset?.name === patchName);
   if (!patchAsset || patchMetadata?.targetElectronVersion !== electronVersion) return fallback;
-  if (!matchesMetadataAsset(fullMetadata, fullAsset, checksums)
-      || !matchesMetadataAsset(patchMetadata, patchAsset, checksums)) return fallback;
-  if (!(Number(patchMetadata.size) < Number(fullMetadata.size))) return fallback;
+  if (!matchesMetadataAsset(patchMetadata, patchAsset, checksums)) return fallback;
+  if (platform === "win32" && !matchesMetadataAsset(fullMetadata, fullAsset, checksums)) return fallback;
+  if (!(Number(patchMetadata.size) < Number(fullAsset.size))) return fallback;
 
   return {
     asset: patchAsset,
@@ -51,3 +69,20 @@ export function selectWindowsUpdatePackage({ version, assets = [], metadata, ele
     expectedSha256: patchMetadata.sha256.toLowerCase(),
   };
 }
+
+/**
+ * Choose the Windows update payload. Any missing, stale, or incompatible patch
+ * metadata falls back to the full ZIP, which keeps older releases compatible.
+ */
+export function selectWindowsUpdatePackage(params) {
+  return selectPlatformUpdatePackage({ ...params, platform: "win32" });
+}
+
+/**
+ * Choose the macOS update payload. Any missing, stale, or incompatible patch
+ * metadata falls back to the full ZIP, which keeps older releases compatible.
+ */
+export function selectMacUpdatePackage(params) {
+  return selectPlatformUpdatePackage({ ...params, platform: "darwin" });
+}
+

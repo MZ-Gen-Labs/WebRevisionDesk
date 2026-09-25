@@ -131,6 +131,9 @@ jobs:
           executable=$(find "$target" -path '*/WebRevisionDesk.app/Contents/MacOS/Electron' -type f | head -n 1)
           test -n "$executable"
           "$executable" --editor-smoke-test
+      - name: Smoke test macOS patch updater
+        run: |
+          ./tests/macos/update-patch-smoke.sh electron/updater.sh "$RUNNER_TEMP"
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v7
         with:
