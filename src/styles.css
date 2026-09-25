@@ -52,7 +52,11 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .project-bar input[type="text"], .project-bar input[type="url"] { width: 100%; min-width: 0; }
 .project-storage-path { display: grid; min-width: 180px; flex: 1 1 260px; gap: .25rem; }
 .project-storage-path > span { color: #6b6c7d; font-size: .75rem; }
-.project-storage-path code { display: block; overflow: hidden; padding: .5rem .6rem; border: 1px solid #d8d9e2; border-radius: 6px; background: #fff; color: #414254; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.project-path-actions { display: flex; min-width: 0; align-items: center; gap: .35rem; }
+.project-storage-path code { display: block; min-width: 0; flex: 1 1 auto; overflow: hidden; padding: .5rem .6rem; border: 1px solid #d8d9e2; border-radius: 6px; background: #fff; color: #414254; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.open-folder-button { flex: 0 0 auto; padding: .32rem .5rem; border-color: #d8d9e2; background: #fff; color: #44455b; font-size: .72rem; white-space: nowrap; }
+.open-folder-button:hover:not(:disabled) { border-color: #9c9ce4; background: #f4f4ff; }
+.open-folder-button[hidden] { display: none !important; }
 .project-bar > span { min-width: 130px; }
 .pipeline-options { display: flex; align-items: center; gap: .55rem; white-space: nowrap; }
 .project-bar .pipeline-option { display: flex; align-items: center; gap: .3rem; white-space: nowrap; font-size: .78rem; }
@@ -335,6 +339,7 @@ input:focus, textarea:focus { outline: 3px solid rgb(91 91 214 / 18%); border-co
 .setup-summary-project { flex: 0 1 15rem; min-width: 7rem; }
 .setup-summary-url { flex: 1 1 20rem; min-width: 8rem; }
 .setup-summary-path { flex: .65 10 18rem; min-width: 0; }
+.setup-summary-path .open-folder-button { margin-left: .15rem; padding: .1rem .28rem; font-size: .7rem; }
 .setup-panel > summary:focus-visible { outline: 2px solid #5b5bd6; outline-offset: -2px; }
 .setup-content { max-height: 32vh; overflow: auto; }
 .project-bar { grid-template-columns: auto minmax(140px, .7fr) minmax(220px, 1.3fr) minmax(180px, 1fr) auto; padding: .5rem .9rem; }

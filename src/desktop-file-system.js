@@ -115,3 +115,7 @@ export async function openRecentDesktopProjectDirectory(projectPath) {
 export async function removeRecentDesktopProjectDirectory(projectPath) {
   return unwrap(desktop().removeRecentProjectDirectory(projectPath));
 }
+
+export async function openProjectDirectoryInFileManager() {
+  return unwrap(desktop().openProjectDirectory());
+}

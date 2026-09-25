@@ -2,7 +2,7 @@ import { PageEditor } from "./editor.js";
 import { cleanHtmlString, downloadBlob, downloadHtml, EDITOR_CLASS, EDITOR_ID_ATTR, sanitizeImportedHtml } from "./html.js";
 import { changeLabel, createRedlineReport, downloadDiffReport, downloadRedlineReport } from "./diff-report.js";
 import { createProjectPackages, createProjectPackagesAsync, downloadProjectPackage } from "./project-package.js";
-import { chooseDesktopOutput, desktopFileSystemAvailable, saveDesktopOutput, writeDesktopOutput } from "./desktop-file-system.js";
+import { chooseDesktopOutput, desktopFileSystemAvailable, openProjectDirectoryInFileManager, saveDesktopOutput, writeDesktopOutput } from "./desktop-file-system.js";
 import {
   DEFAULT_SEARCH_REPLACE_RULE,
   MAX_SEARCH_REPLACE_RULES,
@@ -60,6 +60,7 @@ const ui = {
   selectProjectFolder: $("#select-project-folder"), projectName: $("#project-name"),
   setupPanelSummary: $("#setup-panel-summary"), setupSummaryProject: $("#setup-summary-project"),
   setupSummaryUrl: $("#setup-summary-url"), setupSummaryPath: $("#setup-summary-path"), projectSavePath: $("#project-save-path"),
+  openProjectFolder: $("#open-project-folder"), summaryOpenProjectFolder: $("#summary-open-project-folder"),
   recentProjects: $("#recent-projects"), recentProjectList: $("#recent-project-list"),
   projectBaseUrl: $("#project-base-url"), saveProjectPage: $("#save-project-page"),
   crawlProjectPages: $("#crawl-project-pages"),
@@ -826,7 +827,14 @@ function syncProjectControls() {
   updateProjectSummary();
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
-  ui.saveProjectPage.disabled = !hasProject || !state.originalHtml || state.previewOnly;
+  const hasSavedSelection = (projectStore.project?.pages || []).some((page) => state.selectedProjectUrls.has(page.url));
+  const hasCurrentPage = Boolean(state.originalHtml && !state.previewOnly);
+  ui.saveProjectPage.disabled = !hasProject || (!hasSavedSelection && !hasCurrentPage) || state.batchRunning;
+  const canOpenProjectFolder = desktopFileSystemAvailable() && hasProject && !state.batchRunning;
+  ui.openProjectFolder.hidden = !desktopFileSystemAvailable();
+  ui.summaryOpenProjectFolder.hidden = !desktopFileSystemAvailable();
+  ui.openProjectFolder.disabled = !canOpenProjectFolder;
+  ui.summaryOpenProjectFolder.disabled = !canOpenProjectFolder;
   ui.crawlProjectPages.disabled = !hasProject || loginBlocked() || pipelineRunning;
   ui.crawlCapturePages.disabled = !hasProject || loginBlocked() || pipelineRunning;
   ui.crawlReplacePages.disabled = !hasProject || loginBlocked() || pipelineRunning;
@@ -859,6 +867,16 @@ function updateProjectSummary() {
   ui.setupSummaryPath.title = projectPath;
   ui.projectSavePath.textContent = projectPath;
   ui.projectSavePath.title = projectPath;
+}
+
+async function openProjectFolder() {
+  if (!projectStore.project || !desktopFileSystemAvailable()) return;
+  try {
+    await openProjectDirectoryInFileManager();
+    setStatus("案件フォルダをFinder／エクスプローラーで開きました。", "success");
+  } catch (error) {
+    setStatus(`案件フォルダを開けませんでした: ${error.message}`, "error");
+  }
 }
 
 function updateBatchControls() {
@@ -1729,6 +1747,60 @@ async function saveCurrentToProject({ quiet = false } = {}) {
   return page;
 }
 
+async function regenerateSelectedPageReports() {
+  if (!projectStore.project) return;
+  if (state.dirty && state.originalHtml) {
+    try {
+      if (canAutoSaveCurrentPage()) await flushAutoSave({ force: true, quiet: true });
+      else if (!state.previewOnly) await saveCurrentToProject({ quiet: true });
+    } catch (error) {
+      setStatus(`変更を保存できず、変更箇所を更新できませんでした: ${error.message}`, "error");
+      return;
+    }
+  }
+  const listed = listedProjectPages();
+  const checked = listed.filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  const targets = checked.length
+    ? checked
+    : listed.filter((page) => page.saved && page.id === state.activeProjectPageId);
+  if (!targets.length) {
+    setStatus("変更箇所を更新する保存済みページがありません。ページを開くか、一覧で更新するページを選択してください。", "info");
+    return;
+  }
+
+  state.batchRunning = true;
+  setButtonProcessing(ui.saveProjectPage, true);
+  updateBatchControls();
+  const failures = [];
+  let completed = 0;
+  try {
+    for (let index = 0; index < targets.length; index++) {
+      const page = targets[index];
+      ui.batchProgress.textContent = `変更箇所を更新中... (${index + 1}/${targets.length}ページ)`;
+      setStatus(`「${page.title}」の変更箇所を再生成しています…`, "info");
+      try {
+        await projectStore.regeneratePageReports(page.id);
+        completed++;
+      } catch (error) {
+        failures.push(`${page.title}: ${error.message}`);
+      }
+      if ((index + 1) % 5 === 0) await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    renderProjectPages();
+    if (state.viewMode === "redline" && targets.some((page) => page.id === state.activeProjectPageId)) {
+      await render("redline", { captureCurrent: false });
+    }
+    ui.batchProgress.textContent = `変更箇所の更新完了 ${completed}/${targets.length}ページ`;
+    const message = `${completed}件のページの変更箇所（redline.html）と修正内容一覧（diff.html）を最新ロジックで更新しました。`;
+    setStatus(failures.length ? `${message} 失敗 ${failures.length}件: ${failures.join("、")}` : message, failures.length ? "error" : "success");
+  } finally {
+    state.batchRunning = false;
+    setButtonProcessing(ui.saveProjectPage, false);
+    syncProjectControls();
+    updateBatchControls();
+  }
+}
+
 async function openProjectPage(pageId) {
   if (pageId === state.activeProjectPageId) return;
   const pageInfo = projectStore.project?.pages.find((page) => page.id === pageId);
@@ -1833,14 +1905,13 @@ ui.selectProjectFolder.addEventListener("click", async () => {
 });
 
 ui.saveProjectPage.addEventListener("click", async () => {
-  ui.saveProjectPage.disabled = true;
-  try {
-    await flushAutoSave({ force: true, quiet: false });
-  } catch (error) {
-    setStatus(`案件フォルダへ保存できませんでした: ${error.message}`, "error");
-  } finally {
-    syncProjectControls();
-  }
+  await regenerateSelectedPageReports();
+});
+ui.openProjectFolder.addEventListener("click", openProjectFolder);
+ui.summaryOpenProjectFolder.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openProjectFolder();
 });
 
 async function crawlRelatedPages() {

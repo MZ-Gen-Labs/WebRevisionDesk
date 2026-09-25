@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { JSDOM } from "jsdom";
 
 import { removeProjectEntry } from "../../electron/project-file-system.mjs";
 import { normalizeClasses } from "../../src/html.js";
@@ -127,6 +128,50 @@ test("deleting a listed page removes its metadata and artifacts without deleting
   assert.equal(parent.entries.has("original.html"), false);
   assert.equal(parent.entries.has("child"), true);
   assert.equal(child.entries.has("original.html"), true);
+});
+
+test("regenerating page reports rewrites redline and diff from saved working HTML and changes", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (value) => value.replace(/([^a-zA-Z0-9_-])/g, "\\$1") };
+  const root = new MemoryDirectoryHandle("project");
+  const pages = await root.getDirectoryHandle("pages", { create: true });
+  const pageDirectory = await pages.getDirectoryHandle("saved-page", { create: true });
+  await pageDirectory.getFileHandle("working.html", { create: true }).then(async (file) => {
+    const writable = await file.createWritable();
+    await writable.write("<!doctype html><html><head><title>Saved</title></head><body><p>Current saved text</p></body></html>");
+    await writable.close();
+  });
+  await pageDirectory.getFileHandle("page.json", { create: true }).then(async (file) => {
+    const writable = await file.createWritable();
+    await writable.write(JSON.stringify({
+      fileName: "saved.html",
+      changes: [{ type: "text-change", elementId: "text-1", before: "Old text", after: "Current saved text" }],
+    }));
+    await writable.close();
+  });
+  for (const name of ["redline.html", "diff.html"]) {
+    const file = await pageDirectory.getFileHandle(name, { create: true });
+    const writable = await file.createWritable();
+    await writable.write("stale report");
+    await writable.close();
+  }
+
+  const store = new ProjectStore();
+  store.directory = root;
+  store.project = {
+    format: "web-revision-folder-project", version: 1, projectName: "test", baseUrl: "https://example.com/",
+    pages: [{ id: "page-1", url: "https://example.com/saved", title: "Saved page", fileName: "saved.html", path: "pages/saved-page" }],
+    discoveredPages: [],
+  };
+
+  await store.regeneratePageReports("page-1");
+  const redline = await (await pageDirectory.getFileHandle("redline.html")).getFile().then((file) => file.text());
+  const diff = await (await pageDirectory.getFileHandle("diff.html")).getFile().then((file) => file.text());
+  assert.notEqual(redline, "stale report");
+  assert.match(redline, /Current saved text/);
+  assert.notEqual(diff, "stale report");
+  assert.match(diff, /Old text/);
 });
 
 test("force deletion removes project metadata when physical cleanup fails", async () => {

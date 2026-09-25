@@ -51,7 +51,7 @@ protocol.registerSchemesAsPrivileged([{
   scheme: "wrd",
   privileges: { standard: true, secure: true, supportFetchAPI: true },
 }]);
-app.setName("WebRevisionDesk");
+app.setName(packageJson.buildLabel ? `WebRevisionDesk · ${packageJson.buildLabel}` : "WebRevisionDesk");
 app.setPath("userData", path.join(app.getPath("appData"), "WebRevisionDesk"));
 
 function progress(message, detail = {}) {
@@ -994,6 +994,13 @@ async function handleFileSystem({ operation, parts = [], create = false, content
       await writeEditorSettings({ ...settings, lastProjectDirectory, recentProjects });
       return { ok: true, value: recentProjects };
     }
+    if (operation === "open-project-directory") {
+      if (!projectDirectory) throw new Error("先に案件フォルダを選択してください。");
+      if (!(await stat(projectDirectory)).isDirectory()) throw Object.assign(new Error("案件フォルダが見つかりません。"), { code: "ENOENT" });
+      const error = await shell.openPath(projectDirectory);
+      if (error) throw new Error(error);
+      return { ok: true, value: true };
+    }
     if (operation === "choose-output") {
       const selected = await dialog.showSaveDialog(mainWindow, {
         title: "保存先を選択",
@@ -1268,7 +1275,7 @@ app.whenReady().then(async () => {
     await createMainWindow({ show: false });
     const title = await mainWindow.webContents.executeJavaScript("document.title");
     if (title !== "Web Revision Desk") throw new Error(`Unexpected editor page title: ${title}`);
-    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.openExternal && window.webRevisionDesktop?.fileSystem?.chooseOutput && window.webRevisionDesktop?.fileSystem?.writeOutput)");
+    const desktopApi = await mainWindow.webContents.executeJavaScript("Boolean(window.webRevisionDesktop?.request && window.webRevisionDesktop?.openExternal && window.webRevisionDesktop?.fileSystem?.chooseOutput && window.webRevisionDesktop?.fileSystem?.writeOutput && window.webRevisionDesktop?.fileSystem?.openProjectDirectory)");
     if (!desktopApi) throw new Error("Electron editor bridge was not exposed.");
     const appInfo = await mainWindow.webContents.executeJavaScript(`window.webRevisionDesktop.request({ url: "/api/app-info", method: "GET", headers: {}, bodyBase64: "" })`);
     const appInfoBody = JSON.parse(Buffer.from(appInfo.bodyBase64, "base64").toString("utf8"));

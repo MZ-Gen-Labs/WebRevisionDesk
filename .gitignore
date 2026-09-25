@@ -4,3 +4,4 @@ dist/
 work/
 release/
 release-electron/
+release-electron-mac/

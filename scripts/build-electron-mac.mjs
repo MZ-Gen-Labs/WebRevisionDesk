@@ -10,6 +10,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const appOnly = process.argv.includes("--app-only");
 const buildLabel = appOnly ? process.env.WEB_REVISION_BUILD_LABEL?.trim() : "";
+const bundleIdentifier = appOnly
+  ? process.env.WEB_REVISION_BUNDLE_ID?.trim() || "jp.co.webrevisiondesk.app"
+  : "jp.co.webrevisiondesk.app";
+const displayName = appOnly ? process.env.WEB_REVISION_DISPLAY_NAME?.trim() || "WebRevisionDesk" : "WebRevisionDesk";
 if (process.platform !== "darwin") throw new Error("macOS版はmacOSまたはGitHub Actions上で作成してください。");
 const arch = process.arch === "arm64" ? "arm64" : "x64";
 const releaseRoot = path.join(root, "release-electron-mac");
@@ -55,9 +59,9 @@ await Promise.all([
   }, null, 2)}\n`),
 ]);
 const plist = path.join(appBundle, "Contents", "Info.plist");
-await run("/usr/libexec/PlistBuddy", ["-c", "Set :CFBundleDisplayName WebRevisionDesk", plist]);
-await run("/usr/libexec/PlistBuddy", ["-c", "Set :CFBundleName WebRevisionDesk", plist]);
-await run("/usr/libexec/PlistBuddy", ["-c", "Set :CFBundleIdentifier jp.co.webrevisiondesk.app", plist]);
+await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleDisplayName ${displayName}`, plist]);
+await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleName ${displayName}`, plist]);
+await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleIdentifier ${bundleIdentifier}`, plist]);
 await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleShortVersionString ${packageJson.version}`, plist]);
 await run("/usr/libexec/PlistBuddy", ["-c", `Set :CFBundleVersion ${packageJson.version}`, plist]);
 // Resource changes invalidate Electron's bundled signature. An ad-hoc signature

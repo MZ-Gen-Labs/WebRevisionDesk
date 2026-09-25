@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("webRevisionDesktop", Object.freeze({
     selectProjectDirectory: () => invokeFile("select"),
     listRecentProjectDirectories: () => invokeFile("recent-list"),
     openRecentProjectDirectory: (projectPath) => invokeFile("open-recent", { parts: [projectPath] }),
+    openProjectDirectory: () => invokeFile("open-project-directory"),
     removeRecentProjectDirectory: (projectPath) => invokeFile("remove-recent", { parts: [projectPath] }),
     ensureDirectory: (parts, create) => invokeFile("ensure-directory", { parts, create }),
     ensureFile: (parts, create) => invokeFile("ensure-file", { parts, create }),

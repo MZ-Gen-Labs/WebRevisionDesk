@@ -253,6 +253,23 @@ export class ProjectStore {
     return { page: { ...page, resourceFailures: data.resourceFailures || page.resourceFailures || [] }, originalHtml, workingHtml, changes: data.changes || [] };
   }
 
+  async regeneratePageReports(pageId) {
+    if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
+    const page = this.project.pages.find((entry) => entry.id === pageId);
+    if (!page) throw new Error("案件内のページが見つかりません。");
+    const directory = await ensureDirectory(this.directory, page.path.split("/"));
+    const [workingHtml, dataText] = await Promise.all([
+      readTextFile(directory, "working.html"),
+      readTextFile(directory, "page.json"),
+    ]);
+    const data = JSON.parse(dataText);
+    const fileName = data.fileName || page.fileName || "page.html";
+    const changes = Array.isArray(data.changes) ? data.changes : [];
+    await writeTextFile(directory, "diff.html", createDiffReport(fileName, changes));
+    await writeTextFile(directory, "redline.html", createRedlineReport(workingHtml, changes, fileName));
+    return { ...page, fileName, changeCount: changes.length };
+  }
+
   async resetPageChanges(pageIds) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
     const ids = new Set(pageIds);
