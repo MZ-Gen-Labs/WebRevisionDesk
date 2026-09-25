@@ -14,6 +14,7 @@ import { compareProjectPages, pagePathForUrl, ProjectStore } from "./project-sto
 import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
 import { LATEST_RELEASE_URL } from "./release-links.js";
+import { initTooltips } from "./tooltip.js";
 import {
   DEFAULT_CANVAS_ZOOM,
   DEFAULT_CANVAS_ZOOM_STEP,
@@ -3523,3 +3524,4 @@ void refreshRecentProjects();
 syncLoginControls();
 updateGuidance();
 showSelection(null);
+initTooltips();

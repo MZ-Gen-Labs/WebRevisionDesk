@@ -6,7 +6,7 @@ body > :not(.workspace) { flex-shrink: 0; }
 button, input, textarea { font: inherit; }
 button, .button { border: 1px solid #d4d5df; border-radius: 9px; background: #fff; color: #292936; padding: .65rem .85rem; cursor: pointer; }
 button:hover:not(:disabled), .button:hover { border-color: #7779d8; }
-button:disabled { cursor: not-allowed; opacity: .45; }
+button:disabled { cursor: not-allowed; opacity: .45; pointer-events: auto; }
 button.is-processing:disabled { opacity: .95; }
 button.is-processing { position: relative; border-color: #7777df; color: #3b3bb0; background: #f5f5ff; animation: processing-pulse .8s ease-in-out infinite; }
 button.is-processing::before { content: ""; width: .55em; height: .55em; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
@@ -367,3 +367,54 @@ input:focus, textarea:focus { outline: 3px solid rgb(91 91 214 / 18%); border-co
   .workspace { --project-sidebar-width: 180px; grid-template-columns: var(--project-sidebar-width) 7px minmax(0, 1fr) 7px var(--inspector-width); }
   .search-condition-grid { grid-template-columns: 1fr; }
 }
+
+/* Custom Tooltip */
+.app-tooltip {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  padding: .35rem .6rem;
+  border-radius: 6px;
+  background: #1e1e28;
+  color: #fff;
+  font-size: .75rem;
+  line-height: 1.35;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.16);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 320px;
+  animation: tooltip-fade-in .1s ease-out;
+}
+
+@keyframes tooltip-fade-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-tooltip[data-placement="top"] {
+  animation: tooltip-fade-in-top .1s ease-out;
+}
+
+@keyframes tooltip-fade-in-top {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.app-tooltip[data-placement="left"] {
+  animation: tooltip-fade-in-left .1s ease-out;
+}
+
+@keyframes tooltip-fade-in-left {
+  from { opacity: 0; transform: translateX(2px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.app-tooltip[data-placement="right"] {
+  animation: tooltip-fade-in-right .1s ease-out;
+}
+
+@keyframes tooltip-fade-in-right {
+  from { opacity: 0; transform: translateX(-2px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
