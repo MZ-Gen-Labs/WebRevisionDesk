@@ -1,0 +1,10 @@
+# Auto detect text files and perform LF normalization on checkout for non-Windows platforms
+* text=auto
+
+# Shell scripts must always use LF line endings
+*.sh text eol=lf
+
+# PowerShell and Windows batch scripts should use CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf

@@ -64,6 +64,16 @@ await Promise.all([
     "",
   ].join("\r\n"), "ascii"),
 ]);
+
+// Shell scripts must always use LF line endings, even when built on Windows runners.
+const packagedUpdaterSh = path.join(application, "electron", "updater.sh");
+try {
+  const updaterShContent = await readFile(packagedUpdaterSh, "utf8");
+  await writeFile(packagedUpdaterSh, updaterShContent.replace(/\r\n/g, "\n"), "utf8");
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
+
 await rename(path.join(stage, "electron.exe"), path.join(stage, executableName));
 
 const quotePowerShell = (value) => `'${String(value).replaceAll("'", "''")}'`;

@@ -133,6 +133,19 @@ test("Electron selects macOS update ZIPs and starts the shell updater", async ()
   assert.match(source, /canApplyPatch/);
   assert.match(source, /selectMacUpdatePackage/);
   assert.match(source, /scriptArguments\.push\("--patch", "--expected-version", downloadedUpdate\.version\)/);
+  assert.match(source, /replace\(\/\\r\\n\/g, "\\n"\)/);
+});
+
+test("macOS updater script retains LF line endings and sanitizes CRLF", async () => {
+  const updaterSource = await readFile(path.join(root, "electron", "updater.sh"), "utf8");
+  assert.ok(!updaterSource.includes("\r"), "electron/updater.sh in repo must use LF line endings only");
+
+  const gitattributes = await readFile(path.join(root, ".gitattributes"), "utf8");
+  assert.match(gitattributes, /\*\.sh\s+text\s+eol=lf/);
+
+  const migrationScript = await readFile(path.join(root, "scripts", "build-electron-migration.mjs"), "utf8");
+  assert.match(migrationScript, /packagedUpdaterSh/);
+  assert.match(migrationScript, /replace\(\/\\r\\n\/g, "\\n"\)/);
 });
 
 test("BOM-prefixed updater parses in Windows PowerShell", { skip: process.platform !== "win32" }, async () => {

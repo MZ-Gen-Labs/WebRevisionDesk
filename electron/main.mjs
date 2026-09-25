@@ -856,7 +856,10 @@ async function applyMacDownloadedUpdate() {
   const updaterDirectory = path.join(app.getPath("temp"), "WebRevisionDesk");
   const script = path.join(updaterDirectory, `updater-${randomUUID()}.sh`);
   await mkdir(updaterDirectory, { recursive: true });
-  await writeFile(script, await readFile(sourceScript, "utf8"), { mode: 0o700 });
+  // Shell scripts require LF line endings; strip any CRLF that may have leaked
+  // into the archive or local checkout on Windows.
+  const scriptContent = (await readFile(sourceScript, "utf8")).replace(/\r\n/g, "\n");
+  await writeFile(script, scriptContent, { mode: 0o700 });
   const scriptArguments = [
     "--process-id", String(process.pid),
     "--install-path", downloadedUpdate.installDirectory,
@@ -871,6 +874,8 @@ async function applyMacDownloadedUpdate() {
   child.once("error", (error) => void record("update-process-error", { message: error.message, script }));
   void record("update-process-started", { pid: child.pid, script });
   await new Promise((resolve) => { child.once("spawn", resolve); child.once("error", resolve); });
+  // Let macOS finish creating the detached process before the Electron parent exits.
+  await new Promise((resolve) => setTimeout(resolve, 500));
   child.unref();
   allowMainWindowClose = true;
   app.quit();
