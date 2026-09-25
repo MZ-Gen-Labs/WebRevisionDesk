@@ -507,20 +507,25 @@ function getUpdateDownloadTimeoutSeconds() {
   }
 }
 
-function showLatestReleaseAction(visible) {
-  ui.openLatestRelease.hidden = !visible;
+function getInstallerDownloadUrl() {
+  if (availableUpdate?.installerUrl) return availableUpdate.installerUrl;
+  if (availableUpdate?.version) {
+    return `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${availableUpdate.version}/WebRevisionDesk-${availableUpdate.version}-Setup.exe`;
+  }
+  return LATEST_RELEASE_URL;
 }
 
-async function openLatestRelease() {
+async function openLatestRelease(preferredUrl = null) {
+  const targetUrl = preferredUrl || getInstallerDownloadUrl();
   try {
-    if (window.webRevisionDesktop?.openExternal) await window.webRevisionDesktop.openExternal(LATEST_RELEASE_URL);
-    else window.open(LATEST_RELEASE_URL, "_blank", "noopener,noreferrer");
+    if (window.webRevisionDesktop?.openExternal) await window.webRevisionDesktop.openExternal(targetUrl);
+    else window.open(targetUrl, "_blank", "noopener,noreferrer");
   } catch (error) {
-    setStatus(`GitHub Releaseを開けませんでした: ${error.message}`, "error");
+    setStatus(`ダウンロードを開けませんでした: ${error.message}`, "error");
   }
 }
-ui.openLatestRelease.addEventListener("click", () => { void openLatestRelease(); });
-ui.updateTimeoutOpenRelease.addEventListener("click", () => { void openLatestRelease(); });
+ui.openLatestRelease.addEventListener("click", () => { void openLatestRelease(LATEST_RELEASE_URL); });
+ui.updateTimeoutOpenRelease.addEventListener("click", () => { void openLatestRelease(getInstallerDownloadUrl()); });
 
 async function checkForApplicationUpdate({ quiet = false } = {}) {
   ui.updateControls.hidden = false;
@@ -553,6 +558,12 @@ function showUpdateDownloadFailure(error) {
   ui.updateTimeoutInput.value = String(timeoutSeconds);
   ui.updateTimeoutError.textContent = error.message || "通信状態を確認して、タイムアウト値を調整して再試行してください。";
   ui.updateStatus.textContent = "更新のダウンロードに失敗しました";
+  const isPatch = availableUpdate?.installerType === "patch"
+    || Boolean(availableUpdate?.installerName && /Patch.*Setup\.exe/i.test(availableUpdate.installerName));
+  const fileLabel = isPatch ? "差分Setupファイル" : (availableUpdate?.installerName?.endsWith(".dmg") ? "インストーラー" : "Setupファイル");
+  const installerName = availableUpdate?.installerName || fileLabel;
+  ui.updateTimeoutOpenRelease.textContent = `ブラウザで${fileLabel}をダウンロード`;
+  ui.updateTimeoutOpenRelease.title = `${installerName} をブラウザで直接ダウンロード`;
   if (!ui.updateTimeoutDialog.open) ui.updateTimeoutDialog.showModal();
   showLatestReleaseAction(true);
   setStatus(`更新をダウンロードできませんでした: ${ui.updateTimeoutError.textContent}`, "error");

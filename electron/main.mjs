@@ -713,6 +713,30 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
       }
     }
   }
+
+  const setupExe = release.assets?.find((asset) => /^WebRevisionDesk-.*-Setup\.exe$/i.test(asset.name) && !asset.name.includes("Patch"));
+  const patchExe = release.assets?.find((asset) => /^WebRevisionDesk-.*-Patch.*Setup\.exe$/i.test(asset.name));
+  const macDmg = release.assets?.find((asset) => /^WebRevisionDesk-.*-mac-.*\.dmg$/i.test(asset.name));
+
+  let installerAsset = null;
+  let installerType = "full";
+
+  if (process.platform === "win32") {
+    if (selected.packageType === "patch" && patchExe) {
+      installerAsset = patchExe;
+      installerType = "patch";
+    } else {
+      installerAsset = setupExe || patchExe;
+      installerType = setupExe ? "full" : "patch";
+    }
+  } else if (process.platform === "darwin") {
+    installerAsset = macDmg;
+    installerType = "full";
+  } else {
+    installerAsset = (selected.packageType === "patch" && patchExe) ? patchExe : (setupExe || patchExe);
+    installerType = (selected.packageType === "patch" && patchExe) ? "patch" : "full";
+  }
+
   return {
     version,
     zipUrl: selected.asset.browser_download_url,
@@ -723,6 +747,9 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
     fullZipName: fullZip.name,
     fullExpectedSha256,
     sumsUrl: sums.browser_download_url,
+    installerUrl: installerAsset?.browser_download_url || "",
+    installerName: installerAsset?.name || "",
+    installerType,
     notes: String(release.body || ""),
   };
 }
@@ -1118,7 +1145,7 @@ function registerIpc() {
   ipcMain.handle("editor:open-external", async (event, url) => {
     assertTrustedSender(event);
     if (!isAllowedReleaseUrl(url)) throw new Error("許可されていない外部URLです。");
-    await shell.openExternal(LATEST_RELEASE_URL);
+    await shell.openExternal(url);
     return { ok: true };
   });
   ipcMain.handle("feasibility:get-info", async (event) => {

@@ -93,3 +93,30 @@ test("macOS falls back to the architecture-specific full ZIP when Electron chang
   assert.equal(noPatch.expectedSha256, macX64Sha);
 });
 
+test("identifies Setup.exe installer asset for Windows and DMG for macOS", () => {
+  const setupName = `WebRevisionDesk-${version}-Setup.exe`;
+  const patchSetupName = `WebRevisionDesk-${version}-Patch-from-0.7.10+-Setup.exe`;
+  const dmgName = `WebRevisionDesk-${version}-mac-arm64.dmg`;
+  const allAssets = [
+    ...assets,
+    { name: setupName, browser_download_url: `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${version}/${setupName}` },
+    { name: patchSetupName, browser_download_url: `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${version}/${patchSetupName}` },
+    { name: dmgName, browser_download_url: `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${version}/${dmgName}` },
+  ];
+
+  const fullSetupAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-Setup\.exe$/i.test(asset.name) && !asset.name.includes("Patch"));
+  const patchSetupAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-Patch.*Setup\.exe$/i.test(asset.name));
+  const dmgAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-mac-.*\.dmg$/i.test(asset.name));
+
+  assert.equal(fullSetupAsset?.name, setupName);
+  assert.equal(patchSetupAsset?.name, patchSetupName);
+  assert.equal(dmgAsset?.name, dmgName);
+
+  // 差分更新が有効な場合は差分インストーラー（Patch...Setup.exe）を選択
+  const selectInstaller = (packageType) => (packageType === "patch" && patchSetupAsset ? patchSetupAsset : fullSetupAsset);
+  assert.equal(selectInstaller("patch")?.name, patchSetupName);
+  assert.equal(selectInstaller("full")?.name, setupName);
+});
+
+
+
