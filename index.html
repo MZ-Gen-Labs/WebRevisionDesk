@@ -233,52 +233,52 @@
           <div class="table-tool-group">
             <span class="table-group-title">行操作</span>
             <div class="table-button-row">
-              <button id="add-table-row-before" type="button">上に行を追加</button>
-              <button id="add-table-row" type="button">下に行を追加</button>
+              <button id="add-table-row-before" type="button" title="選択中のセルの上に行を1行追加">上に行を追加</button>
+              <button id="add-table-row" type="button" title="選択中のセルの下に行を1行追加">下に行を追加</button>
             </div>
             <div class="table-button-row">
-              <button id="move-table-row-up" type="button">行を上へ移動</button>
-              <button id="move-table-row-down" type="button">行を下へ移動</button>
+              <button id="move-table-row-up" type="button" title="選択中の行を1つ上へ移動">行を上へ移動</button>
+              <button id="move-table-row-down" type="button" title="選択中の行を1つ下へ移動">行を下へ移動</button>
             </div>
-            <button id="delete-table-row" type="button">この行を削除</button>
+            <button id="delete-table-row" type="button" title="選択中の行を表から削除">この行を削除</button>
           </div>
 
           <div class="table-tool-group">
             <span class="table-group-title">列操作</span>
             <div class="table-button-row">
-              <button id="add-table-column-before" type="button">左に列を追加</button>
-              <button id="add-table-column" type="button">右に列を追加</button>
+              <button id="add-table-column-before" type="button" title="選択中のセルの左に列を1列追加">左に列を追加</button>
+              <button id="add-table-column" type="button" title="選択中のセルの右に列を1列追加">右に列を追加</button>
             </div>
             <div class="table-button-row">
-              <button id="move-table-column-left" type="button">列を左へ移動</button>
-              <button id="move-table-column-right" type="button">列を右へ移動</button>
+              <button id="move-table-column-left" type="button" title="選択中の列を1つ左へ移動">列を左へ移動</button>
+              <button id="move-table-column-right" type="button" title="選択中の列を1つ右へ移動">列を右へ移動</button>
             </div>
-            <button id="delete-table-column" type="button">この列を削除</button>
+            <button id="delete-table-column" type="button" title="選択中の列を表から削除">この列を削除</button>
           </div>
 
           <div class="table-tool-group">
             <span class="table-group-title">見出し・文字配置</span>
             <div class="table-button-row">
-              <button id="toggle-cell-type" type="button">見出し切替(th/td)</button>
-              <button id="toggle-first-column-header" type="button">1列目を見出し化</button>
+              <button id="toggle-cell-type" type="button" title="選択中のセルを見出し（th）と通常セル（td）で切り替え">見出し切替(th/td)</button>
+              <button id="toggle-first-column-header" type="button" title="表の1列目をすべて見出しセル（th）に切り替え">1列目を見出し化</button>
             </div>
             <div class="table-button-row table-align-buttons">
-              <button id="table-align-left" type="button">左揃え</button>
-              <button id="table-align-center" type="button">中央揃え</button>
-              <button id="table-align-right" type="button">右揃え</button>
+              <button id="table-align-left" type="button" title="選択中のセルのテキストを左揃え">左揃え</button>
+              <button id="table-align-center" type="button" title="選択中のセルのテキストを中央揃え">中央揃え</button>
+              <button id="table-align-right" type="button" title="選択中のセルのテキストを右揃え">右揃え</button>
             </div>
           </div>
 
           <div class="table-tool-group">
             <span class="table-group-title">セル結合（マージ）</span>
             <div class="table-button-row">
-              <button id="merge-cell-right" type="button">右と結合</button>
-              <button id="merge-cell-down" type="button">下と結合</button>
+              <button id="merge-cell-right" type="button" title="選択中のセルと右隣のセルを横に結合">右と結合</button>
+              <button id="merge-cell-down" type="button" title="選択中のセルと下のセルを縦に結合">下と結合</button>
             </div>
-            <button id="split-cell" type="button">結合を解除</button>
+            <button id="split-cell" type="button" title="結合されているセルを元のセルに分割・解除">結合を解除</button>
           </div>
 
-          <button id="delete-table" class="danger" type="button">表全体を削除</button>
+          <button id="delete-table" class="danger" type="button" title="選択中の表全体をページから削除">表全体を削除</button>
           <p class="table-tools-help">セルの文章は、セルをクリックして「文章」欄またはダブルクリックで編集できます。</p>
         </div>
 
@@ -288,7 +288,7 @@
             <label>行数<input id="table-row-count" type="number" min="1" max="50" value="3" /></label>
             <label>列数<input id="table-column-count" type="number" min="1" max="20" value="3" /></label>
             <label class="table-header-option"><input id="table-header-row" type="checkbox" checked /> 1行目を見出しにする</label>
-            <button id="insert-table" type="button">選択位置の後に表を追加</button>
+            <button id="insert-table" type="button" title="指定した行数・列数の新しい表を選択要素の直後に挿入">選択位置の後に表を追加</button>
           </div>
           <p class="table-tools-help">選択中の要素の直後に新しい表を挿入します。</p>
         </details>
@@ -301,15 +301,15 @@
           <div class="link-field" data-editor-field="link">
             <label for="link-value">リンク先URL</label>
             <input id="link-value" type="text" placeholder="https://example.com/" />
-            <button id="remove-image-link" class="small-button" type="button" hidden>画像のリンクを削除</button>
+            <button id="remove-image-link" class="small-button" type="button" hidden title="画像に設定されているリンク（aタグ）を削除">画像のリンクを削除</button>
           </div>
           <div id="inline-link-tools" class="inline-link-tools" data-editor-field="inline-link" hidden>
             <strong>文章中の選択文字へリンクを設定</strong>
             <span id="inline-link-selection">文章をダブルクリックして編集状態にし、リンクにする文字を選択してください。</span>
             <input id="inline-link-url" type="text" placeholder="https://example.com/" aria-label="選択文字のリンク先URL" />
             <div>
-              <button id="apply-inline-link" type="button">リンク設定・変更</button>
-              <button id="remove-inline-link" type="button">リンク解除</button>
+              <button id="apply-inline-link" type="button" title="選択中の文章にリンク先URLを設定または更新">リンク設定・変更</button>
+              <button id="remove-inline-link" type="button" title="選択中の文章からリンクを解除">リンク解除</button>
             </div>
           </div>
           <label data-editor-field="alt">
@@ -319,7 +319,7 @@
           <label data-editor-field="image">
             画像を差し替える
             <input id="image-file" type="file" accept="image/*" />
-            <button id="save-selected-image" class="small-button" type="button" disabled>この画像を保存</button>
+            <button id="save-selected-image" class="small-button" type="button" disabled title="差し替えた画像ファイルを案件フォルダに保存">この画像を保存</button>
           </label>
           <label data-editor-field="image-url">
             画像URL（src）
@@ -331,14 +331,14 @@
             <datalist id="class-options"></datalist>
           </label>
           <div class="element-actions">
-            <button id="select-parent-element" class="select-parent" type="button">親要素選択</button>
-            <button id="return-child-element" class="return-child" type="button">子要素戻る</button>
-            <button id="copy-element" class="copy-element" type="button">要素コピー</button>
-            <button id="delete-element" class="danger" type="button">要素削除</button>
-            <button id="paste-before-element" type="button">前に貼付け</button>
-            <button id="paste-after-element" type="button">後に貼付け</button>
-            <button id="move-before" type="button">上／前へ移動</button>
-            <button id="move-after" type="button">下／後へ移動</button>
+            <button id="select-parent-element" class="select-parent" type="button" title="選択中の要素を囲む外側の親要素を選択">親要素選択</button>
+            <button id="return-child-element" class="return-child" type="button" title="親要素を選択する前に選んでいた子要素に戻る">子要素戻る</button>
+            <button id="copy-element" class="copy-element" type="button" title="選択中の要素とその内容をクリップボードにコピー">要素コピー</button>
+            <button id="delete-element" class="danger" type="button" title="選択中の要素をページから削除">要素削除</button>
+            <button id="paste-before-element" type="button" title="コピーした要素を選択中の要素の直前に貼り付け">前に貼付け</button>
+            <button id="paste-after-element" type="button" title="コピーした要素を選択中の要素の直後に貼り付け">後に貼付け</button>
+            <button id="move-before" type="button" title="選択中の要素を1つ前の兄弟要素の前へ移動">上／前へ移動</button>
+            <button id="move-after" type="button" title="選択中の要素を1つ後ろの兄弟要素の後へ移動">下／後へ移動</button>
           </div>
         </fieldset>
 
@@ -348,7 +348,7 @@
               <p class="eyebrow">Change Log</p>
               <h2 id="history-title">変更履歴 <span id="history-count">0</span></h2>
             </div>
-            <button id="clear-history" class="small-button" type="button" disabled>履歴を消去</button>
+            <button id="clear-history" class="small-button" type="button" disabled title="記録された変更履歴の一覧をすべて消去">履歴を消去</button>
           </div>
           <ol id="history-list" class="history-list">
             <li class="history-empty">まだ変更はありません。</li>

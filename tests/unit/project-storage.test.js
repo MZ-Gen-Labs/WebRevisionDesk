@@ -352,6 +352,49 @@ test("index.html toolbar and sidebar buttons have updated labels and command hin
     assert.ok(btn, `Button ${id} should exist`);
     assert.ok(btn.getAttribute("title")?.trim(), `Button ${id} should have a non-empty title attribute`);
   }
+
+  // 右パネル編集メニュー（Inspector）の各ボタンの title 属性の確認
+  const inspectorButtonIds = [
+    "#collapse-inspector",
+    "#add-table-row-before",
+    "#add-table-row",
+    "#move-table-row-up",
+    "#move-table-row-down",
+    "#delete-table-row",
+    "#add-table-column-before",
+    "#add-table-column",
+    "#move-table-column-left",
+    "#move-table-column-right",
+    "#delete-table-column",
+    "#toggle-cell-type",
+    "#toggle-first-column-header",
+    "#table-align-left",
+    "#table-align-center",
+    "#table-align-right",
+    "#merge-cell-right",
+    "#merge-cell-down",
+    "#split-cell",
+    "#delete-table",
+    "#insert-table",
+    "#remove-image-link",
+    "#apply-inline-link",
+    "#remove-inline-link",
+    "#save-selected-image",
+    "#select-parent-element",
+    "#return-child-element",
+    "#copy-element",
+    "#delete-element",
+    "#paste-before-element",
+    "#paste-after-element",
+    "#move-before",
+    "#move-after",
+    "#clear-history",
+  ];
+  for (const id of inspectorButtonIds) {
+    const btn = doc.querySelector(id);
+    assert.ok(btn, `Inspector button ${id} should exist`);
+    assert.ok(btn.getAttribute("title")?.trim(), `Inspector button ${id} should have a non-empty title attribute`);
+  }
 });
 
 
