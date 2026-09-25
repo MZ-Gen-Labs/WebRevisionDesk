@@ -101,6 +101,15 @@ export function downloadDiffReport(fileName, changes) {
 }
 
 const EDITOR_ID_ATTR = "data-web-revision-id";
+const VOID_ELEMENTS = new Set([
+  "AREA", "BASE", "BR", "COL", "EMBED", "HR", "IMG", "INPUT", "LINK", "META", "PARAM", "SOURCE", "TRACK", "WBR",
+]);
+const RESTRICTED_CHILD_ELEMENTS = new Set([
+  "UL", "OL", "DL", "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "COLGROUP", "SELECT", "OPTGROUP", "PICTURE",
+]);
+const RESTRICTED_STRUCTURE_ELEMENTS = new Set([
+  "UL", "OL", "DL", "THEAD", "TBODY", "TFOOT", "TR", "COLGROUP", "COL", "SELECT", "OPTGROUP", "OPTION", "PICTURE", "SOURCE", "TRACK",
+]);
 
 function disableActiveContent(doc) {
   doc.querySelectorAll("script, meta[http-equiv='refresh' i]").forEach((element) => element.remove());
@@ -123,10 +132,58 @@ function sanitizedElementFromHtml(doc, html) {
   return template.content.firstElementChild;
 }
 
+function imageLabelHost(element) {
+  const semanticHost = element.closest("figure, a, li, article");
+  if (semanticHost) return semanticHost;
+  const parent = element.parentElement;
+  return parent?.tagName === "PICTURE" ? parent.parentElement : parent;
+}
+
+function addSiblingLabel(target, label, kind) {
+  let anchor = target;
+  while (anchor.parentElement && RESTRICTED_CHILD_ELEMENTS.has(anchor.parentElement.tagName)) {
+    anchor = anchor.parentElement;
+  }
+  const host = anchor.parentElement;
+  if (!host) return;
+
+  const labels = target.getAttribute("data-wr-label");
+  const combinedLabel = labels ? `${labels} / ${label}` : label;
+  target.setAttribute("data-wr-label", combinedLabel);
+  const anchorId = target.getAttribute(EDITOR_ID_ATTR)
+    || target.getAttribute("data-wr-label-anchor")
+    || `label-${Math.random().toString(36).slice(2)}`;
+  if (!target.hasAttribute(EDITOR_ID_ATTR)) target.setAttribute("data-wr-label-anchor", anchorId);
+  let badge = [...host.children].find((child) => child.getAttribute("data-wr-label-for") === anchorId);
+  if (!badge) {
+    badge = target.ownerDocument.createElement("span");
+    badge.className = "wr-redline-label wr-redline-label-sibling";
+    badge.setAttribute("data-wr-label-for", anchorId);
+    host.insertBefore(badge, anchor);
+  }
+  badge.classList.add(`wr-redline-label-${kind}`);
+  badge.textContent = combinedLabel;
+}
+
+function addDefinitionListLabel(target, label, kind) {
+  const labels = target.getAttribute("data-wr-label");
+  const combinedLabel = labels ? `${labels} / ${label}` : label;
+  target.setAttribute("data-wr-label", combinedLabel);
+  let badge = [...target.children].find((child) => child.classList.contains("wr-redline-label-inside"));
+  if (!badge) {
+    badge = target.ownerDocument.createElement("dt");
+    badge.className = "wr-redline-label-inside";
+    badge.setAttribute("aria-hidden", "true");
+    target.prepend(badge);
+  }
+  badge.classList.add(`wr-redline-label-${kind}`);
+  badge.textContent = combinedLabel;
+}
+
 function addLabel(element, label, kind = "change") {
   if (element.tagName === "IMG") {
     element.classList.add("wr-redline-target", `wr-redline-${kind}`);
-    const host = element.closest("figure, a, li, article") || element.parentElement;
+    const host = imageLabelHost(element);
     if (!host) return element;
     host.classList.add("wr-image-label-host");
     let marker = [...host.children].find((child) => child.classList.contains("wr-image-marker"));
@@ -163,6 +220,16 @@ function addLabel(element, label, kind = "change") {
       host.insertBefore(badge, element);
     }
     badge.textContent = combinedLabel;
+    return element;
+  }
+  if (element.tagName === "DL") {
+    element.classList.add("wr-redline-target", `wr-redline-${kind}`);
+    addDefinitionListLabel(element, label, kind);
+    return element;
+  }
+  if (VOID_ELEMENTS.has(element.tagName) || RESTRICTED_STRUCTURE_ELEMENTS.has(element.tagName)) {
+    element.classList.add("wr-redline-target", `wr-redline-${kind}`);
+    addSiblingLabel(element, label, kind);
     return element;
   }
   const target = element;
@@ -587,7 +654,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
         if (change.type === "image-change") appendImageComparison(doc, article, group.image, change);
       });
       group.image.classList.add("wr-redline-target", "wr-redline-image");
-      const host = group.image.closest("figure, a, li, article") || group.image.parentElement;
+      const host = imageLabelHost(group.image);
       if (host) {
         host.classList.add("wr-image-label-host");
         const marker = doc.createElement("span");
@@ -621,15 +688,15 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
       element = sanitizedElementFromHtml(doc, change.before);
       if (!element) return;
       element.removeAttribute(EDITOR_ID_ATTR);
-      if (element.tagName === "IMG") {
+      if (element.tagName === "IMG" && parent.tagName !== "PICTURE") {
         const wrapper = doc.createElement("span");
         wrapper.className = "wr-deleted-image";
         wrapper.append(element);
         element = wrapper;
       }
-      addLabel(element, "削除", "delete");
       const reference = parent.children[Math.max(0, change.index)] ?? null;
       parent.insertBefore(element, reference);
+      addLabel(element, "削除", "delete");
       return;
     }
     if (!element) return;
@@ -686,6 +753,8 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     ins{display:inline;color:#08733f;background:#dff7e9;text-decoration:none;border-bottom:2px solid #19a260}
     del+ins{margin-left:.35em}
     .wr-redline-target{position:relative!important;outline:3px solid #d5a216!important;outline-offset:-3px!important}
+    .wr-redline-label-inside{position:absolute!important;z-index:2147483647!important;top:-4px!important;left:0!important;transform:translateY(-100%)!important;display:inline-block!important;width:max-content!important;max-width:100%!important;margin:0!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;box-shadow:0 1px 4px #0004!important;font:700 12px/1.5 system-ui,sans-serif!important;white-space:nowrap!important;text-decoration:none!important;pointer-events:none!important}
+    .wr-redline-label-inside.wr-redline-label-add{background:#08733f!important}.wr-redline-label-inside.wr-redline-label-delete{background:#a52020!important}.wr-redline-label-inside.wr-redline-label-move{background:#245da9!important}.wr-redline-label-inside.wr-redline-label-text{background:#8d4918!important}
     .imgTxt .imgTxt_body-around:has(.wr-redline-target){display:flow-root!important;overflow:visible!important}
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:inline-block!important}
     .wr-redline-inline>.wr-redline-label,.wr-table-cell-redline-label{position:absolute!important;top:0!important;left:0!important;transform:translateY(-100%)!important;margin:0!important;white-space:nowrap!important;pointer-events:none!important}
@@ -696,6 +765,7 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-image-label-host{position:relative!important}.wr-image-marker{position:absolute!important;z-index:2147483647!important;top:4px!important;left:4px!important;display:inline-block!important;max-width:calc(100% - 8px)!important;padding:3px 7px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;box-shadow:0 1px 4px #0004!important;font:700 11px/1.4 system-ui,sans-serif!important;white-space:nowrap!important;text-decoration:none!important;pointer-events:none!important}
     .wr-redline-add{outline-color:#15975a!important}.wr-redline-add>.wr-redline-label{background:#08733f!important}
     .wr-redline-delete{opacity:.72!important;outline-color:#cc3434!important;text-decoration:line-through!important}.wr-redline-delete>.wr-redline-label{background:#a52020!important}
+    .wr-redline-label-sibling.wr-redline-label-add{background:#08733f!important}.wr-redline-label-sibling.wr-redline-label-delete{background:#a52020!important}.wr-redline-label-sibling.wr-redline-label-move{background:#245da9!important}.wr-redline-label-sibling.wr-redline-label-text{background:#8d4918!important}
     .wr-deleted-image{display:inline-grid!important;gap:5px!important;max-width:100%!important;margin:24px 4px 8px!important;vertical-align:top!important}.wr-deleted-image>img{display:block!important;max-width:100%!important;height:auto!important}.wr-deleted-image>.wr-redline-label{grid-row:1!important;justify-self:start!important}
     .wr-redline-move{outline-color:#3578d4!important}.wr-redline-move>.wr-redline-label{background:#245da9!important}
     .wr-redline-text{outline-color:#a65a20!important}.wr-redline-text>.wr-redline-label{background:#8d4918!important}

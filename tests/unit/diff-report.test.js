@@ -425,6 +425,106 @@ test("redline report restores successive deleted siblings in their original orde
   assert.deepEqual([...parsed.querySelector("main").children].map((element) => element.textContent.trim()), ["A", "削除B", "削除C", "D"]);
 });
 
+test("redline additions keep list and definition-list child structure valid", () => {
+  const html = `<html><body><main>
+    <ul data-web-revision-id="ul"><li>item</li></ul>
+    <ol data-web-revision-id="ol"><li>item</li></ol>
+    <dl data-web-revision-id="dl"><dt>term</dt><dd>definition</dd></dl>
+  </main></body></html>`;
+  const changes = ["ul", "ol", "dl"].map((elementId) => ({ type: "element-add", elementId }));
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+
+  assert.deepEqual([...parsed.querySelector("ul").children].map((child) => child.tagName), ["LI"]);
+  assert.deepEqual([...parsed.querySelector("ol").children].map((child) => child.tagName), ["LI"]);
+  assert.deepEqual([...parsed.querySelector("dl").children].map((child) => child.tagName), ["DT", "DT", "DD"]);
+  assert.deepEqual([...parsed.querySelector("dl").children].filter((child) => !child.hasAttribute("aria-hidden")).map((child) => child.tagName), ["DT", "DD"]);
+  for (const [index, id] of ["ul", "ol"].entries()) {
+    const target = [...parsed.querySelectorAll("ul, ol, dl")][index];
+    const badge = [...parsed.querySelectorAll(".wr-redline-label-sibling")]
+      .find((label) => label.getAttribute("data-wr-label-for") === id);
+    assert.ok(target);
+    assert.ok(badge);
+    assert.equal(badge.nextElementSibling, parsed.querySelector(id));
+    assert.match(badge.textContent, /追加/);
+  }
+  const definitionList = parsed.querySelector("dl");
+  assert.equal(definitionList.getAttribute("data-wr-label"), "追加");
+  const badge = definitionList.querySelector(":scope > dt.wr-redline-label-inside");
+  assert.equal(badge.getAttribute("aria-hidden"), "true");
+  assert.equal(badge.textContent, "追加");
+  assert.match(parsed.querySelector("style").textContent, /\.wr-redline-label-inside\{/);
+});
+
+test("redline additions label void elements as siblings without inserting children", () => {
+  const html = `<html><body><main>
+    <input data-web-revision-id="input" value="x"><br data-web-revision-id="br"><hr data-web-revision-id="hr">
+  </main></body></html>`;
+  const changes = ["input", "br", "hr"].map((elementId) => ({ type: "element-add", elementId }));
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+
+  for (const id of ["input", "br", "hr"]) {
+    const target = parsed.querySelector(id);
+    assert.equal(target.childElementCount, 0);
+    assert.equal(target.previousElementSibling?.getAttribute("data-wr-label-for"), id);
+    assert.match(target.previousElementSibling.textContent, /追加/);
+  }
+});
+
+test("redline additions keep picture and select child models intact", () => {
+  const html = `<html><body><main>
+    <picture><source data-web-revision-id="source" srcset="photo.webp"><img data-web-revision-id="photo" src="photo.png"></picture>
+    <select><option data-web-revision-id="option">Choice</option></select>
+  </main></body></html>`;
+  const changes = [
+    { type: "element-add", elementId: "option" },
+    { type: "element-add", elementId: "source" },
+    { type: "element-add", elementId: "photo" },
+  ];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+
+  assert.deepEqual([...parsed.querySelector("picture").children].map((child) => child.tagName), ["SOURCE", "IMG"]);
+  assert.deepEqual([...parsed.querySelector("select").children].map((child) => child.tagName), ["OPTION"]);
+  assert.equal(parsed.querySelector("picture").previousElementSibling?.classList.contains("wr-redline-label-sibling"), true);
+  assert.equal(parsed.querySelector("select").previousElementSibling?.getAttribute("data-wr-label-for"), "option");
+  assert.equal(parsed.querySelector("main .wr-image-marker")?.parentElement, parsed.querySelector("main"));
+});
+
+test("redline deletion keeps an image inside picture without adding an invalid wrapper", () => {
+  const html = `<html><body><main><picture data-web-revision-id="parent"></picture></main></body></html>`;
+  const parsed = new JSDOM(createRedlineReport(html, [{
+    type: "element-delete", elementId: "photo", parentId: "parent", index: 0,
+    before: `<img src="removed.png" alt="removed">`,
+  }], "test.html")).window.document;
+
+  assert.deepEqual([...parsed.querySelector("picture").children].map((child) => child.tagName), ["IMG"]);
+  assert.match(parsed.querySelector("main .wr-image-marker")?.textContent, /削除/);
+});
+
+test("redline deletions restore lists and void elements with sibling labels", () => {
+  const html = `<html><body><main data-web-revision-id="parent"><p>remaining</p></main></body></html>`;
+  const deleted = [
+    ["list", `<ul><li>removed list item</li></ul>`],
+    ["input", `<input value="removed">`],
+    ["br", `<br>`],
+    ["hr", `<hr>`],
+  ];
+
+  for (const [id, before] of deleted) {
+    const parsed = new JSDOM(createRedlineReport(html, [{
+      type: "element-delete", elementId: id, parentId: "parent", index: 0, before,
+    }], "test.html")).window.document;
+    const parent = parsed.querySelector("main");
+    const target = parent.querySelector("ul, input, br, hr");
+    assert.ok(target, `${id} should be restored`);
+    const siblingLabel = [...parent.children].find((child) => child.classList.contains("wr-redline-label-sibling"));
+    assert.ok(siblingLabel, `${id} should have a sibling label`);
+    assert.equal(siblingLabel.nextElementSibling, target, `${id} label should appear directly before its target`);
+    assert.match(siblingLabel.textContent, /削除/);
+    if (target.tagName === "UL") assert.deepEqual([...target.children].map((child) => child.tagName), ["LI"]);
+    else assert.equal(target.childElementCount, 0);
+  }
+});
+
 test("redline report includes both text and images from deleted table cells", () => {
   const html = `<html><body><table data-web-revision-id="table"><tr><td>A</td></tr></table></body></html>`;
   const changes = [{
