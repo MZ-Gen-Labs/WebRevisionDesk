@@ -9,7 +9,7 @@ import { BrowserTaskQueue } from "../src/browser-task-queue.js";
 import { isTrackingResourceUrl } from "../src/tracking-resource-filter.js";
 import { isAllowedReleaseUrl, LATEST_RELEASE_URL } from "../src/release-links.js";
 import { normalizeUpdateDownloadTimeoutSeconds } from "../src/update-timeout.js";
-import { selectMacUpdatePackage, selectWindowsUpdatePackage } from "../src/update-package.js";
+import { selectMacUpdatePackage, selectPlatformInstallerAsset, selectWindowsUpdatePackage } from "../src/update-package.js";
 import { removeProjectEntry } from "./project-file-system.mjs";
 import {
   isCrawlTarget,
@@ -714,28 +714,13 @@ async function fetchLatestRelease({ patchSupported = false } = {}) {
     }
   }
 
-  const setupExe = release.assets?.find((asset) => /^WebRevisionDesk-.*-Setup\.exe$/i.test(asset.name) && !asset.name.includes("Patch"));
-  const patchExe = release.assets?.find((asset) => /^WebRevisionDesk-.*-Patch.*Setup\.exe$/i.test(asset.name));
-  const macDmg = release.assets?.find((asset) => /^WebRevisionDesk-.*-mac-.*\.dmg$/i.test(asset.name));
-
-  let installerAsset = null;
-  let installerType = "full";
-
-  if (process.platform === "win32") {
-    if (selected.packageType === "patch" && patchExe) {
-      installerAsset = patchExe;
-      installerType = "patch";
-    } else {
-      installerAsset = setupExe || patchExe;
-      installerType = setupExe ? "full" : "patch";
-    }
-  } else if (process.platform === "darwin") {
-    installerAsset = macDmg;
-    installerType = "full";
-  } else {
-    installerAsset = (selected.packageType === "patch" && patchExe) ? patchExe : (setupExe || patchExe);
-    installerType = (selected.packageType === "patch" && patchExe) ? "patch" : "full";
-  }
+  const { asset: installerAsset, installerType } = selectPlatformInstallerAsset({
+    platform: process.platform,
+    currentVersion: packageJson.version,
+    releaseVersion: version,
+    assets: release.assets,
+    packageType: selected.packageType,
+  });
 
   return {
     version,

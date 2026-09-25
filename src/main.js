@@ -510,7 +510,8 @@ function getUpdateDownloadTimeoutSeconds() {
 function getInstallerDownloadUrl() {
   if (availableUpdate?.installerUrl) return availableUpdate.installerUrl;
   if (availableUpdate?.version) {
-    return `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${availableUpdate.version}/WebRevisionDesk-${availableUpdate.version}-Setup.exe`;
+    const filename = availableUpdate?.installerName || `WebRevisionDesk-${availableUpdate.version}-Setup.exe`;
+    return `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${availableUpdate.version}/${encodeURIComponent(filename)}`;
   }
   return LATEST_RELEASE_URL;
 }

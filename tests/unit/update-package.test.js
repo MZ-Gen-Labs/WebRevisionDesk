@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectMacUpdatePackage, selectWindowsUpdatePackage } from "../../src/update-package.js";
+import {
+  compareVersionNumbers,
+  extractPatchMinimumVersion,
+  selectMacUpdatePackage,
+  selectPlatformInstallerAsset,
+  selectWindowsUpdatePackage,
+} from "../../src/update-package.js";
 
 const version = "0.8.0";
 const electronVersion = "44.4.3";
@@ -104,18 +110,71 @@ test("identifies Setup.exe installer asset for Windows and DMG for macOS", () =>
     { name: dmgName, browser_download_url: `https://github.com/MZ-Gen-Labs/WebRevisionDesk/releases/download/v${version}/${dmgName}` },
   ];
 
-  const fullSetupAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-Setup\.exe$/i.test(asset.name) && !asset.name.includes("Patch"));
-  const patchSetupAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-Patch.*Setup\.exe$/i.test(asset.name));
-  const dmgAsset = allAssets.find((asset) => /^WebRevisionDesk-.*-mac-.*\.dmg$/i.test(asset.name));
+  // extractPatchMinimumVersion
+  assert.equal(extractPatchMinimumVersion(patchSetupName), "0.7.10");
+  assert.equal(extractPatchMinimumVersion(`WebRevisionDesk-${version}-Patch-from-0.7.20+-Setup.exe`), "0.7.20");
+  assert.equal(extractPatchMinimumVersion(setupName), null);
 
-  assert.equal(fullSetupAsset?.name, setupName);
-  assert.equal(patchSetupAsset?.name, patchSetupName);
-  assert.equal(dmgAsset?.name, dmgName);
+  // compareVersionNumbers
+  assert.equal(compareVersionNumbers("0.7.30", "0.7.10"), 1);
+  assert.equal(compareVersionNumbers("0.7.10", "0.7.30"), -1);
+  assert.equal(compareVersionNumbers("0.7.10", "0.7.10"), 0);
 
-  // 差分更新が有効な場合は差分インストーラー（Patch...Setup.exe）を選択
-  const selectInstaller = (packageType) => (packageType === "patch" && patchSetupAsset ? patchSetupAsset : fullSetupAsset);
-  assert.equal(selectInstaller("patch")?.name, patchSetupName);
-  assert.equal(selectInstaller("full")?.name, setupName);
+  // Windows: packageType が "patch" のときは当然差分インストーラーを選択
+  const patchResult = selectPlatformInstallerAsset({
+    platform: "win32",
+    currentVersion: "0.7.30",
+    releaseVersion: version,
+    assets: allAssets,
+    packageType: "patch",
+  });
+  assert.equal(patchResult.asset?.name, patchSetupName);
+  assert.equal(patchResult.installerType, "patch");
+
+  // Windows: セキュリティや通信失敗等で packageType が "full" にフォールバックした場合でも、
+  // 現在のバージョン (0.7.30) が差分対象 (>= 0.7.10) であれば差分インストーラーを優先選択すること！
+  const securityFallbackResult = selectPlatformInstallerAsset({
+    platform: "win32",
+    currentVersion: "0.7.30",
+    releaseVersion: version,
+    assets: allAssets,
+    packageType: "full",
+  });
+  assert.equal(securityFallbackResult.asset?.name, patchSetupName);
+  assert.equal(securityFallbackResult.installerType, "patch");
+
+  // Windows: 現在のバージョンが古い (0.7.9 < 0.7.10) かつ packageType が "full" のときはフル版を選択
+  const oldVersionResult = selectPlatformInstallerAsset({
+    platform: "win32",
+    currentVersion: "0.7.9",
+    releaseVersion: version,
+    assets: allAssets,
+    packageType: "full",
+  });
+  assert.equal(oldVersionResult.asset?.name, setupName);
+  assert.equal(oldVersionResult.installerType, "full");
+
+  // Windows: 差分インストーラーが存在しないときはフル版を選択
+  const noPatchResult = selectPlatformInstallerAsset({
+    platform: "win32",
+    currentVersion: "0.7.30",
+    releaseVersion: version,
+    assets: allAssets.filter((asset) => asset.name !== patchSetupName),
+    packageType: "full",
+  });
+  assert.equal(noPatchResult.asset?.name, setupName);
+  assert.equal(noPatchResult.installerType, "full");
+
+  // macOS: DMG を選択
+  const macResult = selectPlatformInstallerAsset({
+    platform: "darwin",
+    currentVersion: "0.7.30",
+    releaseVersion: version,
+    assets: allAssets,
+    packageType: "patch",
+  });
+  assert.equal(macResult.asset?.name, dmgName);
+  assert.equal(macResult.installerType, "full");
 });
 
 
