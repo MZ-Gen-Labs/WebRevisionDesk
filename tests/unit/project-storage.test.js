@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { JSDOM } from "jsdom";
-import { determineVariantSuffix, pagePathForUrl, ProjectStore } from "../../src/project-storage.js";
+import { compareProjectPages, determineVariantSuffix, pagePathForUrl, ProjectStore } from "../../src/project-storage.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.DOMParser = dom.window.DOMParser;
@@ -268,4 +268,33 @@ test("index.html contains duplicate-project-page button with label 複製", () =
   assert.equal(duplicateButton.textContent.trim(), "複製");
   assert.equal(doc.querySelector("#check-project-pages"), null, "#check-project-pages should no longer exist");
 });
+
+test("compareProjectPages preserves base URL first, folder hierarchy, and keeps variants immediately after originals", () => {
+  const pages = [
+    { url: "https://example.com/site/products/detail/", path: "pages/site/products/detail/index" },
+    { url: "https://example.com/site/about/", path: "pages/site/about/index_B", variantOf: "about-1", variantSuffix: "_B" },
+    { url: "https://example.com/site/about/", path: "pages/site/about/index" },
+    { url: "https://example.com/site/about/", path: "pages/site/about/index_A", variantOf: "about-1", variantSuffix: "_A" },
+    { url: "https://example.com/site/", path: "pages/site/index" },
+    { url: "https://example.com/site/contact/", path: "pages/site/contact/index" },
+  ];
+
+  const sorted = [...pages].sort(compareProjectPages);
+
+  // 1. 基準URL（最短パス・トップページ）が一番上
+  assert.equal(sorted[0].url, "https://example.com/site/");
+
+  // 2. 配下の about 階層が次に並び、元ページが先頭、その直下に _A, _B が並ぶ
+  assert.equal(sorted[1].url, "https://example.com/site/about/");
+  assert.equal(sorted[1].variantOf, undefined, "Original about page should come first");
+  assert.equal(sorted[2].url, "https://example.com/site/about/");
+  assert.equal(sorted[2].variantSuffix, "_A", "_A should immediately follow original");
+  assert.equal(sorted[3].url, "https://example.com/site/about/");
+  assert.equal(sorted[3].variantSuffix, "_B", "_B should follow _A");
+
+  // 3. 残りの配下ページがURLフォルダ階層順に続く
+  assert.equal(sorted[4].url, "https://example.com/site/contact/");
+  assert.equal(sorted[5].url, "https://example.com/site/products/detail/");
+});
+
 

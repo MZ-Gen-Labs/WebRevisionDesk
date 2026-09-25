@@ -10,7 +10,7 @@ import {
   normalizeSearchReplaceRule,
   validateSearchReplaceRule,
 } from "./search-replace.js";
-import { pagePathForUrl, ProjectStore } from "./project-storage.js";
+import { compareProjectPages, pagePathForUrl, ProjectStore } from "./project-storage.js";
 import { comparePageHtml } from "./page-comparison.js";
 import { appFetch } from "./runtime-api.js";
 import { LATEST_RELEASE_URL } from "./release-links.js";
@@ -1302,7 +1302,7 @@ function listedProjectPages() {
     .filter((page) => !savedUrls.has(page.url))
     .map((page) => ({ ...page, saved: false }));
   const listed = [...savedPages, ...discovered];
-  listed.sort((a, b) => (a.path || a.url).localeCompare(b.path || b.url, "ja"));
+  listed.sort(compareProjectPages);
   return listed;
 }
 

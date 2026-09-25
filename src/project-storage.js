@@ -87,6 +87,22 @@ export function determineVariantSuffix(baseSegment, existingSegments = new Set()
   }
 }
 
+export function compareProjectPages(a, b) {
+  const urlA = String(a?.url || "");
+  const urlB = String(b?.url || "");
+  const urlCompare = urlA.localeCompare(urlB, "ja");
+  if (urlCompare !== 0) return urlCompare;
+
+  const aIsVariant = Boolean(a?.variantOf);
+  const bIsVariant = Boolean(b?.variantOf);
+  if (!aIsVariant && bIsVariant) return -1;
+  if (aIsVariant && !bIsVariant) return 1;
+
+  const suffixA = String(a?.variantSuffix || a?.path || "");
+  const suffixB = String(b?.variantSuffix || b?.path || "");
+  return suffixA.localeCompare(suffixB, "ja");
+}
+
 
 async function readTextFile(directory, name) {
   const handle = await directory.getFileHandle(name);
@@ -265,7 +281,7 @@ export class ProjectStore {
 
     if (existing) Object.assign(existing, pageInfo);
     else this.project.pages.push(pageInfo);
-    this.project.pages.sort((a, b) => a.path.localeCompare(b.path, "ja"));
+    this.project.pages.sort(compareProjectPages);
     this.project.updatedAt = now;
     await writeTextFile(this.directory, PROJECT_FILE, JSON.stringify(this.project, null, 2));
     return pageInfo;
@@ -351,7 +367,7 @@ export class ProjectStore {
     await writeTextFile(targetDirectory, "page.json", JSON.stringify(pageData, null, 2));
 
     this.project.pages.push(pageInfo);
-    this.project.pages.sort((a, b) => a.path.localeCompare(b.path, "ja"));
+    this.project.pages.sort(compareProjectPages);
     this.project.updatedAt = now;
     await writeTextFile(this.directory, PROJECT_FILE, JSON.stringify(this.project, null, 2));
 
