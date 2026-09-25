@@ -23,12 +23,14 @@
         <button id="show-original" type="button" disabled>修正前</button>
         <button id="show-modified" type="button" disabled>修正後</button>
         <button id="show-redline" class="button-redline" type="button" disabled>変更箇所</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="undo" type="button" disabled title="直前の編集をアンドゥ（Ctrl/Cmd+Z）">アンドゥ</button>
         <button id="redo" type="button" disabled title="アンドゥした編集をリドゥ（Ctrl/Cmd+Shift+Z）">リドゥ</button>
         <button id="reset" type="button" disabled>リセット</button>
-        <button id="search-replace" type="button" disabled>検索・置換</button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="save-project-page" class="button-subtle" type="button" disabled>変更更新</button>
-        <button id="download-package" class="button-package" type="button" disabled>共有用ファイル一式を保存</button>
+        <button id="search-replace" type="button" disabled>検索・置換</button>
+        <button id="download-package" class="button-package" type="button" disabled>共有ファイル保存</button>
         <details class="export-menu">
           <summary>その他の保存</summary>
           <div class="export-menu-items">
@@ -98,10 +100,10 @@
         <div class="sidebar-header">
           <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
             <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
-              <span>ページ一覧</span><kbd>Alt/⌥+←</kbd>
+              <span>ページ</span><kbd>Alt/⌥+←</kbd>
             </button>
             <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
-              <span>見出し構成</span><kbd>Alt/⌥+→</kbd>
+              <span>見出し</span><kbd>Alt/⌥+→</kbd>
             </button>
           </div>
           <button id="collapse-project-sidebar" class="icon-button" type="button" aria-label="サイドバーを閉じる" aria-controls="project-sidebar" aria-expanded="true" title="サイドバーを閉じる（Alt + 4）">×</button>
