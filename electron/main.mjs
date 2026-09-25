@@ -885,7 +885,7 @@ async function openCapturePage(url, { show = true } = {}) {
 async function handleEditorApi({ url, method, bodyBase64 }) {
   const body = bodyBase64 ? JSON.parse(Buffer.from(bodyBase64, "base64").toString("utf8")) : {};
   if (method === "GET" && url === "/api/app-info") {
-    return jsonResponse({ version: packageJson.version });
+    return jsonResponse({ version: packageJson.version, buildLabel: packageJson.buildLabel || "" });
   }
   if (method === "GET" && url === "/api/update/check") return jsonResponse(await checkForUpdate());
   if (method === "POST" && url === "/api/update/download") return jsonResponse(await downloadUpdate(body));

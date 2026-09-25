@@ -476,8 +476,9 @@ async function loadAppInfo() {
     const response = await appFetch("/api/app-info", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    ui.appVersion.textContent = `v${data.version}`;
-    ui.appVersion.title = `アプリのバージョン: v${data.version}`;
+    const buildLabel = data.buildLabel ? ` · ${data.buildLabel}` : "";
+    ui.appVersion.textContent = `v${data.version}${buildLabel}`;
+    ui.appVersion.title = `アプリのバージョン: v${data.version}${buildLabel}`;
   } catch (error) {
     ui.appVersion.textContent = "v--";
     console.warn("App information could not be loaded:", error);

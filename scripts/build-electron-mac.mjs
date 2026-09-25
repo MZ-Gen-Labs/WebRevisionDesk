@@ -9,6 +9,7 @@ const run = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const appOnly = process.argv.includes("--app-only");
+const buildLabel = appOnly ? process.env.WEB_REVISION_BUILD_LABEL?.trim() : "";
 if (process.platform !== "darwin") throw new Error("macOS版はmacOSまたはGitHub Actions上で作成してください。");
 const arch = process.arch === "arm64" ? "arm64" : "x64";
 const releaseRoot = path.join(root, "release-electron-mac");
@@ -45,7 +46,13 @@ await Promise.all([
   cp(path.join(root, "src", "update-package.js"), path.join(application, "src", "update-package.js")),
   cp(path.join(root, "LICENSE"), path.join(application, "LICENSE")),
   cp(path.join(root, "THIRD_PARTY_NOTICES.md"), path.join(application, "THIRD_PARTY_NOTICES.md")),
-  writeFile(path.join(application, "package.json"), `${JSON.stringify({ name: packageJson.name, version: packageJson.version, type: "module", main: "electron/main.mjs" }, null, 2)}\n`),
+  writeFile(path.join(application, "package.json"), `${JSON.stringify({
+    name: packageJson.name,
+    version: packageJson.version,
+    ...(buildLabel ? { buildLabel } : {}),
+    type: "module",
+    main: "electron/main.mjs",
+  }, null, 2)}\n`),
 ]);
 const plist = path.join(appBundle, "Contents", "Info.plist");
 await run("/usr/libexec/PlistBuddy", ["-c", "Set :CFBundleDisplayName WebRevisionDesk", plist]);

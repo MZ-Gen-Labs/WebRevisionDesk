@@ -110,7 +110,6 @@ const RESTRICTED_CHILD_ELEMENTS = new Set([
 const RESTRICTED_STRUCTURE_ELEMENTS = new Set([
   "UL", "OL", "DL", "THEAD", "TBODY", "TFOOT", "TR", "COLGROUP", "COL", "SELECT", "OPTGROUP", "OPTION", "PICTURE", "SOURCE", "TRACK",
 ]);
-
 function disableActiveContent(doc) {
   doc.querySelectorAll("script, meta[http-equiv='refresh' i]").forEach((element) => element.remove());
   doc.querySelectorAll("meta[http-equiv='content-security-policy' i]").forEach((element) => element.remove());
@@ -180,6 +179,35 @@ function addDefinitionListLabel(target, label, kind) {
   badge.textContent = combinedLabel;
 }
 
+function addInlineSiblingLabel(target, label, kind) {
+  let wrapper = target.parentElement?.classList.contains("wr-redline-label-wrapper")
+    ? target.parentElement
+    : null;
+  if (!wrapper) {
+    wrapper = target.ownerDocument.createElement("span");
+    wrapper.className = "wr-redline-label-wrapper";
+    target.replaceWith(wrapper);
+    wrapper.append(target);
+  }
+
+  const labels = target.getAttribute("data-wr-label");
+  const combinedLabel = labels ? `${labels} / ${label}` : label;
+  target.setAttribute("data-wr-label", combinedLabel);
+  const anchorId = target.getAttribute(EDITOR_ID_ATTR)
+    || target.getAttribute("data-wr-label-anchor")
+    || `label-${Math.random().toString(36).slice(2)}`;
+  if (!target.hasAttribute(EDITOR_ID_ATTR)) target.setAttribute("data-wr-label-anchor", anchorId);
+  let badge = [...wrapper.children].find((child) => child.getAttribute("data-wr-label-for") === anchorId);
+  if (!badge) {
+    badge = target.ownerDocument.createElement("span");
+    badge.className = "wr-redline-label wr-redline-label-attached";
+    badge.setAttribute("data-wr-label-for", anchorId);
+    wrapper.prepend(badge);
+  }
+  badge.classList.add(`wr-redline-label-${kind}`);
+  badge.textContent = combinedLabel;
+}
+
 function addLabel(element, label, kind = "change") {
   if (element.tagName === "IMG") {
     element.classList.add("wr-redline-target", `wr-redline-${kind}`);
@@ -235,7 +263,8 @@ function addLabel(element, label, kind = "change") {
   const target = element;
   target.classList.add("wr-redline-target", `wr-redline-${kind}`);
   if (["A", "SPAN", "STRONG", "EM", "B", "I", "SMALL", "MARK", "CODE", "S", "U"].includes(target.tagName)) {
-    target.classList.add("wr-redline-inline");
+    addInlineSiblingLabel(target, label, kind);
+    return target;
   }
   const labels = target.getAttribute("data-wr-label");
   const combinedLabel = labels ? `${labels} / ${label}` : label;
@@ -757,7 +786,9 @@ export function createRedlineReport(modifiedHtml, changes, fileName) {
     .wr-redline-label-inside.wr-redline-label-add{background:#08733f!important}.wr-redline-label-inside.wr-redline-label-delete{background:#a52020!important}.wr-redline-label-inside.wr-redline-label-move{background:#245da9!important}.wr-redline-label-inside.wr-redline-label-text{background:#8d4918!important}
     .imgTxt .imgTxt_body-around:has(.wr-redline-target){display:flow-root!important;overflow:visible!important}
     .wr-redline-label{display:inline-block!important;position:relative!important;z-index:2147483647!important;width:max-content!important;max-width:100%!important;margin:2px .55em 4px 2px!important;padding:3px 8px!important;border-radius:5px!important;color:#fff!important;background:#9a7010!important;font:700 12px/1.5 system-ui,sans-serif!important;vertical-align:middle!important;white-space:normal!important;text-decoration:none!important}.wr-table-redline-label{display:inline-block!important}
-    .wr-redline-inline>.wr-redline-label,.wr-table-cell-redline-label{position:absolute!important;top:0!important;left:0!important;transform:translateY(-100%)!important;margin:0!important;white-space:nowrap!important;pointer-events:none!important}
+    .wr-redline-label-wrapper{position:relative!important;display:inline-flex!important;flex-direction:column!important;align-items:flex-start!important;width:fit-content!important;max-width:100%!important;vertical-align:baseline!important}
+    .wr-redline-label-attached{position:static!important;z-index:2147483647!important;transform:none!important;display:block!important;align-self:flex-start!important;width:max-content!important;max-width:min(80vw,32em)!important;margin:0 0 4px!important;white-space:nowrap!important;pointer-events:none!important}
+    .wr-table-cell-redline-label{position:absolute!important;top:0!important;left:0!important;transform:translateY(-100%)!important;margin:0!important;white-space:nowrap!important;pointer-events:none!important}
     .wr-redline-text-diff-box{position:relative!important;z-index:2147483646!important;display:block!important;margin:6px 0!important;padding:8px 12px!important;border:2px solid #a65a20!important;border-radius:6px!important;background:#fff8ec!important;font:13px/1.5 system-ui,sans-serif!important;color:#24242d!important}.wr-redline-text-diff-box>strong{color:#8d4918!important;margin-right:6px!important}
     .wr-page-info-changes{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px!important;padding:14px!important;border:3px solid #a65a20!important;border-radius:8px!important;color:#24242d!important;background:#fff8ec!important;font:14px/1.5 system-ui,sans-serif!important}.wr-page-info-changes>strong{color:#8d4918!important}.wr-page-info-changes>div{display:grid!important;grid-template-columns:minmax(130px,auto) 1fr!important;gap:10px!important}.wr-page-info-changes span{overflow-wrap:anywhere!important}
     .wr-table-deletions{position:relative!important;z-index:2147483646!important;display:grid!important;gap:8px!important;margin:12px 0!important;padding:12px 14px!important;border:2px solid #cc3434!important;border-radius:8px!important;color:#5f1717!important;background:#fff1f1!important;font:13px/1.5 system-ui,sans-serif!important}.wr-table-deletions>strong{font-size:14px!important}.wr-table-deletions>article{display:grid!important;gap:4px!important;padding-top:8px!important;border-top:1px solid #efb1b1!important}.wr-table-deletions>article:first-of-type{padding-top:0!important;border-top:0!important}.wr-table-deletions ul{margin:0!important;padding-left:1.4em!important}.wr-table-deletions li{overflow-wrap:anywhere!important}.wr-table-deletions-remainder{color:#8d4b4b!important;font-weight:700!important}

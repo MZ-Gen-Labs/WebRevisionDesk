@@ -61,6 +61,43 @@ test("redline report preserves child elements in elements with children on text-
   assert.equal(parsed.querySelector(".wr-redline-text-diff-box"), null, "A separate diff box is unnecessary when inline mapping succeeds");
 });
 
+test("inline text-change labels stay attached to their target without affecting narrow layouts", () => {
+  const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.DOMParser = dom.window.DOMParser;
+  globalThis.CSS = dom.window.CSS || { escape: (s) => s };
+
+  const html = `<html><body><main>
+    <p style="width: 12ch">Breadcrumb <a href="https://example.com"><span data-web-revision-id="inline-link">Designcenter Solid Edge</span></a></p>
+    <h1><strong data-web-revision-id="inline-heading">Designcenter Solid Edge</strong> CAD</h1>
+  </main></body></html>`;
+  const changes = [
+    { type: "text-change", elementId: "inline-link", before: "Designcenter Solid Egde", after: "Designcenter Solid Edge" },
+    { type: "text-change", elementId: "inline-heading", before: "Designcenter Solid Egde", after: "Designcenter Solid Edge" },
+  ];
+  const parsed = new JSDOM(createRedlineReport(html, changes, "test.html")).window.document;
+  const link = parsed.querySelector("a");
+  const linkLabel = parsed.querySelector('[data-wr-label-for="inline-link"]');
+  const linkText = linkLabel.parentElement.querySelector(".wr-redline-target");
+  const headingText = parsed.querySelector("h1 .wr-redline-target");
+  const headingLabel = parsed.querySelector('[data-wr-label-for="inline-heading"]');
+
+  assert.equal(linkLabel.parentElement.classList.contains("wr-redline-label-wrapper"), true);
+  assert.equal(linkText.parentElement, linkLabel.parentElement, "The label should be anchored to the changed text, not the full link box");
+  assert.equal(linkLabel.parentElement.parentElement, link);
+  assert.ok(linkLabel.classList.contains("wr-redline-label-attached"), "The label should stay in the wrapper's top row");
+  assert.equal(link.getAttribute("data-original-href"), "https://example.com", "The original link destination should remain attached to the link");
+  assert.equal(headingLabel.parentElement.classList.contains("wr-redline-label-wrapper"), true);
+  assert.equal(headingText.parentElement, headingLabel.parentElement, "Inline heading labels should be anchored to the changed text");
+  assert.match(headingLabel.textContent, /文章変更/);
+
+  const style = parsed.querySelector("style").textContent;
+  assert.match(style, /\.wr-redline-label-wrapper\{position:relative!important/);
+  assert.match(style, /\.wr-redline-label-wrapper\{[^}]*flex-direction:column!important/);
+  assert.match(style, /\.wr-redline-label-attached\{position:static!important/);
+});
+
 test("redline report displays specific table action in table-change label", () => {
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   globalThis.window = dom.window;
