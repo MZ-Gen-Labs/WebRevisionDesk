@@ -30,6 +30,7 @@ import {
   MIN_UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
   normalizeUpdateDownloadTimeoutSeconds,
 } from "./update-timeout.js";
+import { filterActionTargetPages, isActionTargetPage, projectPageKey, renderPageBadges } from "./project-pages-ui.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -846,7 +847,7 @@ function syncProjectControls() {
   updateProjectSummary();
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
-  const hasSavedSelection = (projectStore.project?.pages || []).some((page) => state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url));
+  const hasSavedSelection = (projectStore.project?.pages || []).some((page) => state.selectedProjectKeys.has(projectPageKey(page)));
   const hasCurrentPage = Boolean(state.originalHtml && !state.previewOnly);
   ui.saveProjectPage.disabled = !hasProject || (!hasSavedSelection && !hasCurrentPage) || state.batchRunning;
   const canOpenProjectFolder = desktopFileSystemAvailable() && hasProject && !state.batchRunning;
@@ -1268,8 +1269,14 @@ async function loadHtml(html, fileName, options = {}) {
   state.changes = options.changes || [];
   state.redoChanges = [];
   state.sourceUrl = options.sourceUrl ?? sourceUrlFromHtml(html);
-  if (state.sourceUrl) state.focusedProjectUrl = state.sourceUrl;
   state.activeProjectPageId = options.activeProjectPageId || "";
+  if (state.activeProjectPageId) {
+    state.focusedProjectKey = state.activeProjectPageId;
+    state.focusedProjectUrl = "";
+  } else if (state.sourceUrl) {
+    state.focusedProjectKey = state.sourceUrl;
+    state.focusedProjectUrl = state.sourceUrl;
+  }
   state.dirty = options.dirty ?? true;
   state.previewOnly = options.previewOnly ?? false;
   state.resourceFailures = Array.isArray(options.resourceFailures) ? options.resourceFailures : [];
@@ -1304,10 +1311,6 @@ function sourceUrlFromHtml(html) {
   return doc.querySelector('meta[name="web-revision-source-url"]')?.content ?? "";
 }
 
-function projectPageKey(page) {
-  return page.id || page.url;
-}
-
 function listedProjectPages() {
   const savedPages = (projectStore.project?.pages || []).map((page) => ({ ...page, saved: true }));
   const savedUrls = new Set(savedPages.map((page) => page.url));
@@ -1320,10 +1323,7 @@ function listedProjectPages() {
 }
 
 function actionTargetPages(listed = listedProjectPages()) {
-  return listed.filter((page) => {
-    const key = projectPageKey(page);
-    return state.selectedProjectKeys.has(key) || state.selectedProjectUrls.has(page.url) || key === state.focusedProjectKey || page.url === state.focusedProjectUrl;
-  });
+  return filterActionTargetPages(listed, state);
 }
 
 function handleProjectPageClick(event, page, listed) {
@@ -1341,10 +1341,12 @@ function handleProjectPageClick(event, page, listed) {
       .forEach((item) => {
         const itemKey = projectPageKey(item);
         state.selectedProjectKeys.add(itemKey);
-        state.selectedProjectUrls.add(item.url);
+        if (!item.id) state.selectedProjectUrls.add(item.url);
       });
     state.focusedProjectKey = pageKey;
-    state.focusedProjectUrl = page.url;
+    state.focusedProjectUrl = page.id ? "" : page.url;
+    state.projectSelectionAnchorKey = pageKey;
+    state.projectSelectionAnchorUrl = page.id ? "" : page.url;
     renderProjectPages();
     return;
   }
@@ -1356,22 +1358,22 @@ function handleProjectPageClick(event, page, listed) {
     previousKeys.forEach((key) => state.selectedProjectKeys.add(key));
     if (state.selectedProjectKeys.has(pageKey)) {
       state.selectedProjectKeys.delete(pageKey);
-      state.selectedProjectUrls.delete(page.url);
+      if (!page.id) state.selectedProjectUrls.delete(page.url);
     } else {
       state.selectedProjectKeys.add(pageKey);
-      state.selectedProjectUrls.add(page.url);
+      if (!page.id) state.selectedProjectUrls.add(page.url);
     }
     state.focusedProjectKey = pageKey;
-    state.focusedProjectUrl = page.url;
+    state.focusedProjectUrl = page.id ? "" : page.url;
     state.projectSelectionAnchorKey = pageKey;
-    state.projectSelectionAnchorUrl = page.url;
+    state.projectSelectionAnchorUrl = page.id ? "" : page.url;
     renderProjectPages();
     return;
   }
   state.focusedProjectKey = pageKey;
-  state.focusedProjectUrl = page.url;
+  state.focusedProjectUrl = page.id ? "" : page.url;
   state.projectSelectionAnchorKey = pageKey;
-  state.projectSelectionAnchorUrl = page.url;
+  state.projectSelectionAnchorUrl = page.id ? "" : page.url;
   renderProjectPages();
   return page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page);
 }
@@ -1380,7 +1382,11 @@ function renderProjectPages() {
   const listed = listedProjectPages();
   const availableKeys = new Set(listed.map(projectPageKey));
   state.selectedProjectKeys = new Set([...state.selectedProjectKeys].filter((key) => availableKeys.has(key)));
-  state.selectedProjectUrls = new Set(listed.filter((page) => state.selectedProjectKeys.has(projectPageKey(page))).map((page) => page.url));
+  state.selectedProjectUrls = new Set(
+    listed
+      .filter((page) => !page.id && state.selectedProjectKeys.has(projectPageKey(page)))
+      .map((page) => page.url)
+  );
   ui.projectPageCount.textContent = String(listed.length);
   if (!listed.length) {
     ui.projectPages.innerHTML = '<p class="project-empty">「配下ページを一括検索」でページ候補を取得するか、現在のページを案件へ保存してください。</p>';
@@ -1398,15 +1404,15 @@ function renderProjectPages() {
     checkbox.addEventListener("change", () => {
       if (checkbox.checked) {
         state.selectedProjectKeys.add(key);
-        state.selectedProjectUrls.add(page.url);
+        if (!page.id) state.selectedProjectUrls.add(page.url);
       } else {
         state.selectedProjectKeys.delete(key);
-        state.selectedProjectUrls.delete(page.url);
+        if (!page.id) state.selectedProjectUrls.delete(page.url);
       }
       state.focusedProjectKey = key;
-      state.focusedProjectUrl = page.url;
+      state.focusedProjectUrl = page.id ? "" : page.url;
       state.projectSelectionAnchorKey = key;
-      state.projectSelectionAnchorUrl = page.url;
+      state.projectSelectionAnchorUrl = page.id ? "" : page.url;
       renderProjectPages();
     });
     const button = document.createElement("button");
@@ -1425,30 +1431,15 @@ function renderProjectPages() {
     button.classList.toggle("active", isFocused || isActiveEditing);
     const title = document.createElement("strong");
     const path = document.createElement("small");
-    const status = document.createElement("span");
     title.textContent = page.title;
     path.textContent = page.saved ? page.path.replace(/^pages\//, "") : new URL(page.url).pathname;
-    status.className = "page-status";
-    const savedStatus = {
-      same: "公開版と同じ",
-      changed: page.updateDecision === "kept" ? "公開版に更新あり・現在版を維持" : "公開版に更新あり",
-      error: "公開版の確認失敗",
-    }[page.checkStatus] || `保存済み・変更 ${page.changeCount}件`;
-    status.textContent = page.saved
-      ? state.unavailableProjectUrls.has(page.url) ? "保存データを開けません・削除可能" : savedStatus
-      : state.activeCaptureUrl === page.url
-        ? "画像・ページを取得中"
-        : state.queuedCaptureUrls.has(page.url)
-          ? "優先取得待ち"
-          : "未取得・クリックして画像とページを取得";
-    button.append(title, path, status);
-    if (page.saved && resourceFailureCount > 0) {
-      const failures = document.createElement("span");
-      failures.className = "page-resource-failures";
-      failures.textContent = `⚠ 取り込み失敗 ${resourceFailureCount}件`;
-      failures.title = "画像・CSSなど、関連ファイルの取得に失敗した件数です。ページを開くと詳細を確認できます。";
-      button.append(failures);
-    }
+    const badges = renderPageBadges(page, {
+      unavailable: state.unavailableProjectUrls.has(page.url),
+      activeCaptureUrl: state.activeCaptureUrl,
+      queuedCaptureUrls: state.queuedCaptureUrls,
+      document,
+    });
+    button.append(title, path, badges);
     button.addEventListener("click", (event) => handleProjectPageClick(event, page, listed));
     row.append(checkbox, button);
     if (page.saved && page.checkStatus === "changed") {
@@ -1608,7 +1599,7 @@ async function resetSelectedProjectPages() {
     const reset = await projectStore.resetPages(targets.map((page) => page.id));
     targets.forEach((page) => {
       state.selectedProjectKeys.delete(projectPageKey(page));
-      state.selectedProjectUrls.delete(page.url);
+      if (!page.id) state.selectedProjectUrls.delete(page.url);
     });
     if (activeReset) clearLoadedPage();
     ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
@@ -1651,9 +1642,13 @@ async function deleteSelectedProjectPages() {
       state.selectedProjectUrls.delete(page.url);
       state.queuedCaptureUrls.delete(page.url);
       state.unavailableProjectUrls.delete(page.url);
-      if (projectPageKey(page) === state.focusedProjectKey || page.url === state.focusedProjectUrl) {
+      if (projectPageKey(page) === state.focusedProjectKey || (!page.id && page.url === state.focusedProjectUrl)) {
         state.focusedProjectKey = "";
         state.focusedProjectUrl = "";
+      }
+      if (projectPageKey(page) === state.projectSelectionAnchorKey || (!page.id && page.url === state.projectSelectionAnchorUrl)) {
+        state.projectSelectionAnchorKey = "";
+        state.projectSelectionAnchorUrl = "";
       }
     });
     if (activeDeleted) clearLoadedPage();
@@ -1698,11 +1693,10 @@ async function duplicateSelectedProjectPage() {
     state.selectedProjectKeys.clear();
     state.selectedProjectUrls.clear();
     state.selectedProjectKeys.add(duplicated.id);
-    state.selectedProjectUrls.add(duplicated.url);
     state.focusedProjectKey = duplicated.id;
-    state.focusedProjectUrl = duplicated.url;
+    state.focusedProjectUrl = "";
     state.projectSelectionAnchorKey = duplicated.id;
-    state.projectSelectionAnchorUrl = duplicated.url;
+    state.projectSelectionAnchorUrl = "";
     renderProjectPages();
     await openProjectPage(duplicated.id);
     setStatus(`「${target.title}」を複製し、別バージョン「${duplicated.title}」を作成しました。`, "success");
@@ -1798,9 +1792,9 @@ async function replaceProjectPage(pageId) {
 ui.selectAllProjectPages.addEventListener("click", () => {
   const pages = listedProjectPages();
   state.selectedProjectKeys = new Set(pages.map(projectPageKey));
-  state.selectedProjectUrls = new Set(pages.map((page) => page.url));
+  state.selectedProjectUrls = new Set(pages.filter((page) => !page.id).map((page) => page.url));
   state.projectSelectionAnchorKey = pages[0] ? projectPageKey(pages[0]) : "";
-  state.projectSelectionAnchorUrl = pages[0]?.url || "";
+  state.projectSelectionAnchorUrl = pages[0]?.id ? "" : (pages[0]?.url || "");
   renderProjectPages();
 });
 ui.clearProjectSelection.addEventListener("click", () => {
@@ -1900,7 +1894,7 @@ async function regenerateSelectedPageReports() {
     }
   }
   const listed = listedProjectPages();
-  const checked = listed.filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
+  const checked = listed.filter((page) => page.saved && state.selectedProjectKeys.has(projectPageKey(page)));
   const targets = checked.length
     ? checked
     : listed.filter((page) => page.saved && page.id === state.activeProjectPageId);
@@ -1985,8 +1979,12 @@ async function preserveCurrentPage() {
 function activateProject(project) {
   clearLoadedPage();
   state.activeProjectPageId = "";
+  state.focusedProjectKey = "";
   state.focusedProjectUrl = "";
+  state.projectSelectionAnchorKey = "";
   state.projectSelectionAnchorUrl = "";
+  state.selectedProjectKeys.clear();
+  state.selectedProjectUrls.clear();
   state.unavailableProjectUrls = new Set();
   updateGuidance();
   ui.projectName.value = project.projectName;
@@ -2392,7 +2390,7 @@ ui.undo.addEventListener("click", () => applyUndoRedo("undo"));
 ui.redo.addEventListener("click", () => applyUndoRedo("redo"));
 ui.reset.addEventListener("click", async () => {
   const checkedPages = listedProjectPages()
-    .filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
+    .filter((page) => page.saved && state.selectedProjectKeys.has(projectPageKey(page)));
   if (checkedPages.length) {
     const message = `チェックした${checkedPages.length}ページのすべての修正を破棄して、それぞれの取得時点へ戻しますか？\n\n取得済みページと一覧は残り、編集内容・変更履歴だけがリセットされます。`;
     if (!window.confirm(message)) return;
@@ -3026,7 +3024,7 @@ async function replaceAllSearchRulesWithoutConfirmation() {
 async function replaceSelectedPagesWithoutConfirmation() {
   const enabled = validateEnabledSearchRules();
   if (!enabled) return;
-  const targets = listedProjectPages().filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
+  const targets = listedProjectPages().filter((page) => page.saved && state.selectedProjectKeys.has(projectPageKey(page)));
   if (!targets.length) {
     setStatus("ページ一覧で、保存済みページをチェックしてから実行してください。", "error");
     return;
@@ -3270,7 +3268,7 @@ function moveSidebarSelection(direction) {
   if (!buttons.length) return false;
   let currentIndex = outlineVisible
     ? buttons.findIndex((button) => button.classList.contains("active"))
-    : buttons.findIndex((button) => button.dataset.pageKey === state.focusedProjectKey || button.dataset.pageUrl === state.focusedProjectKey || button.dataset.pageUrl === state.focusedProjectUrl);
+    : buttons.findIndex((button) => button.dataset.pageKey === state.focusedProjectKey || (!button.dataset.pageId && button.dataset.pageUrl === state.focusedProjectUrl));
   if (currentIndex < 0) currentIndex = direction > 0 ? -1 : buttons.length;
   const nextIndex = Math.min(buttons.length - 1, Math.max(0, currentIndex + direction));
   if (nextIndex === currentIndex) return true;
