@@ -18,6 +18,8 @@
     "nodeVersion": "24.18.0"
   },
   "scripts": {
+    "dev": "npm run electron:dev",
+    "start": "npm run electron:dev",
     "electron:dev": "npm run build && electron electron/main.mjs",
     "electron:feasibility": "electron electron/main.mjs --feasibility-ui",
     "electron:package:win": "node scripts/build-electron-feasibility.mjs",

@@ -2,6 +2,14 @@
 
 このプロジェクトをmacOSで開発するときのビルド・起動手順です。
 
+## 重要: アプリケーションの動作形態
+
+**本アプリはElectron専用のデスクトップアプリケーションです。**
+
+- **通常のWebブラウザ（Chrome / Safari等）や `file://` スキームで `index.html` または `dist/index.html` を直接開かないでください。**
+- スタイルシートやJavaScriptはルート相対パス（`/assets/...`）で読み込まれるため、ブラウザやローカルファイルとして直接開くと 404 エラーとなり、**CSSが一切適用されず画面レイアウトが完全に崩れます**。
+- また、ファイルシステムアクセスやローカルAPIはElectronのpreloadブリッジ（`window.webRevisionDesktop`）に依存しているため、ブラウザ環境では動作しません。必ず下記のElectron起動コマンドを使用してください。
+
 ## 開発モードで起動
 
 リポジトリのルートで依存パッケージを入れ、Electronアプリを起動します。
@@ -9,13 +17,15 @@
 ```bash
 npm ci
 npm run electron:dev
+# または npm run dev / npm start
 ```
 
-`electron:dev` は先にViteで画面をビルドし、その後 `electron electron/main.mjs` を実行します。通常はこちらを使います。
+- `electron:dev` は先にViteで画面を本番ビルド（`npm run build`）し、その後 `electron electron/main.mjs` を実行します。通常はこちらを使います。
+- **画面修正時の注意**: ソースコード（`src/` や `index.html`）を変更した場合は、必ず `npm run build`（または `npm run electron:dev`）を実行して `dist/` ディレクトリを更新してください。Viteビルドを経由せずにElectronプロセスだけを再起動しても変更内容は反映されず、レイアウトの不整合の原因になります。
 
 ## パッケージ版アプリをローカルで確認
 
-パッケージ版の動作確認が必要な場合は、DMGを作らず `.app` だけを作成します。
+パッケージ版（`.app`）の動作確認が必要な場合は、DMGを作らず `.app` だけを作成します。
 
 ```bash
 npm run build:electron:mac:app
@@ -34,16 +44,36 @@ release-electron-mac/stage/WebRevisionDesk.app
   release-electron-mac/stage/WebRevisionDesk.app/Contents/Info.plist
 ```
 
-## このMacでの起動上の注意
+### パッケージ版の起動方法（CLI）
 
-2026-09-25に、既存の `/Applications/WebRevisionDesk.app`（v0.7.19）と修正版を同時に扱う際、名前だけでアプリを選ぶと旧版を再選択することを確認しました。ビルド成功だけで修正版の起動確認とせず、次の手順で画面のビルド表示まで確認します。
+作成したステージ版アプリは、ターミナルから以下のいずれかのコマンドで起動できます。
 
-1. `npm run build:electron:mac:app` でステージ用 `.app` を作る。
-2. 必要に応じて `Contents/Info.plist` の `CFBundleShortVersionString` と、アプリ内のビルド表示を確認する。
-3. Codexからアプリを選ぶ場合、表示名 `WebRevisionDesk` だけでなく、ビルド時に設定した一意なBundle IDで選択する。
-4. 起動後、画面上部のバージョン・ビルド表示と修正されたUIを目視する。古いアプリも起動中なら、ウインドウタイトルだけで判断しない。
+```bash
+# アプリバンドルを開く（通常）
+open release-electron-mac/stage/WebRevisionDesk.app
 
-修正内容を識別できる一時ビルドは、正式リリースの識別子を変更せず、次のように別のBundle ID・表示名・ビルドラベルを指定して作成します。
+# または実行バイナリを直接起動
+./release-electron-mac/stage/WebRevisionDesk.app/Contents/MacOS/Electron
+```
+
+## 既存アプリとの混同防止と一時ビルド
+
+### 既存プロセスの確認と終了
+
+システム上にインストール済みの `/Applications/WebRevisionDesk.app`（旧版など）が既に起動している場合、新規に開発版を起動しても古いウィンドウが前面に残ったり、AIエージェントが既存プロセスを誤認したりすることがあります。
+必要に応じて、事前に既存プロセスを確認・終了してください。
+
+```bash
+# 実行中のプロセスを確認
+pgrep -fl WebRevisionDesk
+
+# 必要に応じて既存アプリを終了
+pkill -f "/Applications/WebRevisionDesk.app"
+```
+
+### 修正確認用の一時ビルド（一意なBundle IDでの識別）
+
+修正版と既存版を厳密に区別してテストしたい場合は、正式リリースの識別子を変更せず、次のように別の一意なBundle ID・表示名・ビルドラベルを指定して作成します。
 
 ```bash
 WEB_REVISION_BUILD_LABEL='Issue #NN 修正版' \
@@ -52,13 +82,23 @@ WEB_REVISION_DISPLAY_NAME='WebRevisionDesk Issue NN Preview' \
 npm run build:electron:mac:app
 ```
 
-Codexでは `jp.co.webrevisiondesk.app.preview.issuenumber` のように**一意なBundle IDを指定して**起動します。名前が同じ既存アプリを選ばないようにします。起動後、画面に `vX.Y.Z · Issue #NN 修正版` が表示されていることを確認します。正式リリースでは一時ビルド用環境変数を設定せず、通常のアプリ名・Bundle IDを使用します。
+作成後、ターミナルから設定したBundle IDを指定して起動できます。
 
-このMacでは、過去に `npm run electron:dev` 後のElectronが `SIGABRT` で終了したこと、`open <staged .app>` が `kLSNoExecutableErr` で失敗したことがあります。これらはその時点の環境での観測で、すべての環境に当てはまる仕様とは限りません。CodexからBundle IDで選択した識別済みステージ版は起動し、画面表示を確認できました。
+```bash
+# Bundle IDを指定して起動
+open -b jp.co.webrevisiondesk.app.preview.issuenumber
+```
 
-ローカル開発ではDMGを作成しません。DMGの作成・検証はリリース用GitHub Actionsで行います。
+AIエージェント（Codex、Cursor、Claude等）からアプリを選択・検証する場合も、表示名 `WebRevisionDesk` だけでなく、上記で設定した一意なBundle IDやステージ版アプリの絶対パス（`/Users/.../release-electron-mac/stage/WebRevisionDesk.app`）を指定することで、名前が同じ既存アプリとの混同を防げます。
+起動後、画面上部に `vX.Y.Z · Issue #NN 修正版` と表示されていることを目視確認してください。
 
-起動経路やOS環境を変えた場合は、開発モードとステージ済み `.app` をそれぞれ再確認してください。
+## トラブルシューティング
+
+- **画面が真っ白、またはスタイルが崩れて素のHTMLが表示される**:
+  - ブラウザで直接HTMLファイルを開いていないか確認してください。必ず `npm run electron:dev` またはパッケージ版 `.app` を起動してください。
+  - ソース変更後に `npm run build` を実行したか確認してください（`dist/` 内のCSS/JSとHTMLの同期が必要です）。
+- **`SIGABRT` や `kLSNoExecutableErr` が出る場合**:
+  - 過去に一部の制限されたサンドボックス環境や権限不足時にこれらのエラーが観測された事例があります。通常のmacOSターミナル環境では `npm run electron:dev` または `open release-electron-mac/stage/WebRevisionDesk.app` で起動可能です。もし `open` コマンドでエラーが出る場合は、バイナリ直接実行（`./release-electron-mac/stage/WebRevisionDesk.app/Contents/MacOS/Electron`）をお試しください。
 
 ## DMGの作成と検証
 

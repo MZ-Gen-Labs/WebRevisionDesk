@@ -1,6 +1,6 @@
 # Web Revision Desk
 
-既存Webページを取り込み、見た目を確認しながら編集し、修正後HTML、視覚的な赤入れ、修正指示を作成するデスクトップ向けローカルWebアプリです。
+既存Webページを取り込み、見た目を確認しながら編集し、修正後HTML、視覚的な赤入れ、修正指示を作成するElectronデスクトップアプリケーションです。
 
 [![CI](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/MZ-Gen-Labs/WebRevisionDesk/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
@@ -9,11 +9,12 @@ SingleFileを使わず、URLをElectron内蔵Chromiumで開いて現在の表示
 
 ## Electron版
 
-v0.6.0以降はElectron版が標準です。Electron内蔵Chromiumでページ検索・プレビュー・取り込みを行い、案件フォルダはOS標準のフォルダ選択画面から利用します。
+v0.6.0以降はElectron版が標準です。Electron内蔵Chromiumでページ検索・プレビュー・取り込みを行い、案件フォルダはOS標準のフォルダ選択画面から利用します。通常のWebブラウザで直接HTMLを開くことはできません。
 
 ```bash
 npm ci
 npm run electron:dev
+# または npm run dev / npm start
 ```
 
 macOSでの開発ビルド・起動方法と、このMacで起きた起動時の注意点は [`docs/macos-development.md`](docs/macos-development.md) に記録しています。
@@ -49,7 +50,10 @@ macOSでの開発ビルド・起動方法と、このMacで起きた起動時の
 ```bash
 npm ci
 npm run electron:dev
+# または npm run dev / npm start
 ```
+
+> **注意**: 本アプリはElectron専用です。通常のWebブラウザで直接HTMLファイルを開くと、CSS/JSのパス解決（404）やElectron API不在により画面レイアウト崩れ・スクリプトエラーが発生します。必ず上記コマンドでElectronから起動してください。macOSでの詳細な起動・開発手順は [`docs/macos-development.md`](docs/macos-development.md) を参照してください。
 
 ## テスト
 
