@@ -297,4 +297,61 @@ test("compareProjectPages preserves base URL first, folder hierarchy, and keeps 
   assert.equal(sorted[5].url, "https://example.com/site/products/detail/");
 });
 
+test("index.html toolbar and sidebar buttons have updated labels and command hint titles", () => {
+  const htmlPath = path.resolve(import.meta.dirname, "../../index.html");
+  const htmlContent = fs.readFileSync(htmlPath, "utf-8");
+  const testDom = new JSDOM(htmlContent);
+  const doc = testDom.window.document;
+
+  // 上部メニューの名称変更と title 属性の確認
+  const checkUpdate = doc.querySelector("#check-update");
+  assert.ok(checkUpdate, "#check-update button should exist");
+  assert.equal(checkUpdate.textContent.trim(), "更新確認");
+  assert.ok(checkUpdate.getAttribute("title"), "#check-update should have title attribute");
+
+  const topbarButtonIds = [
+    "#check-update",
+    "#show-original",
+    "#show-modified",
+    "#show-redline",
+    "#undo",
+    "#redo",
+    "#reset",
+    "#save-project-page",
+    "#search-replace",
+    "#download-package",
+    "#download",
+    "#download-diff",
+    "#download-redline",
+  ];
+  for (const id of topbarButtonIds) {
+    const btn = doc.querySelector(id);
+    assert.ok(btn, `Button ${id} should exist`);
+    assert.ok(btn.getAttribute("title")?.trim(), `Button ${id} should have a non-empty title attribute`);
+  }
+
+  // 左サイドメニューの名称変更と title 属性の確認
+  const batchCapture = doc.querySelector("#batch-capture-pages");
+  assert.ok(batchCapture, "#batch-capture-pages button should exist");
+  assert.equal(batchCapture.textContent.trim(), "取得");
+  assert.ok(batchCapture.getAttribute("title"), "#batch-capture-pages should have title attribute");
+
+  const sidebarButtonIds = [
+    "#select-all-project-pages",
+    "#clear-project-selection",
+    "#batch-capture-pages",
+    "#duplicate-project-page",
+    "#reset-project-pages",
+    "#delete-project-pages",
+    "#show-project-list",
+    "#show-heading-outline",
+    "#collapse-project-sidebar",
+  ];
+  for (const id of sidebarButtonIds) {
+    const btn = doc.querySelector(id);
+    assert.ok(btn, `Button ${id} should exist`);
+    assert.ok(btn.getAttribute("title")?.trim(), `Button ${id} should have a non-empty title attribute`);
+  }
+});
+
 

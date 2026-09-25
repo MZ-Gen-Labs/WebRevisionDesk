@@ -15,28 +15,28 @@
       <div class="toolbar" aria-label="編集・保存操作">
         <div id="update-controls" class="update-controls" hidden>
           <span id="update-status"></span>
-          <button id="open-latest-release" class="button-subtle" type="button" hidden>GitHubで見る</button>
-          <button id="check-update" class="button-subtle" type="button">更新を確認</button>
-          <button id="download-update" class="button-primary" type="button" hidden>更新をダウンロード</button>
-          <button id="apply-update" class="button-primary" type="button" hidden>再起動して更新</button>
+          <button id="open-latest-release" class="button-subtle" type="button" hidden title="GitHubの最新リリースページを開く">GitHubで見る</button>
+          <button id="check-update" class="button-subtle" type="button" title="最新バージョンの有無を確認">更新確認</button>
+          <button id="download-update" class="button-primary" type="button" hidden title="最新バージョンの更新ファイルをダウンロード">更新をダウンロード</button>
+          <button id="apply-update" class="button-primary" type="button" hidden title="ダウンロードした更新を適用してアプリを再起動">再起動して更新</button>
         </div>
-        <button id="show-original" type="button" disabled>修正前</button>
-        <button id="show-modified" type="button" disabled>修正後</button>
-        <button id="show-redline" class="button-redline" type="button" disabled>変更箇所</button>
+        <button id="show-original" type="button" disabled title="修正前のオリジナルページを表示">修正前</button>
+        <button id="show-modified" type="button" disabled title="編集中の修正後ページを表示">修正後</button>
+        <button id="show-redline" class="button-redline" type="button" disabled title="変更箇所を赤字・取り消し線（レッドライン）で表示">変更箇所</button>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <button id="undo" type="button" disabled title="直前の編集をアンドゥ（Ctrl/Cmd+Z）">アンドゥ</button>
         <button id="redo" type="button" disabled title="アンドゥした編集をリドゥ（Ctrl/Cmd+Shift+Z）">リドゥ</button>
-        <button id="reset" type="button" disabled>リセット</button>
+        <button id="reset" type="button" disabled title="このページの編集内容を破棄して元の状態に戻す">リセット</button>
         <span class="toolbar-divider" aria-hidden="true"></span>
-        <button id="save-project-page" class="button-subtle" type="button" disabled>変更更新</button>
-        <button id="search-replace" type="button" disabled>検索・置換</button>
-        <button id="download-package" class="button-package" type="button" disabled>共有ファイル保存</button>
+        <button id="save-project-page" class="button-subtle" type="button" disabled title="現在の編集内容を案件フォルダに保存">変更更新</button>
+        <button id="search-replace" type="button" disabled title="テキストの一括検索・置換ダイアログを開く">検索・置換</button>
+        <button id="download-package" class="button-package" type="button" disabled title="修正前・後・変更箇所と差分一覧をまとめた共有用ZIPを出力">共有ファイル保存</button>
         <details class="export-menu">
-          <summary>その他の保存</summary>
+          <summary title="個別ファイルの保存メニューを開く">その他の保存</summary>
           <div class="export-menu-items">
-            <button id="download" type="button" disabled>修正後ページを保存</button>
-            <button id="download-diff" class="button-diff" type="button" disabled>修正内容一覧を保存</button>
-            <button id="download-redline" class="button-redline" type="button" disabled>変更箇所ページを保存</button>
+            <button id="download" type="button" disabled title="編集後のHTMLファイル単体を保存">修正後ページを保存</button>
+            <button id="download-diff" class="button-diff" type="button" disabled title="変更内容のテキスト一覧（差分レポート）を保存">修正内容一覧を保存</button>
+            <button id="download-redline" class="button-redline" type="button" disabled title="変更箇所（レッドライン）HTMLを保存">変更箇所ページを保存</button>
           </div>
         </details>
       </div>
@@ -99,10 +99,10 @@
       <aside id="project-sidebar" class="project-sidebar" aria-label="案件ページ一覧">
         <div class="sidebar-header">
           <div class="sidebar-tabs" role="tablist" aria-label="左パネル表示">
-            <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1">
+            <button id="show-project-list" class="active" type="button" role="tab" aria-selected="true" aria-keyshortcuts="Alt+ArrowLeft Alt+1" title="ページ一覧を表示（Alt/⌥ + ← または Alt + 1）">
               <span>ページ</span><kbd>Alt/⌥+←</kbd>
             </button>
-            <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled>
+            <button id="show-heading-outline" type="button" role="tab" aria-selected="false" aria-keyshortcuts="Alt+ArrowRight Alt+2" disabled title="見出し構成（H1〜H3）を表示（Alt/⌥ + → または Alt + 2）">
               <span>見出し</span><kbd>Alt/⌥+→</kbd>
             </button>
           </div>
@@ -114,12 +114,12 @@
             <h2>ページ一覧 <span id="project-page-count">0</span></h2>
           </div>
           <div class="project-batch-actions">
-            <button id="select-all-project-pages" class="small-button" type="button" disabled>全選択</button>
-            <button id="clear-project-selection" class="small-button" type="button" disabled>解除</button>
-            <button id="batch-capture-pages" class="small-button" type="button" disabled>一括取得</button>
-            <button id="duplicate-project-page" class="small-button" type="button" disabled>複製</button>
-            <button id="reset-project-pages" class="small-button danger-button" type="button" disabled>解放</button>
-            <button id="delete-project-pages" class="small-button danger-button" type="button" disabled>削除</button>
+            <button id="select-all-project-pages" class="small-button" type="button" disabled title="一覧のすべてのページを選択">全選択</button>
+            <button id="clear-project-selection" class="small-button" type="button" disabled title="ページの選択状態をすべて解除">解除</button>
+            <button id="batch-capture-pages" class="small-button" type="button" disabled title="選択したページ（または未取得ページ）のHTMLとアセットを取得">取得</button>
+            <button id="duplicate-project-page" class="small-button" type="button" disabled title="選択したページの別バージョン（_A, _B...）を複製作成">複製</button>
+            <button id="reset-project-pages" class="small-button danger-button" type="button" disabled title="選択したページの保存データを削除し、未取得（URLのみ）の状態に戻す">解放</button>
+            <button id="delete-project-pages" class="small-button danger-button" type="button" disabled title="選択したページを案件の一覧から完全に削除">削除</button>
             <span id="batch-progress"></span>
           </div>
           <nav id="project-pages" class="project-pages" aria-label="保存済みページ">
