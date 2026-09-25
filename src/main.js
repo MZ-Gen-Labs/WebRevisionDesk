@@ -73,7 +73,7 @@ const ui = {
   headingOutline: $("#heading-outline"), headingCount: $("#heading-count"),
   selectAllProjectPages: $("#select-all-project-pages"), clearProjectSelection: $("#clear-project-selection"),
   batchCapturePages: $("#batch-capture-pages"),
-  checkProjectPages: $("#check-project-pages"), resetProjectPages: $("#reset-project-pages"),
+  duplicateProjectPage: $("#duplicate-project-page"), resetProjectPages: $("#reset-project-pages"),
   deleteProjectPages: $("#delete-project-pages"), batchProgress: $("#batch-progress"),
   appVersion: $("#app-version"),
   saveState: $("#save-state"), selectionHelp: $("#selection-help"),
@@ -128,6 +128,9 @@ const ui = {
 const state = {
   fileName: "page.html", originalHtml: "", modifiedHtml: "", mode: "modified", viewMode: "modified", changes: [], redoChanges: [],
   sourceUrl: "", activeProjectPageId: "", dirty: false, previewOnly: false, previewObjectUrl: "",
+  focusedProjectKey: "",
+  projectSelectionAnchorKey: "",
+  selectedProjectKeys: new Set(),
   focusedProjectUrl: "",
   projectSelectionAnchorUrl: "",
   selectedProjectUrls: new Set(), batchRunning: false, queuedCaptureUrls: new Set(), activeCaptureUrl: "",
@@ -830,7 +833,7 @@ function syncProjectControls() {
   updateProjectSummary();
   ui.projectName.disabled = !hasProject;
   ui.projectBaseUrl.disabled = !hasProject;
-  const hasSavedSelection = (projectStore.project?.pages || []).some((page) => state.selectedProjectUrls.has(page.url));
+  const hasSavedSelection = (projectStore.project?.pages || []).some((page) => state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url));
   const hasCurrentPage = Boolean(state.originalHtml && !state.previewOnly);
   ui.saveProjectPage.disabled = !hasProject || (!hasSavedSelection && !hasCurrentPage) || state.batchRunning;
   const canOpenProjectFolder = desktopFileSystemAvailable() && hasProject && !state.batchRunning;
@@ -885,14 +888,19 @@ async function openProjectFolder() {
 function updateBatchControls() {
   const listed = listedProjectPages();
   const selected = actionTargetPages(listed);
+  const savedSelected = selected.filter((page) => page.saved);
+  const hasSelection = state.selectedProjectKeys.size > 0 || state.selectedProjectUrls.size > 0 || Boolean(state.focusedProjectKey || state.focusedProjectUrl);
   ui.selectAllProjectPages.disabled = state.batchRunning || listed.length === 0;
-  ui.clearProjectSelection.disabled = state.batchRunning || (state.selectedProjectUrls.size === 0 && !state.focusedProjectUrl);
+  ui.clearProjectSelection.disabled = state.batchRunning || !hasSelection;
   ui.batchCapturePages.disabled = loginBlocked() || state.batchRunning || selected.length === 0;
-  ui.checkProjectPages.disabled = loginBlocked() || state.batchRunning || !selected.some((page) => page.saved);
-  ui.resetProjectPages.disabled = state.batchRunning || !selected.some((page) => page.saved);
+  ui.duplicateProjectPage.disabled = loginBlocked() || state.batchRunning || savedSelected.length !== 1;
+  ui.duplicateProjectPage.title = savedSelected.length === 1
+    ? `「${savedSelected[0].title}」の別バージョン（_A等）を作成します`
+    : "保存済みページを1件選択すると複製できます";
+  ui.resetProjectPages.disabled = state.batchRunning || savedSelected.length === 0;
   ui.deleteProjectPages.disabled = state.batchRunning || selected.length === 0;
-  ui.reset.disabled = state.batchRunning || (!state.originalHtml && !selected.some((page) => page.saved));
-  ui.downloadPackage.disabled = state.batchRunning || (!state.originalHtml && !selected.some((page) => page.saved));
+  ui.reset.disabled = state.batchRunning || (!state.originalHtml && savedSelected.length === 0);
+  ui.downloadPackage.disabled = state.batchRunning || (!state.originalHtml && savedSelected.length === 0);
 }
 
 function updateUndoControls() {
@@ -1283,47 +1291,73 @@ function sourceUrlFromHtml(html) {
   return doc.querySelector('meta[name="web-revision-source-url"]')?.content ?? "";
 }
 
+function projectPageKey(page) {
+  return page.id || page.url;
+}
+
 function listedProjectPages() {
-  const savedPages = projectStore.project?.pages || [];
-  const savedByUrl = new Map(savedPages.map((page) => [page.url, page]));
-  const discovered = projectStore.project?.discoveredPages || [];
-  const listed = discovered.map((page) => ({ ...page, ...savedByUrl.get(page.url), saved: savedByUrl.has(page.url) }));
-  savedPages.filter((page) => !discovered.some((item) => item.url === page.url)).forEach((page) => listed.push({ ...page, saved: true }));
-  listed.sort((a, b) => a.url.localeCompare(b.url, "ja"));
+  const savedPages = (projectStore.project?.pages || []).map((page) => ({ ...page, saved: true }));
+  const savedUrls = new Set(savedPages.map((page) => page.url));
+  const discovered = (projectStore.project?.discoveredPages || [])
+    .filter((page) => !savedUrls.has(page.url))
+    .map((page) => ({ ...page, saved: false }));
+  const listed = [...savedPages, ...discovered];
+  listed.sort((a, b) => (a.path || a.url).localeCompare(b.path || b.url, "ja"));
   return listed;
 }
 
 function actionTargetPages(listed = listedProjectPages()) {
-  return listed.filter((page) => state.selectedProjectUrls.has(page.url) || page.url === state.focusedProjectUrl);
+  return listed.filter((page) => {
+    const key = projectPageKey(page);
+    return state.selectedProjectKeys.has(key) || state.selectedProjectUrls.has(page.url) || key === state.focusedProjectKey || page.url === state.focusedProjectUrl;
+  });
 }
 
 function handleProjectPageClick(event, page, listed) {
+  const pageKey = projectPageKey(page);
   const additive = event.ctrlKey || event.metaKey;
   if (event.shiftKey) {
-    const anchorUrl = state.projectSelectionAnchorUrl || state.focusedProjectUrl || page.url;
-    const anchorIndex = Math.max(0, listed.findIndex((item) => item.url === anchorUrl));
-    const targetIndex = listed.findIndex((item) => item.url === page.url);
-    if (!additive) state.selectedProjectUrls.clear();
+    const anchorKey = state.projectSelectionAnchorKey || state.focusedProjectKey || pageKey;
+    const anchorIndex = Math.max(0, listed.findIndex((item) => projectPageKey(item) === anchorKey));
+    const targetIndex = listed.findIndex((item) => projectPageKey(item) === pageKey);
+    if (!additive) {
+      state.selectedProjectKeys.clear();
+      state.selectedProjectUrls.clear();
+    }
     listed.slice(Math.min(anchorIndex, targetIndex), Math.max(anchorIndex, targetIndex) + 1)
-      .forEach((item) => state.selectedProjectUrls.add(item.url));
+      .forEach((item) => {
+        const itemKey = projectPageKey(item);
+        state.selectedProjectKeys.add(itemKey);
+        state.selectedProjectUrls.add(item.url);
+      });
+    state.focusedProjectKey = pageKey;
     state.focusedProjectUrl = page.url;
     renderProjectPages();
     return;
   }
   if (additive) {
-    const activeUrl = ui.projectPages.querySelector(".project-page.active")?.dataset.pageUrl || "";
-    const previousUrls = new Set([state.focusedProjectUrl, state.projectSelectionAnchorUrl, activeUrl]);
-    previousUrls.delete("");
-    previousUrls.delete(page.url);
-    previousUrls.forEach((url) => state.selectedProjectUrls.add(url));
-    if (state.selectedProjectUrls.has(page.url)) state.selectedProjectUrls.delete(page.url);
-    else state.selectedProjectUrls.add(page.url);
+    const activeKey = ui.projectPages.querySelector(".project-page.active")?.dataset.pageKey || "";
+    const previousKeys = new Set([state.focusedProjectKey, state.projectSelectionAnchorKey, activeKey]);
+    previousKeys.delete("");
+    previousKeys.delete(pageKey);
+    previousKeys.forEach((key) => state.selectedProjectKeys.add(key));
+    if (state.selectedProjectKeys.has(pageKey)) {
+      state.selectedProjectKeys.delete(pageKey);
+      state.selectedProjectUrls.delete(page.url);
+    } else {
+      state.selectedProjectKeys.add(pageKey);
+      state.selectedProjectUrls.add(page.url);
+    }
+    state.focusedProjectKey = pageKey;
     state.focusedProjectUrl = page.url;
+    state.projectSelectionAnchorKey = pageKey;
     state.projectSelectionAnchorUrl = page.url;
     renderProjectPages();
     return;
   }
+  state.focusedProjectKey = pageKey;
   state.focusedProjectUrl = page.url;
+  state.projectSelectionAnchorKey = pageKey;
   state.projectSelectionAnchorUrl = page.url;
   renderProjectPages();
   return page.saved ? openProjectPage(page.id) : previewUncapturedProjectPage(page);
@@ -1331,8 +1365,9 @@ function handleProjectPageClick(event, page, listed) {
 
 function renderProjectPages() {
   const listed = listedProjectPages();
-  const availableUrls = new Set(listed.map((page) => page.url));
-  state.selectedProjectUrls = new Set([...state.selectedProjectUrls].filter((url) => availableUrls.has(url)));
+  const availableKeys = new Set(listed.map(projectPageKey));
+  state.selectedProjectKeys = new Set([...state.selectedProjectKeys].filter((key) => availableKeys.has(key)));
+  state.selectedProjectUrls = new Set(listed.filter((page) => state.selectedProjectKeys.has(projectPageKey(page))).map((page) => page.url));
   ui.projectPageCount.textContent = String(listed.length);
   if (!listed.length) {
     ui.projectPages.innerHTML = '<p class="project-empty">「配下ページを一括検索」でページ候補を取得するか、現在のページを案件へ保存してください。</p>';
@@ -1340,28 +1375,41 @@ function renderProjectPages() {
     return;
   }
   ui.projectPages.replaceChildren(...listed.map((page) => {
+    const key = projectPageKey(page);
     const row = document.createElement("div");
     row.className = "project-page-row";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = state.selectedProjectUrls.has(page.url);
+    checkbox.checked = state.selectedProjectKeys.has(key);
     checkbox.setAttribute("aria-label", `${page.title}を選択`);
     checkbox.addEventListener("change", () => {
-      checkbox.checked ? state.selectedProjectUrls.add(page.url) : state.selectedProjectUrls.delete(page.url);
+      if (checkbox.checked) {
+        state.selectedProjectKeys.add(key);
+        state.selectedProjectUrls.add(page.url);
+      } else {
+        state.selectedProjectKeys.delete(key);
+        state.selectedProjectUrls.delete(page.url);
+      }
+      state.focusedProjectKey = key;
       state.focusedProjectUrl = page.url;
+      state.projectSelectionAnchorKey = key;
       state.projectSelectionAnchorUrl = page.url;
       renderProjectPages();
     });
     const button = document.createElement("button");
     button.type = "button";
+    button.dataset.pageKey = key;
     button.dataset.pageUrl = page.url;
+    if (page.id) button.dataset.pageId = page.id;
     button.className = "project-page";
     button.classList.toggle("saved", page.saved);
     button.classList.toggle("changed", page.checkStatus === "changed");
     button.classList.toggle("unavailable", state.unavailableProjectUrls.has(page.url));
     const resourceFailureCount = Array.isArray(page.resourceFailures) ? page.resourceFailures.length : 0;
     button.classList.toggle("has-resource-failures", resourceFailureCount > 0);
-    button.classList.toggle("active", page.url === state.focusedProjectUrl);
+    const isFocused = key === state.focusedProjectKey;
+    const isActiveEditing = Boolean(page.saved && page.id && page.id === state.activeProjectPageId);
+    button.classList.toggle("active", isFocused || isActiveEditing);
     const title = document.createElement("strong");
     const path = document.createElement("small");
     const status = document.createElement("span");
@@ -1545,7 +1593,10 @@ async function resetSelectedProjectPages() {
   try {
     const activeReset = targets.some((page) => page.id === state.activeProjectPageId);
     const reset = await projectStore.resetPages(targets.map((page) => page.id));
-    reset.forEach((page) => state.selectedProjectUrls.delete(page.url));
+    targets.forEach((page) => {
+      state.selectedProjectKeys.delete(projectPageKey(page));
+      state.selectedProjectUrls.delete(page.url);
+    });
     if (activeReset) clearLoadedPage();
     ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
     setStatus(`${reset.length}ページの保存データを削除し、未取得状態へ戻しました。`, "success");
@@ -1576,20 +1627,22 @@ async function deleteSelectedProjectPages() {
   updateBatchControls();
   try {
     const activeDeleted = targets.some((page) => page.id && page.id === state.activeProjectPageId);
-    const urls = targets.map((page) => page.url);
     let result;
     try {
-      result = await projectStore.deletePages(urls, { force: knownErrorCount > 0 });
+      result = await projectStore.deletePages(targets, { force: knownErrorCount > 0 });
     } catch {
-      result = await projectStore.deletePages(urls, { force: true });
+      result = await projectStore.deletePages(targets, { force: true });
     }
-    result.deletedUrls.forEach((url) => {
-      state.selectedProjectUrls.delete(url);
-      state.queuedCaptureUrls.delete(url);
-      state.unavailableProjectUrls.delete(url);
+    targets.forEach((page) => {
+      state.selectedProjectKeys.delete(projectPageKey(page));
+      state.selectedProjectUrls.delete(page.url);
+      state.queuedCaptureUrls.delete(page.url);
+      state.unavailableProjectUrls.delete(page.url);
+      if (projectPageKey(page) === state.focusedProjectKey || page.url === state.focusedProjectUrl) {
+        state.focusedProjectKey = "";
+        state.focusedProjectUrl = "";
+      }
     });
-    targets.forEach((page) => state.unavailableProjectUrls.delete(page.url));
-    if (targets.some((page) => page.url === state.focusedProjectUrl)) state.focusedProjectUrl = "";
     if (activeDeleted) clearLoadedPage();
     ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
     const cleanupNote = result.cleanupErrors.length
@@ -1606,6 +1659,50 @@ async function deleteSelectedProjectPages() {
   }
 }
 
+async function duplicateSelectedProjectPage() {
+  if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
+  const targets = actionTargetPages().filter((page) => page.saved);
+  if (targets.length !== 1) return;
+  const target = targets[0];
+  state.batchRunning = true;
+  setButtonProcessing(ui.duplicateProjectPage, true);
+  updateBatchControls();
+  try {
+    let editorOverrides = null;
+    if (state.activeProjectPageId === target.id && state.originalHtml) {
+      if (state.mode === "modified") state.modifiedHtml = editor.getHtml();
+      editorOverrides = {
+        pageId: target.id,
+        sourceUrl: target.url,
+        originalHtml: state.originalHtml,
+        workingHtml: state.modifiedHtml,
+        changes: changesFromOriginal(),
+        resourceFailures: state.resourceFailures,
+      };
+    }
+    const duplicated = await projectStore.duplicatePage(target.id, editorOverrides);
+    ui.projectState.textContent = `${projectStore.project.projectName}：保存済み${projectStore.project.pages.length}ページ`;
+    state.selectedProjectKeys.clear();
+    state.selectedProjectUrls.clear();
+    state.selectedProjectKeys.add(duplicated.id);
+    state.selectedProjectUrls.add(duplicated.url);
+    state.focusedProjectKey = duplicated.id;
+    state.focusedProjectUrl = duplicated.url;
+    state.projectSelectionAnchorKey = duplicated.id;
+    state.projectSelectionAnchorUrl = duplicated.url;
+    renderProjectPages();
+    await openProjectPage(duplicated.id);
+    setStatus(`「${target.title}」を複製し、別バージョン「${duplicated.title}」を作成しました。`, "success");
+  } catch (error) {
+    setStatus(`ページの複製に失敗しました: ${error.message}`, "error");
+  } finally {
+    state.batchRunning = false;
+    setButtonProcessing(ui.duplicateProjectPage, false);
+    renderProjectPages();
+    updateBatchControls();
+  }
+}
+
 async function processSelectedPages(mode) {
   if (loginBlocked()) return setStatus("先にログインを完了してください。", "error");
   if (captureSessionId) return setStatus("取得用ブラウザを取り込みまたはキャンセルしてから一括処理してください。", "error");
@@ -1613,7 +1710,7 @@ async function processSelectedPages(mode) {
   const targets = mode === "check" ? selected.filter((page) => page.saved) : selected;
   if (!targets.length) return;
   state.batchRunning = true;
-  const actionButton = mode === "check" ? ui.checkProjectPages : ui.batchCapturePages;
+  const actionButton = mode === "check" ? ui.duplicateProjectPage : ui.batchCapturePages;
   setButtonProcessing(actionButton, true);
   updateBatchControls();
   let completed = 0;
@@ -1687,18 +1784,23 @@ async function replaceProjectPage(pageId) {
 
 ui.selectAllProjectPages.addEventListener("click", () => {
   const pages = listedProjectPages();
+  state.selectedProjectKeys = new Set(pages.map(projectPageKey));
   state.selectedProjectUrls = new Set(pages.map((page) => page.url));
+  state.projectSelectionAnchorKey = pages[0] ? projectPageKey(pages[0]) : "";
   state.projectSelectionAnchorUrl = pages[0]?.url || "";
   renderProjectPages();
 });
 ui.clearProjectSelection.addEventListener("click", () => {
+  state.selectedProjectKeys.clear();
   state.selectedProjectUrls.clear();
+  state.focusedProjectKey = "";
   state.focusedProjectUrl = "";
+  state.projectSelectionAnchorKey = "";
   state.projectSelectionAnchorUrl = "";
   renderProjectPages();
 });
 ui.batchCapturePages.addEventListener("click", () => processSelectedPages("capture"));
-ui.checkProjectPages.addEventListener("click", () => processSelectedPages("check"));
+ui.duplicateProjectPage.addEventListener("click", duplicateSelectedProjectPage);
 ui.resetProjectPages.addEventListener("click", resetSelectedProjectPages);
 ui.deleteProjectPages.addEventListener("click", deleteSelectedProjectPages);
 
@@ -1750,6 +1852,7 @@ async function saveCurrentToProject({ quiet = false } = {}) {
   const sourceUrl = state.sourceUrl || ui.manualPageUrl.value.trim();
   if (!sourceUrl) throw new Error("ページURLが不明です。「その他の取り込み」でページURLを指定してください。");
   const saveData = {
+    pageId: state.activeProjectPageId,
     fileName: state.fileName,
     sourceUrl,
     originalHtml: state.originalHtml,
@@ -1784,7 +1887,7 @@ async function regenerateSelectedPageReports() {
     }
   }
   const listed = listedProjectPages();
-  const checked = listed.filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  const checked = listed.filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
   const targets = checked.length
     ? checked
     : listed.filter((page) => page.saved && page.id === state.activeProjectPageId);
@@ -2276,7 +2379,7 @@ ui.undo.addEventListener("click", () => applyUndoRedo("undo"));
 ui.redo.addEventListener("click", () => applyUndoRedo("redo"));
 ui.reset.addEventListener("click", async () => {
   const checkedPages = listedProjectPages()
-    .filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+    .filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
   if (checkedPages.length) {
     const message = `チェックした${checkedPages.length}ページのすべての修正を破棄して、それぞれの取得時点へ戻しますか？\n\n取得済みページと一覧は残り、編集内容・変更履歴だけがリセットされます。`;
     if (!window.confirm(message)) return;
@@ -2910,7 +3013,7 @@ async function replaceAllSearchRulesWithoutConfirmation() {
 async function replaceSelectedPagesWithoutConfirmation() {
   const enabled = validateEnabledSearchRules();
   if (!enabled) return;
-  const targets = listedProjectPages().filter((page) => page.saved && state.selectedProjectUrls.has(page.url));
+  const targets = listedProjectPages().filter((page) => page.saved && (state.selectedProjectKeys.has(projectPageKey(page)) || state.selectedProjectUrls.has(page.url)));
   if (!targets.length) {
     setStatus("ページ一覧で、保存済みページをチェックしてから実行してください。", "error");
     return;
@@ -3154,7 +3257,7 @@ function moveSidebarSelection(direction) {
   if (!buttons.length) return false;
   let currentIndex = outlineVisible
     ? buttons.findIndex((button) => button.classList.contains("active"))
-    : buttons.findIndex((button) => button.dataset.pageUrl === state.focusedProjectUrl);
+    : buttons.findIndex((button) => button.dataset.pageKey === state.focusedProjectKey || button.dataset.pageUrl === state.focusedProjectKey || button.dataset.pageUrl === state.focusedProjectUrl);
   if (currentIndex < 0) currentIndex = direction > 0 ? -1 : buttons.length;
   const nextIndex = Math.min(buttons.length - 1, Math.max(0, currentIndex + direction));
   if (nextIndex === currentIndex) return true;

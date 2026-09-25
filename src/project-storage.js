@@ -60,6 +60,34 @@ export function pagePathForUrl(pageUrl, baseUrl) {
   return ["pages", ...segments];
 }
 
+export function determineVariantSuffix(baseSegment, existingSegments = new Set()) {
+  const cleanBase = String(baseSegment || "page").replace(/_[A-Z]+$/, "");
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  for (let i = 0; i < letters.length; i++) {
+    const candidate = `_${letters[i]}`;
+    if (!existingSegments.has(`${cleanBase}${candidate}`)) {
+      return { cleanBase, suffix: candidate };
+    }
+  }
+  for (let i = 0; i < letters.length; i++) {
+    for (let j = 0; j < letters.length; j++) {
+      const candidate = `_${letters[i]}${letters[j]}`;
+      if (!existingSegments.has(`${cleanBase}${candidate}`)) {
+        return { cleanBase, suffix: candidate };
+      }
+    }
+  }
+  let counter = 1;
+  while (true) {
+    const candidate = `_copy${counter}`;
+    if (!existingSegments.has(`${cleanBase}${candidate}`)) {
+      return { cleanBase, suffix: candidate };
+    }
+    counter++;
+  }
+}
+
+
 async function readTextFile(directory, name) {
   const handle = await directory.getFileHandle(name);
   return (await handle.getFile()).text();
@@ -195,27 +223,31 @@ export class ProjectStore {
     return this.project.discoveredPages;
   }
 
-  async savePage({ fileName, sourceUrl, originalHtml, workingHtml, changes, resourceFailures = [] }) {
+  async savePage({ pageId, fileName, sourceUrl, originalHtml, workingHtml, changes, resourceFailures = [] }) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
     if (!this.project.baseUrl) throw new Error("基準URLを入力してください。");
     const normalizedUrl = normalizePageUrl(sourceUrl);
-    const path = pagePathForUrl(normalizedUrl, this.project.baseUrl);
+    const existing = pageId
+      ? this.project.pages.find((page) => page.id === pageId)
+      : this.project.pages.find((page) => page.url === normalizedUrl);
+    const path = existing ? existing.path.split("/").filter(Boolean) : pagePathForUrl(normalizedUrl, this.project.baseUrl);
     const pageDirectory = await ensureDirectory(this.directory, path);
     const modifiedHtml = cleanHtmlString(workingHtml);
-    const title = documentTitle(workingHtml, fileName);
+    const title = existing?.title || documentTitle(workingHtml, fileName);
     const now = new Date().toISOString();
-    const existing = this.project.pages.find((page) => page.url === normalizedUrl);
+    const resolvedFileName = existing?.fileName || fileName;
     const pageInfo = {
-      id: existing?.id || `page-${shortHash(normalizedUrl)}`,
+      id: existing?.id || pageId || `page-${shortHash(normalizedUrl)}`,
       url: normalizedUrl,
       title,
-      fileName,
+      fileName: resolvedFileName,
       path: path.join("/"),
       status: existing?.status || "editing",
       changeCount: changes.length,
       resourceFailures: Array.isArray(resourceFailures) ? resourceFailures.slice(0, 30) : [],
       createdAt: existing?.createdAt || now,
       updatedAt: now,
+      ...(existing?.variantOf ? { variantOf: existing.variantOf, variantSuffix: existing.variantSuffix } : {}),
     };
     const pageData = {
       format: "web-revision-page",
@@ -227,8 +259,8 @@ export class ProjectStore {
     await writeTextFile(pageDirectory, "original.html", originalHtml);
     await writeTextFile(pageDirectory, "working.html", workingHtml);
     await writeTextFile(pageDirectory, "modified.html", modifiedHtml);
-    await writeTextFile(pageDirectory, "diff.html", createDiffReport(fileName, changes));
-    await writeTextFile(pageDirectory, "redline.html", createRedlineReport(workingHtml, changes, fileName));
+    await writeTextFile(pageDirectory, "diff.html", createDiffReport(resolvedFileName, changes));
+    await writeTextFile(pageDirectory, "redline.html", createRedlineReport(workingHtml, changes, resolvedFileName));
     await writeTextFile(pageDirectory, "page.json", JSON.stringify(pageData, null, 2));
 
     if (existing) Object.assign(existing, pageInfo);
@@ -238,6 +270,94 @@ export class ProjectStore {
     await writeTextFile(this.directory, PROJECT_FILE, JSON.stringify(this.project, null, 2));
     return pageInfo;
   }
+
+  async duplicatePage(pageId, editorOverrides = null) {
+    if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
+    const sourcePage = this.project.pages.find((entry) => entry.id === pageId);
+    if (!sourcePage) throw new Error("複製元のページが見つかりません。");
+
+    const sourceSegments = sourcePage.path.split("/").filter(Boolean);
+    const parentSegments = sourceSegments.slice(0, -1);
+    const lastSegment = sourceSegments.at(-1);
+
+    const parentPathPrefix = parentSegments.join("/");
+    const existingSiblings = new Set(
+      this.project.pages
+        .map((p) => p.path.split("/").filter(Boolean))
+        .filter((segs) => segs.slice(0, -1).join("/") === parentPathPrefix)
+        .map((segs) => segs.at(-1))
+    );
+
+    const { cleanBase, suffix } = determineVariantSuffix(lastSegment, existingSiblings);
+    const newSegment = `${cleanBase}${suffix}`;
+    const newPathSegments = [...parentSegments, newSegment];
+    const newPath = newPathSegments.join("/");
+
+    const extMatch = (sourcePage.fileName || "page.html").match(/(\.[^.]+)$/);
+    const ext = extMatch ? extMatch[1] : ".html";
+    const rawFileNameBase = (sourcePage.fileName || "page.html").slice(0, -(ext.length));
+    const cleanFileNameBase = rawFileNameBase.replace(/_[A-Z]+$/, "");
+    const newFileName = `${cleanFileNameBase}${suffix}${ext}`;
+
+    const cleanTitle = (sourcePage.title || "ページ").replace(/\s*\(_[A-Z]+\)$/, "").trim();
+    const newTitle = `${cleanTitle} (${suffix})`;
+
+    let originalHtml, workingHtml, changes, resourceFailures;
+    if (editorOverrides && (editorOverrides.pageId === pageId || editorOverrides.sourceUrl === sourcePage.url)) {
+      originalHtml = editorOverrides.originalHtml;
+      workingHtml = editorOverrides.workingHtml;
+      changes = editorOverrides.changes || [];
+      resourceFailures = editorOverrides.resourceFailures || sourcePage.resourceFailures || [];
+    } else {
+      const loaded = await this.loadPage(pageId);
+      originalHtml = loaded.originalHtml;
+      workingHtml = loaded.workingHtml;
+      changes = loaded.changes;
+      resourceFailures = loaded.page.resourceFailures || [];
+    }
+
+    const modifiedHtml = cleanHtmlString(workingHtml);
+    const now = new Date().toISOString();
+    const newPageId = `page-${shortHash(`${sourcePage.url}:${newPath}`)}`;
+
+    const pageInfo = {
+      id: newPageId,
+      url: sourcePage.url,
+      title: newTitle,
+      fileName: newFileName,
+      path: newPath,
+      status: "editing",
+      changeCount: changes.length,
+      resourceFailures: Array.isArray(resourceFailures) ? resourceFailures.slice(0, 30) : [],
+      createdAt: now,
+      updatedAt: now,
+      variantOf: sourcePage.id,
+      variantSuffix: suffix,
+    };
+
+    const pageData = {
+      format: "web-revision-page",
+      version: 1,
+      ...pageInfo,
+      changes,
+    };
+
+    const targetDirectory = await ensureDirectory(this.directory, newPathSegments);
+    await writeTextFile(targetDirectory, "original.html", originalHtml);
+    await writeTextFile(targetDirectory, "working.html", workingHtml);
+    await writeTextFile(targetDirectory, "modified.html", modifiedHtml);
+    await writeTextFile(targetDirectory, "diff.html", createDiffReport(newFileName, changes));
+    await writeTextFile(targetDirectory, "redline.html", createRedlineReport(workingHtml, changes, newFileName));
+    await writeTextFile(targetDirectory, "page.json", JSON.stringify(pageData, null, 2));
+
+    this.project.pages.push(pageInfo);
+    this.project.pages.sort((a, b) => a.path.localeCompare(b.path, "ja"));
+    this.project.updatedAt = now;
+    await writeTextFile(this.directory, PROJECT_FILE, JSON.stringify(this.project, null, 2));
+
+    return pageInfo;
+  }
+
 
   async loadPage(pageId) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
@@ -305,9 +425,14 @@ export class ProjectStore {
       resetPages.push(page);
     }
 
+    const resetIds = new Set(resetPages.map((page) => page.id));
+    const remainingPages = this.project.pages.filter((page) => !resetIds.has(page.id));
+    const remainingUrls = new Set(remainingPages.map((page) => page.url));
+
     const discoveredByUrl = new Map((this.project.discoveredPages || []).map((page) => [page.url, page]));
     const now = new Date().toISOString();
     for (const page of resetPages) {
+      if (page.variantOf || remainingUrls.has(page.url)) continue;
       if (!discoveredByUrl.has(page.url)) {
         discoveredByUrl.set(page.url, {
           url: page.url,
@@ -319,21 +444,40 @@ export class ProjectStore {
       }
     }
     this.project.discoveredPages = [...discoveredByUrl.values()].sort((a, b) => a.url.localeCompare(b.url, "ja"));
-    const resetIds = new Set(resetPages.map((page) => page.id));
-    this.project.pages = this.project.pages.filter((page) => !resetIds.has(page.id));
+    this.project.pages = remainingPages;
     await this.saveProject();
     return resetPages;
   }
 
-  async deletePages(pageUrls, { force = false } = {}) {
+  async deletePages(pageTargets, { force = false } = {}) {
     if (!this.directory || !this.project) throw new Error("案件フォルダが選択されていません。");
-    const identity = (url) => {
-      try { return normalizePageUrl(url); } catch { return String(url); }
+    const targets = Array.isArray(pageTargets) ? pageTargets : [pageTargets];
+    const targetIds = new Set();
+    const targetUrls = new Set();
+
+    for (const target of targets) {
+      if (typeof target === "object" && target !== null) {
+        if (target.id) targetIds.add(target.id);
+        if (target.url) {
+          try { targetUrls.add(normalizePageUrl(target.url)); } catch { targetUrls.add(String(target.url)); }
+        }
+      } else if (typeof target === "string") {
+        if (target.startsWith("page-")) {
+          targetIds.add(target);
+        } else {
+          try { targetUrls.add(normalizePageUrl(target)); } catch { targetUrls.add(String(target)); }
+        }
+      }
+    }
+
+    const matchesSaved = (page) => {
+      if (targetIds.has(page.id)) return true;
+      if (targetIds.size === 0 && targetUrls.has(normalizePageUrl(page.url))) return true;
+      return false;
     };
-    const urls = new Set(pageUrls.map(identity));
-    const matches = (page) => urls.has(identity(page.url));
+
     const savedTargets = this.project.pages
-      .filter(matches)
+      .filter(matchesSaved)
       .sort((left, right) => right.path.split("/").length - left.path.split("/").length);
     const cleanupErrors = [];
 
@@ -347,11 +491,25 @@ export class ProjectStore {
       }
     }
 
-    this.project.pages = this.project.pages.filter((page) => !matches(page));
-    this.project.discoveredPages = (this.project.discoveredPages || []).filter((page) => !matches(page));
+    const deletedIds = new Set(savedTargets.map((page) => page.id));
+    this.project.pages = this.project.pages.filter((page) => !deletedIds.has(page.id));
+    const remainingUrls = new Set(this.project.pages.map((page) => page.url));
+
+    this.project.discoveredPages = (this.project.discoveredPages || []).filter((page) => {
+      const normalized = normalizePageUrl(page.url);
+      if (targetUrls.has(normalized) && !remainingUrls.has(page.url)) return false;
+      return true;
+    });
+
     await this.saveProject();
-    return { deletedUrls: [...urls], deletedSavedPages: savedTargets, cleanupErrors };
+    return {
+      deletedUrls: [...targetUrls],
+      deletedIds: [...deletedIds],
+      deletedSavedPages: savedTargets,
+      cleanupErrors,
+    };
   }
+
 
   async checkSource(pageId, currentHtml, comparison) {
     const page = this.project?.pages.find((entry) => entry.id === pageId);
