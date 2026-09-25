@@ -16,9 +16,11 @@ import { appFetch } from "./runtime-api.js";
 import { LATEST_RELEASE_URL } from "./release-links.js";
 import {
   DEFAULT_CANVAS_ZOOM,
+  DEFAULT_CANVAS_ZOOM_STEP,
   MAX_CANVAS_ZOOM,
   MIN_CANVAS_ZOOM,
   normalizeCanvasZoom,
+  normalizeCanvasZoomStep,
   stepCanvasZoom,
 } from "./canvas-zoom.js";
 import {
@@ -133,6 +135,7 @@ const state = {
   pipelineCancelled: false,
   resourceFailures: [],
   canvasZoom: DEFAULT_CANVAS_ZOOM,
+  canvasZoomStep: DEFAULT_CANVAS_ZOOM_STEP,
 };
 let captureSessionId = "";
 let loginSessionId = "";
@@ -939,6 +942,24 @@ function setMode(mode) {
   updateUndoControls();
 }
 
+function syncCanvasZoomStepUI() {
+  const currentStep = normalizeCanvasZoomStep(state.canvasZoomStep);
+  state.canvasZoomStep = currentStep;
+  document.querySelectorAll(".zoom-step-button").forEach((button) => {
+    const step = Number(button.dataset.step);
+    const isActive = step === currentStep;
+    button.classList.toggle("active", isActive);
+    button.setAttribute("aria-checked", String(isActive));
+  });
+  ui.canvasZoomOut.setAttribute("title", `編集画面を縮小（−${currentStep}%）`);
+  ui.canvasZoomIn.setAttribute("title", `編集画面を拡大（＋${currentStep}%）`);
+}
+
+function setCanvasZoomStep(step) {
+  state.canvasZoomStep = normalizeCanvasZoomStep(step);
+  syncCanvasZoomStepUI();
+}
+
 function syncCanvasZoom() {
   const zoom = normalizeCanvasZoom(state.canvasZoom);
   state.canvasZoom = zoom;
@@ -964,7 +985,7 @@ function handleCanvasWheel(event) {
   if (!event.ctrlKey && !event.metaKey) return;
   event.preventDefault();
   if (event.deltaY === 0) return;
-  setCanvasZoom(stepCanvasZoom(state.canvasZoom, event.deltaY < 0 ? 1 : -1));
+  setCanvasZoom(stepCanvasZoom(state.canvasZoom, event.deltaY < 0 ? 1 : -1, state.canvasZoomStep));
 }
 
 function handleCanvasZoomShortcut(event) {
@@ -975,15 +996,19 @@ function handleCanvasZoomShortcut(event) {
   if (!zoomIn && !zoomOut && !reset) return;
   event.preventDefault();
   if (reset) setCanvasZoom(DEFAULT_CANVAS_ZOOM);
-  else setCanvasZoom(stepCanvasZoom(state.canvasZoom, zoomIn ? 1 : -1));
+  else setCanvasZoom(stepCanvasZoom(state.canvasZoom, zoomIn ? 1 : -1, state.canvasZoomStep));
 }
 
 const canvasViewportObserver = new ResizeObserver(syncCanvasZoom);
 canvasViewportObserver.observe(ui.canvasViewport);
-ui.canvasZoomOut.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, -1)));
-ui.canvasZoomIn.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, 1)));
+ui.canvasZoomOut.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, -1, state.canvasZoomStep)));
+ui.canvasZoomIn.addEventListener("click", () => setCanvasZoom(stepCanvasZoom(state.canvasZoom, 1, state.canvasZoomStep)));
 ui.canvasZoomReset.addEventListener("click", () => setCanvasZoom(DEFAULT_CANVAS_ZOOM));
+document.querySelectorAll(".zoom-step-button").forEach((button) => {
+  button.addEventListener("click", () => setCanvasZoomStep(button.dataset.step));
+});
 document.addEventListener("keydown", handleCanvasZoomShortcut);
+syncCanvasZoomStepUI();
 
 async function render(mode, { captureCurrent = true } = {}) {
   if (!state.originalHtml) return;

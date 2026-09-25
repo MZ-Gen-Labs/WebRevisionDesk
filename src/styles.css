@@ -243,6 +243,11 @@ h2 { margin-bottom: .45rem; font-size: 1.1rem; }
 .canvas-zoom-reset { min-width: 58px; padding: .3rem .45rem; border-color: transparent; background: transparent; color: #626376; font-size: .76rem; font-weight: 750; }
 .canvas-zoom-reset:hover, .canvas-zoom-reset:focus-visible { border-color: #b9b9f0; background: #f3f3ff; }
 .canvas-zoom-reset[data-zoomed="true"] { border-color: #aaaaf0; background: #e9e9ff; color: #4545b7; }
+.canvas-zoom-step-group { display: inline-flex; align-items: center; margin-left: .25rem; padding: 1px; border: 1px solid #d4d5df; border-radius: 6px; background: #f0f1f6; gap: 1px; }
+.zoom-step-button { padding: .2rem .35rem; min-width: 26px; border: none; border-radius: 4px; background: transparent; color: #636477; font-size: .68rem; font-weight: 750; line-height: 1.2; cursor: pointer; transition: background-color .12s, color .12s; }
+.zoom-step-button:hover { background: #e2e4ed; color: #2e2f3d; }
+.zoom-step-button:focus-visible { outline: 2px solid #5b5bd6; outline-offset: 1px; }
+.zoom-step-button.active, .zoom-step-button[aria-checked="true"] { background: #5b5bd6; color: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .screenshot-preview { flex: 1; min-height: 0; overflow: auto; border: 1px solid #d8d9e2; border-radius: 12px; background: #e8e9ef; }
 .screenshot-preview img { display: block; width: 100%; height: auto; margin: 0 auto; background: #fff; }
 .badge { display: inline-flex; border-radius: 999px; padding: .3rem .65rem; background: #e4e5eb; color: #55566a; font-weight: 700; }

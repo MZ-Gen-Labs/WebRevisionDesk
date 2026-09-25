@@ -156,6 +156,11 @@
             <button id="canvas-zoom-out" class="small-button" type="button" aria-label="編集画面を縮小" title="編集画面を縮小">−</button>
             <button id="canvas-zoom-reset" class="canvas-zoom-reset" type="button" aria-label="表示倍率を100%に戻す" title="クリックして100%に戻す">100%</button>
             <button id="canvas-zoom-in" class="small-button" type="button" aria-label="編集画面を拡大" title="編集画面を拡大">＋</button>
+            <div class="canvas-zoom-step-group" role="radiogroup" aria-label="拡大縮小の刻み幅">
+              <button class="zoom-step-button" type="button" role="radio" data-step="1" aria-checked="false" title="倍率変更の刻み幅を1%にする">1%</button>
+              <button class="zoom-step-button active" type="button" role="radio" data-step="5" aria-checked="true" title="倍率変更の刻み幅を5%にする">5%</button>
+              <button class="zoom-step-button" type="button" role="radio" data-step="10" aria-checked="false" title="倍率変更の刻み幅を10%にする">10%</button>
+            </div>
           </div>
           <button id="import-preview-page" class="small-button primary-inline" type="button" hidden>このページを取り込んで編集</button>
           <button id="refresh-preview" class="small-button" type="button" hidden>画像を更新</button>
